@@ -56,7 +56,13 @@ body {
 
 .notice-section h2 {
   font-size: 20px;
+  margin: 0 0 4px;
+}
+
+.section-hint {
   margin: 0 0 12px;
+  color: var(--ink-soft);
+  font-size: 13px;
 }
 
 .empty-state {
@@ -101,10 +107,255 @@ body {
   text-decoration: none;
 }
 
+.notice-item .notice-title:hover {
+  color: var(--accent);
+}
+
 .notice-item .notice-meta {
   margin-top: 4px;
   color: var(--ink-soft);
   font-size: 13px;
+}
+
+.notice-item-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.status-badge {
+  display: inline-block;
+  font-size: 12px;
+  line-height: 1;
+  padding: 4px 8px;
+  border-radius: 999px;
+  border: 1px solid transparent;
+}
+
+.status-open {
+  color: #166534;
+  background: #dcfce7;
+  border-color: #bbf7d0;
+}
+
+.status-closed {
+  color: #7f1d1d;
+  background: #fee2e2;
+  border-color: #fecaca;
+}
+
+.status-resulted {
+  color: #1e3a8a;
+  background: #dbeafe;
+  border-color: #bfdbfe;
+}
+
+.countdown {
+  font-size: 12px;
+  color: #9a3412;
+  background: #ffedd5;
+  border: 1px solid #fed7aa;
+  border-radius: 999px;
+  padding: 4px 8px;
+  line-height: 1;
+}
+
+.countdown-urgent {
+  color: #b91c1c;
+  background: #fee2e2;
+  border-color: #fecaca;
+  font-weight: 600;
+}
+
+.breadcrumb {
+  margin-bottom: 16px;
+  font-size: 14px;
+}
+
+.breadcrumb a {
+  color: var(--ink-soft);
+  text-decoration: none;
+}
+
+.breadcrumb a:hover {
+  color: var(--accent);
+}
+
+.detail-header {
+  border-bottom: 1px solid var(--line);
+  padding-bottom: 16px;
+  margin-bottom: 20px;
+}
+
+.detail-badges {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.detail-title {
+  font-size: 24px;
+  line-height: 1.4;
+  margin: 0 0 14px;
+}
+
+.detail-fields {
+  margin: 0;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px 16px;
+}
+
+.detail-fields .field dt {
+  font-size: 12px;
+  color: var(--ink-soft);
+  margin: 0 0 2px;
+}
+
+.detail-fields .field dd {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.summary-slot {
+  background: #fffbeb;
+  border: 1px dashed #fcd34d;
+  border-radius: 8px;
+  padding: 14px 16px;
+  margin-bottom: 20px;
+}
+
+.summary-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.summary-tag {
+  font-size: 12px;
+  font-weight: 600;
+  color: #92400e;
+  background: #fef3c7;
+  border: 1px solid #fde68a;
+  border-radius: 4px;
+  padding: 2px 6px;
+}
+
+.summary-pending {
+  font-size: 14px;
+  font-weight: 600;
+  color: #92400e;
+}
+
+.summary-note {
+  margin: 0;
+  font-size: 13px;
+  color: var(--ink-soft);
+}
+
+.action-slot {
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 16px;
+  margin-bottom: 20px;
+}
+
+.go-button {
+  display: inline-block;
+  background: var(--accent);
+  color: #fff;
+  font-size: 16px;
+  font-weight: 600;
+  text-decoration: none;
+  padding: 12px 24px;
+  border-radius: 8px;
+}
+
+.go-button:hover {
+  background: #92400e;
+}
+
+.how-to {
+  margin-top: 14px;
+}
+
+.how-to .how-to-title {
+  font-size: 14px;
+  font-weight: 600;
+  margin: 0 0 6px;
+}
+
+.how-to ol {
+  margin: 0;
+  padding-left: 20px;
+  color: var(--ink-soft);
+  font-size: 13px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.how-to a {
+  color: var(--accent);
+}
+
+.click-stats {
+  margin: 14px 0 0;
+  font-size: 12px;
+  color: var(--ink-soft);
+}
+
+.attachments h2,
+.notice-body h2 {
+  font-size: 16px;
+  margin: 0 0 8px;
+}
+
+.attachments {
+  margin-bottom: 20px;
+}
+
+.attachments ul {
+  margin: 0;
+  padding-left: 20px;
+  font-size: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.attachments a {
+  color: var(--accent);
+  word-break: break-all;
+}
+
+.notice-body {
+  margin-bottom: 20px;
+}
+
+.body-text {
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 16px;
+  font-size: 14px;
+  white-space: pre-wrap;
+}
+
+.body-source {
+  margin-top: 8px;
+  font-size: 12px;
+  color: var(--ink-soft);
+  word-break: break-all;
+}
+
+.body-source a {
+  color: var(--accent);
 }
 
 .site-footer {
