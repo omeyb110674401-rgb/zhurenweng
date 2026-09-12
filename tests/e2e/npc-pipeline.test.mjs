@@ -250,7 +250,7 @@ describe('issue #3：全国人大源 → 入库 → 列表/详情 → 出站跳�
 
     // 已截止条目不参与摘要（issue #4）：仍显示「摘要生成中」占位
     const closedHtml = await (
-      await fetch(`${app.url}/notices/${extractNoticeId(items[2].href)}`)
+      await fetch(`${app.url}/notices/${extractNoticeId(hrefOf(extractListItems(listHtml), TITLES.closed))}`)
     ).text();
     assert.match(closedHtml, /data-testid="summary-placeholder"/, '占位块保留');
     assert.match(closedHtml, /摘要生成中/);
