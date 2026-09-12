@@ -16,6 +16,28 @@ const CONTENT_TYPES = {
   '.txt': 'text/plain; charset=utf-8',
 };
 
+const TEXT_EXTENSIONS = new Set(Object.keys(CONTENT_TYPES));
+
+/**
+ * 日期令牌：快照文件里的 {{DATE±N}} / {{CN_DATE±N}} 在服务时按「服务器启动时刻」
+ * 替换为具体日期（N 天偏移）。锚定在启动时刻保证同一次测试运行内多次响应内容
+ * 一致，使「征求意见中 / 已截止」状态与倒计时断言不随运行日期衰减。
+ */
+const DATE_TOKEN = /\{\{\s*(CN_)?DATE\s*([+-]\d+)?\s*\}\}/g;
+
+/** @param {string} text @param {Date} anchor @returns {string} */
+function substituteDateTokens(text, anchor) {
+  return text.replace(DATE_TOKEN, (_, chinese, offset) => {
+    const date = new Date(anchor.getTime() + Number(offset ?? 0) * 24 * 60 * 60 * 1000);
+    if (chinese) {
+      return `${date.getFullYear()}年${date.getMonth() + 1}月${date.getDate()}日`;
+    }
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    return `${date.getFullYear()}-${month}-${day}`;
+  });
+}
+
 /**
  * @typedef {Object} FixtureServerOptions
  * @property {string} fixturesDir 快照根目录（一般是仓库内的 fixtures/）
@@ -30,6 +52,8 @@ const CONTENT_TYPES = {
 /** @param {FixtureServerOptions} options @returns {FixtureServer} */
 export function createFixtureServer({ fixturesDir, host = '127.0.0.1', port = 0 }) {
   const root = path.resolve(fixturesDir);
+  /** 日期令牌锚点：start() 时固定，保证一次运行内响应一致 */
+  let anchor = new Date();
   const server = createServer(async (req, res) => {
     try {
       const url = new URL(req.url ?? '/', `http://${req.headers.host ?? 'localhost'}`);
@@ -47,8 +71,15 @@ export function createFixtureServer({ fixturesDir, host = '127.0.0.1', port = 0 
         return;
       }
       const filePath = path.join(root, ...segments);
+      const ext = path.extname(filePath).toLowerCase();
+      const contentType = CONTENT_TYPES[ext] ?? 'application/octet-stream';
+      if (TEXT_EXTENSIONS.has(ext)) {
+        const body = substituteDateTokens(await readFile(filePath, 'utf8'), anchor);
+        res.writeHead(200, { 'content-type': contentType });
+        res.end(body);
+        return;
+      }
       const body = await readFile(filePath);
-      const contentType = CONTENT_TYPES[path.extname(filePath).toLowerCase()] ?? 'application/octet-stream';
       res.writeHead(200, { 'content-type': contentType });
       res.end(body);
     } catch {
@@ -60,6 +91,7 @@ export function createFixtureServer({ fixturesDir, host = '127.0.0.1', port = 0 
   return {
     start() {
       return new Promise((resolve, reject) => {
+        anchor = new Date();
         server.once('error', reject);
         server.listen(port, host, () => {
           server.removeListener('error', reject);
