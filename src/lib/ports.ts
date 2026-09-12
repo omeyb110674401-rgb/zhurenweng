@@ -1,6 +1,7 @@
 import { GlmLlm } from './adapters/glm-llm.ts';
 import { StubLlm } from './adapters/stubs/stub-llm.ts';
 import { StubMailer } from './adapters/stubs/stub-mailer.ts';
+import { createSmtpMailerFromEnv } from './adapters/smtp-mailer.ts';
 
 /**
  * 端口（Port）定义 —— 生产实现与测试 stub 之间的接缝（ADR-0001）。
@@ -93,9 +94,9 @@ export function createMailerPort(): MailerPort {
       return new StubMailer({ outboxFile });
     }
     case 'smtp':
-      throw new Error(
-        'SMTP 邮件适配器尚未实现（邮件切片交付）；本地与测试请设 MAILER_PROVIDER=stub',
-      );
+      // 生产实现（nodemailer，PRD：国内 SMTP 服务商）；配置经 SMTP_* / MAIL_FROM 注入，
+      // 见 adapters/smtp-mailer.ts。测试永远走 stub（ADR-0001 第 5 条）。
+      return createSmtpMailerFromEnv();
     default:
       throw new Error(`未知的 MAILER_PROVIDER "${provider}"（可选：stub | smtp）`);
   }
