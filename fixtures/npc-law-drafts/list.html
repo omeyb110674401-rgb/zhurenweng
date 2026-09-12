@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <title>法律草案征求意见（fixture 快照占位）</title>
+  </head>
+  <body>
+    <!--
+      fixture 快照（合成占位数据，issue #2）。
+      目录约定：fixtures/<source>/<页面>.html，源 ID 与
+      src/sources/registry.ts 中适配器的 id 一致。
+      该源（npc-law-drafts，全国人大网"法律草案征求意见"）的真实快照
+      由源适配器切片录入；本文件仅用于验证 fixture 源站的目录服务能力。
+    -->
+    <h1>法律草案征求意见</h1>
+    <ul class="notice-list">
+      <li>
+        <a href="detail-fl-001.html">中华人民共和国样本法（修订草案）征求意见</a>
+        <span>发布机关：全国人大常委会法制工作委员会</span>
+        <span>截止日期：2026-10-15</span>
+      </li>
+      <li>
+        <a href="detail-fl-001.html">中华人民共和国示例条例（草案）公开征求意见</a>
+        <span>发布机关：全国人大常委会法制工作委员会</span>
+        <span>截止日期：2026-11-01</span>
+      </li>
+    </ul>
+    <p data-fixture-marker="npc-law-drafts-list">fixture-marker: npc-law-drafts/list.html</p>
+  </body>
+</html>
