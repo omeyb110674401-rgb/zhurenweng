@@ -41,6 +41,8 @@ export const notices = sqliteTable('notices', {
   categoryTagsJson: text('category_tags_json').notNull().default('[]'),
   /** 正文纯文本 */
   bodyText: text('body_text'),
+  /** JSON 存 TEXT：附件清单数组（NoticeAttachment[] = [{ name, url }]） */
+  attachmentsJson: text('attachments_json').notNull().default('[]'),
   /** JSON 存 TEXT：结构化 AI 摘要（StructuredSummary） */
   aiSummaryJson: text('ai_summary_json'),
   /** 摘要模型名与版本 */
