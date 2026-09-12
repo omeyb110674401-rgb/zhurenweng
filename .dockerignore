@@ -1,0 +1,12 @@
+node_modules
+.next
+out
+data
+.git
+tests
+fixtures
+*.md
+docker-compose.yml
+Dockerfile.*
+.dockerignore
+.github

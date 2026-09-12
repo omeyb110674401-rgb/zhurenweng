@@ -1,0 +1,46 @@
+{
+  "name": "zhurenweng",
+  "version": "0.1.0",
+  "private": true,
+  "description": "主人翁——政府公示与征求意见信息聚合网站（发现 → 读懂 → 行动）",
+  "license": "UNLICENSED",
+  "type": "module",
+  "engines": {
+    "node": ">=22.18"
+  },
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "eslint .",
+    "worker": "node worker/index.ts",
+    "fixtures": "node scripts/fixture-server.mjs",
+    "db:generate": "drizzle-kit generate --config drizzle.config.ts",
+    "db:generate:pg": "drizzle-kit generate --config drizzle.config.pg.ts",
+    "db:migrate": "node scripts/db-migrate.mjs",
+    "e2e": "next build && node --test \"tests/e2e/**/*.test.mjs\"",
+    "test": "npm run e2e"
+  },
+  "dependencies": {
+    "better-sqlite3": "^13.0.3",
+    "drizzle-orm": "^0.45.2",
+    "next": "^16.3.5",
+    "pg": "^8.16.3",
+    "react": "^19.3.0",
+    "react-dom": "^19.3.0"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.39.5",
+    "@next/eslint-plugin-next": "^16.3.5",
+    "@types/better-sqlite3": "^7.6.13",
+    "@types/node": "^24.10.1",
+    "@types/pg": "^8.23.1",
+    "@types/react": "^19.2.7",
+    "@types/react-dom": "^19.2.7",
+    "drizzle-kit": "^0.31.10",
+    "eslint": "^9.39.5",
+    "globals": "^17.4.0",
+    "typescript": "^5.9.3",
+    "typescript-eslint": "^8.70.0"
+  }
+}
