@@ -42,6 +42,10 @@ export interface NoticeRecord {
   fetchedAt: string;
   /** 出站提意点击数（北极星指标） */
   outboundClicks: number;
+  /** 版本链（issue #10）：上一轮版本条目 id；首版 / 未关联为 null */
+  versionOf: string | null;
+  /** 版本轮次序号（1 = 首轮公示）；未关联为 null */
+  versionSeq: number | null;
 }
 
 /** 源（抓取配置与健康状态） */

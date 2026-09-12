@@ -28,6 +28,10 @@ fixtures/
     npc/                     #   XML 转义断言，含已截止对照条目；与 npc/ 同构独立成目录）
       list.html
       c2/c30834/*.html
+  e2e-versions/              # issue #10 版本链与条款对比场景专用（同一法案两轮
+    npc/                     #   公示：标题措辞不同、正文有增删改；另含一条无关
+      list.html              #   单轮条目作「无上一版」对照；与 npc/ 同构独立成目录）
+      c2/c30834/*.html
 ```
 
 列表页快照固定为 `<source>/list.html`（抓取管线的 `SOURCES_FIXTURE_BASE`

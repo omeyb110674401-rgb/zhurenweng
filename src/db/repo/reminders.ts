@@ -28,6 +28,8 @@ function toNoticeRecord(row: typeof notices.$inferSelect): NoticeRecord {
     summaryModel: row.summaryModel,
     fetchedAt: row.fetchedAt,
     outboundClicks: row.outboundClicks,
+    versionOf: row.versionOf,
+    versionSeq: row.versionSeq,
   };
 }
 
