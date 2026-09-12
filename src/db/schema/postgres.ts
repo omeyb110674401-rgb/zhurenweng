@@ -41,10 +41,15 @@ export const notices = pgTable('notices', {
   bodyText: text('body_text'),
   /** JSON 存 TEXT：附件清单数组（NoticeAttachment[] = [{ name, url }]） */
   attachmentsJson: text('attachments_json').notNull().default('[]'),
-  /** JSON 存 TEXT：结构化 AI 摘要（StructuredSummary） */
+  /** JSON 存 TEXT：结构化 AI 摘要（五段式带原文引用，形状见 src/lib/summary-content.ts 的 QuotedSummary） */
   aiSummaryJson: text('ai_summary_json'),
   /** 摘要模型名与版本 */
   summaryModel: text('summary_model'),
+  /**
+   * 摘要状态（issue #4）：pending 待生成 / done 已生成 / failed_review 重试耗尽待人工复核。
+   * 抓取 upsert 不触碰本列（属摘要管线，与 ai_summary_json / summary_model 一致）。
+   */
+  summaryStatus: text('summary_status').notNull().default('pending'),
   /** 抓取时间，ISO 8601 */
   fetchedAt: text('fetched_at').notNull(),
   /** 出站提意点击数（北极星指标） */

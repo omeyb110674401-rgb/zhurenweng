@@ -45,7 +45,10 @@ npm run dev            # http://localhost:3000
 | --- | --- | --- |
 | `DB_DRIVER` | `sqlite` | `sqlite` 或 `postgres` |
 | `DATABASE_URL` | `data/zhurenweng.db` | SQLite 文件路径或 PG 连接串 |
-| `LLM_PROVIDER` | `stub` | `stub`（固定摘要）/ `glm`（AI 摘要切片交付） |
+| `LLM_PROVIDER` | `stub` | `stub`（固定摘要，可注入失败）/ `glm`（智谱 GLM 系列，需 `GLM_API_KEY`） |
+| `GLM_API_KEY` / `GLM_API_BASE` / `GLM_MODEL` | （空）/ `https://open.bigmodel.cn/api/paas/v4` / `glm-4-flash` | GLM 大模型接入配置（`LLM_PROVIDER=glm` 时必填 Key） |
+| `LLM_STUB_FAILURES` / `LLM_STUB_CALLS_FILE` | （空） | stub LLM 注入失败（前 N 次调用抛错，或 `always`）/ stub 调用日志 JSONL（跨进程断言调用次数） |
+| `SUMMARY_MAX_RETRIES` / `SUMMARY_RETRY_DELAY_MS` | `3` / `500` | 摘要失败重试次数 / 指数退避基数（毫秒） |
 | `MAILER_PROVIDER` | `stub` | `stub`（捕获邮件）/ `smtp`（邮件切片交付） |
 | `MAILER_OUTBOX_FILE` | （空） | stub 邮件追加写入的 JSONL 文件，供跨进程断言 |
 | `FIXTURES_DIR` / `FIXTURE_SERVER_PORT` | `fixtures/` / `4170` | fixture 源站目录与端口 |
@@ -73,11 +76,34 @@ npm run e2e            # 等价命令：npm test
 - stub LLM 返回固定结构化摘要、stub 邮件按 JSONL 捕获发出的邮件；
 - **issue #3 全链路场景**（`tests/e2e/npc-pipeline.test.mjs`）：真实 worker 进程
   抓取 `fixtures/npc/` 快照 → 幂等入库 → 列表页倒计时 / 排序 / 状态徽标 →
-  详情页字段与「摘要生成中」占位 → `/go/<id>` 302 至官方原文并计数 →
-  重复抓取条目数不变。
+  详情页字段与 AI 摘要展示（已截止条目保持占位）→ `/go/<id>` 302 至官方原文并
+  计数 → 重复抓取条目数不变。
+- **issue #4 摘要双路径场景**（`tests/e2e/summary-pipeline.test.mjs`）：stub LLM
+  全部失败 → 每条目首调 + 3 次重试（调用日志精确计数）→ `failed_review` 转人工
+  复核占位，且不再自动重试；追加新条目 → 成功路径 → 详情页五段式摘要 + 显著
+  AI 标注 + 各段原文引用（一键跳官方原文）+ 占位消失。
 
 数据库迁移在应用首连时自动应用（`drizzle/<driver>/`）；CI（GitHub Actions）运行
 lint 与 e2e 两个 job，同样只依赖 npm。
+
+## AI 摘要器（issue #4）
+
+worker 注册表中的 `summarize-notices` 任务（`worker/jobs/summarize-notices.ts`）
+对 `ai_summary_json` 为空、状态 `pending` 且**未截止**的条目调用 LLM 端口
+（`LlmPort`，输入正文纯文本），输出五段式结构化摘要（这是什么 / 影响谁 /
+关键条款 / 截止日期 / 如何提意见），每段附**原文引用片段**，连同 `summary_model`
+落库（`notices.ai_summary_json`，形状见 `src/lib/summary-content.ts`）。
+
+- **失败策略**：单条条目失败后重试 `SUMMARY_MAX_RETRIES` 次（默认 3，指数退避），
+  仍失败置 `summary_status=failed_review` 转人工复核，worker 不再自动重试；
+  已截止条目不生成摘要。
+- **详情页**（`src/app/_lib/summary-view.tsx`）：`done` → 五段式摘要卡片 + 显著
+  「AI 生成，仅供参考，以官方原文为准」标注 + 各段引用块（点击跳官方原文）；
+  `pending` → 「摘要生成中」占位；`failed_review` → 「摘要生成中（待人工复核）」。
+- **服务商切换**：`LLM_PROVIDER=stub`（默认，测试永远走 stub）或 `glm`（生产，
+  智谱开放平台 OpenAI 兼容端点，`GLM_API_KEY` / `GLM_API_BASE` / `GLM_MODEL`
+  配置，模型被要求只输出 JSON，解析做防御性校验）。本地不配 Key 联调 GLM 适配器
+  的行为可参考 stub 的失败注入（`LLM_STUB_FAILURES`）。
 
 ## 如何添加 fixture 源
 
