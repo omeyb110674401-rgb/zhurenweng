@@ -57,10 +57,6 @@ function runWorkerOnce() {
   });
 }
 
-function matchAll(html, regex) {
-  return [...html.matchAll(regex)].map((match) => match[1]);
-}
-
 /**
  * React SSR 会在「文本 + 表达式」混排处插入 <!-- --> 注释（如
  * 「出站提意点击：<!-- -->2<!-- --> 次」），做文本断言前先剥掉。
@@ -84,6 +80,31 @@ function extractListItems(html) {
     title: match[1].trim(),
     href: (match[0].match(/href="([^"]+)"/) ?? [])[1],
   }));
+}
+
+/**
+ * 聚合列表自 issue #5 起为多源并存（npc / moj / govcn 条目同页展示）。
+ * 按 <li class="notice-item"> 分块提取每条的标题 / 状态徽标 / 倒计时，
+ * 供本场景只对 npc 条目作逐条断言。
+ */
+function extractItemBlocks(html) {
+  return html
+    .split(/<li class="notice-item"/)
+    .slice(1)
+    .map((block) => block.slice(0, block.indexOf('</li>')))
+    .map((block) => ({
+      title: (/<a[^>]*notice-title-link[^>]*>([^<]+)<\/a>/.exec(block) ?? [])[1] ?? '',
+      badge: (/<span[^>]*notice-status-badge[^>]*>([^<]+)<\/span>/.exec(block) ?? [])[1] ?? null,
+      countdown:
+        (/<span[^>]*notice-countdown[^>]*>([^<]+)<\/span>/.exec(block) ?? [])[1] ?? null,
+    }));
+}
+
+/** 取指定标题条目的详情链接（聚合列表含多源条目，不能按位置取）。 */
+function hrefOf(items, title) {
+  const item = items.find((candidate) => candidate.title === title);
+  assert.ok(item, `列表页应含条目「${title}」`);
+  return item.href;
 }
 
 /** 从详情页 HTML 解析出条目 ID（/notices/<id> 的 <id>）。 */
@@ -141,28 +162,34 @@ describe('issue #3：全国人大源 → 入库 → 列表/详情 → 出站跳�
     assert.equal(first.code, 0, `worker 应正常退出，输出：${first.output}`);
     assert.match(first.output, /源 npc 抓取完成：列表 3 条，新增 3，更新 0/);
 
-    // 首轮抓取前首页请求已触发建库，这里再确认列表内容
+    // 首轮抓取前首页请求已触发建库，这里再确认列表内容。
+    // 聚合列表为多源并存（含 issue #5 的 moj / govcn 条目），本场景只对
+    // npc 的 3 条作断言：各自恰好一次、相对顺序保持（截止升序、已截止沉底）。
     const response = await fetch(`${app.url}/`);
     assert.equal(response.status, 200);
     const html = await response.text();
-
-    const items = extractListItems(html);
-    assert.equal(items.length, 3, `列表页应有 3 条条目，实际 HTML：${html.slice(0, 500)}`);
-    // 排序：即将截止在前（+21 天 < +45 天），已截止条目沉底
+    const npcBlocks = extractItemBlocks(html).filter((block) =>
+      Object.values(TITLES).includes(block.title),
+    );
+    assert.equal(
+      npcBlocks.length,
+      3,
+      `列表页应含 npc 的 3 条条目（各恰好一次），实际 HTML：${html.slice(0, 500)}`,
+    );
     assert.deepEqual(
-      items.map((item) => item.title),
+      npcBlocks.map((block) => block.title),
       [TITLES.open1, TITLES.open2, TITLES.closed],
     );
 
-    const badges = matchAll(html, /<span[^>]*notice-status-badge[^>]*>([^<]+)<\/span>/g);
-    assert.deepEqual(badges, ['征求意见中', '征求意见中', '已截止']);
-
-    // 倒计时：与 fixture 源站已替换的截止日期按日历日一致
+    // 徽标与倒计时逐条对应 npc 条目（仅征求意见中的条目展示倒计时）
+    assert.deepEqual(
+      npcBlocks.map((block) => block.badge),
+      ['征求意见中', '征求意见中', '已截止'],
+    );
     const expectedDays = await expectedDaysUntilDeadline('/npc/c2/c30834/t20260830_150001.html');
-    const countdowns = matchAll(html, /<span[^>]*notice-countdown[^>]*>([^<]+)<\/span>/g);
-    assert.equal(countdowns.length, 2, '仅征求意见中的条目展示倒计时');
-    assert.equal(countdowns[0], `剩 ${expectedDays} 天`);
-    assert.match(countdowns[1], /剩 \d+ 天/);
+    assert.equal(npcBlocks[0].countdown, `剩 ${expectedDays} 天`);
+    assert.match(npcBlocks[1].countdown, /剩 \d+ 天/);
+    assert.equal(npcBlocks[2].countdown, null);
 
     // 列表条目元信息：发布机关与发布日期
     const visibleText = stripSsrComments(html);
@@ -173,8 +200,7 @@ describe('issue #3：全国人大源 → 入库 → 列表/详情 → 出站跳�
   it('详情页：全部字段、官方原文链接、分步提意指引与 AI 摘要展示', async () => {
     const listResponse = await fetch(`${app.url}/`);
     const listHtml = await listResponse.text();
-    const items = extractListItems(listHtml);
-    const noticeId = extractNoticeId(items[0].href);
+    const noticeId = extractNoticeId(hrefOf(extractListItems(listHtml), TITLES.open1));
 
     const response = await fetch(`${app.url}/notices/${noticeId}`);
     assert.equal(response.status, 200);
@@ -233,7 +259,7 @@ describe('issue #3：全国人大源 → 入库 → 列表/详情 → 出站跳�
 
   it('出站跳转：/go/<id> 记录点击并 302 到官方原文 URL', async () => {
     const listHtml = await (await fetch(`${app.url}/`)).text();
-    const noticeId = extractNoticeId(extractListItems(listHtml)[0].href);
+    const noticeId = extractNoticeId(hrefOf(extractListItems(listHtml), TITLES.open1));
     const officialUrl = `${fixtureUrl}/npc/c2/c30834/t20260830_150001.html`;
 
     for (const round of [1, 2]) {
@@ -258,15 +284,18 @@ describe('issue #3：全国人大源 → 入库 → 列表/详情 → 出站跳�
     assert.match(second.output, /源 npc 抓取完成：列表 3 条，新增 0，更新 3/);
 
     const html = await (await fetch(`${app.url}/`)).text();
-    const items = extractListItems(html);
-    assert.equal(items.length, 3, '重复抓取不应产生重复条目');
+    // 重复抓取不产生重复条目：npc 的 3 条各自仍恰好一次、顺序不变
+    // （聚合列表同时含其他源条目，全列表总数断言由 issue #5 场景负责）
+    const npcBlocks = extractItemBlocks(html).filter((block) =>
+      Object.values(TITLES).includes(block.title),
+    );
     assert.deepEqual(
-      items.map((item) => item.title),
+      npcBlocks.map((block) => block.title),
       [TITLES.open1, TITLES.open2, TITLES.closed],
       '条目与顺序保持稳定（同一 id 同一行）',
     );
 
-    const noticeId = extractNoticeId(items[0].href);
+    const noticeId = extractNoticeId(hrefOf(extractListItems(html), TITLES.open1));
     const detailHtml = await (await fetch(`${app.url}/notices/${noticeId}`)).text();
     assert.equal(extractOutboundClicks(detailHtml), 2, '重复抓取不得清零出站点击计数');
   });

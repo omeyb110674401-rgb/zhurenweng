@@ -1,4 +1,6 @@
 import type { NoticeAttachment } from '../db/types.ts';
+import { govcnAdapter } from './adapters/govcn.ts';
+import { mojAdapter } from './adapters/moj.ts';
 import { npcLawDraftsAdapter } from './adapters/npc.ts';
 
 /**
@@ -53,4 +55,8 @@ export interface SourceAdapter {
 }
 
 /** 注册表：所有源适配器在此登记，调度器按此数组驱动。 */
-export const sourceAdapters: SourceAdapter[] = [npcLawDraftsAdapter];
+export const sourceAdapters: SourceAdapter[] = [
+  npcLawDraftsAdapter,
+  mojAdapter,
+  govcnAdapter,
+];

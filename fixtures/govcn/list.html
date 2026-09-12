@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>意见征集_中国政府网</title>
+  </head>
+  <body>
+    <!--
+      fixture 快照（合成数据）：中国政府网「意见征集」栏目列表页，
+      仿 www.gov.cn 真实页面结构（政策栏目表格版式）。
+      列表页按仓库约定放 fixtures/govcn/list.html（worker 的 SOURCES_FIXTURE_BASE
+      重写固定为 <base>/<源ID>/list.html，快照统一用 .html 以获得 fixture 源站的
+      日期令牌替换）；详情页快照保留真实栏目路径 zhengce/yjzj/<年月>/content_*.html。
+      与另两源不同：纯表格版式，每行自带「发布机关」与「意见征集截止日期」列
+      （转发条目的截止列写「见原文」）；栏目同时直接链接部委站原文。
+      首行条目《仲裁法（修订草案）》由司法部起草、中国政府网（国务院渠道）发布，
+      fixtures/moj/ 列表同步转发该条（href 相同，按原文 URL 唯一键去重后只入库
+      一条）—— 构成 issue #5 的跨源去重场景。
+      日期令牌 {{CN_DATE±N}} 由 fixture 源站在服务时替换；
+      发布日期为固定历史事实，不使用令牌。
+    -->
+    <div class="header">
+      <div class="logo">中国政府网</div>
+      <div class="header-nav">
+        <a href="/">首页</a>
+        <a href="/govcn/zhengce/list.htm">政策</a>
+        <a href="/govcn/zhengce/yjzj/list.htm">意见征集</a>
+        <a href="/govcn/hudong/list.htm">互动</a>
+      </div>
+    </div>
+
+    <div class="location">
+      当前位置：<a href="/">首页</a>&gt;<a href="/govcn/zhengce/list.htm">政策</a>&gt;<a href="/govcn/zhengce/yjzj/list.htm">意见征集</a>
+    </div>
+
+    <div class="page-title">意见征集</div>
+
+    <table class="yjzj-list">
+      <thead>
+        <tr>
+          <th>标题</th>
+          <th>发布机关</th>
+          <th>发布日期</th>
+          <th>意见征集截止日期</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td class="zc-title"><a href="/govcn/zhengce/yjzj/202609/content_6923101.html">司法部关于《中华人民共和国仲裁法（修订草案）》公开征求意见的通知</a></td>
+          <td class="zc-agency">司法部</td>
+          <td class="zc-date">2026-09-02</td>
+          <td class="zc-deadline">见原文</td>
+        </tr>
+        <tr>
+          <td class="zc-title"><a href="/govcn/zhengce/yjzj/202609/content_6923112.html">国家发展改革委关于《中华人民共和国社会信用体系建设法（草案征求意见稿）》公开征求意见的通知</a></td>
+          <td class="zc-agency">国家发展改革委</td>
+          <td class="zc-date">2026-09-05</td>
+          <td class="zc-deadline">{{CN_DATE+26}}</td>
+        </tr>
+        <tr>
+          <td class="zc-title"><a href="/govcn/zhengce/yjzj/202609/content_6923118.html">国家铁路局关于《铁路交通事故应急救援和调查处理条例（修订草案征求意见稿）》公开征求意见的通知</a></td>
+          <td class="zc-agency">国家铁路局</td>
+          <td class="zc-date">2026-09-10</td>
+          <td class="zc-deadline">{{CN_DATE+12}}</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <div class="page">
+      <a href="/govcn/zhengce/yjzj/list.htm">首页</a>
+      <a href="/govcn/zhengce/yjzj/list_2.htm">下一页</a>
+    </div>
+
+    <div class="footer">
+      <p>中华人民共和国国务院　版权所有</p>
+      <p>京ICP备05070418号</p>
+    </div>
+  </body>
+</html>
