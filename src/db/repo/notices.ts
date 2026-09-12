@@ -1,8 +1,9 @@
-import { asc, desc, eq, inArray, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray, sql } from 'drizzle-orm';
 import { getDb } from '../client.ts';
 import { notices, outboundClickDaily } from '../schema/sqlite.ts';
 import { syncNoticeVersionLinks } from './versions.ts';
 import { localDateIso } from '../../lib/dates.ts';
+import { deriveCategoryTags } from '../../lib/categories.ts';
 import {
   safeParseJson,
   safeParseJsonArray,
@@ -28,33 +29,102 @@ export interface UpsertNoticeInput {
   publishedAt: string | null;
   deadlineAt: string | null;
   status: NoticeStatus;
-  categoryTags: string[];
+  /**
+   * 领域标签（issue #9）：可选。未提供（undefined）时由入库路径按关键词规则
+   * 自动打标（src/lib/categories.ts 的 deriveCategoryTags）——抓取管线与手动
+   * 补录共用本入口，自动打标只此一处；显式传入数组（含空数组）时以传入值为准
+   * （E2E 合成条目、未来适配器规则的逃生门）。
+   */
+  categoryTags?: string[];
   bodyText: string | null;
   attachments: NoticeAttachment[];
   fetchedAt: string;
 }
 
 /**
- * 聚合列表排序（issue #3）：
+ * 聚合列表排序（issue #3，列表页所有查询共用）：
  * 1. 征求意见中在前，已截止 / 已出结果沉底；
  * 2. 组内按截止日期升序（即将截止在前），无截止日期的排最后；
  * 3. 以抓取时间降序兜底。
  * 双方言交集下 NULL 排序位置不同（SQLite 在前、PostgreSQL 在后），
  * 故用显式 CASE 归一化。
  */
+const AGGREGATION_ORDER = [
+  sql`case when ${notices.status} = 'open' then 0 else 1 end`,
+  sql`case when ${notices.deadlineAt} is null then 1 else 0 end`,
+  asc(notices.deadlineAt),
+  desc(notices.fetchedAt),
+];
+
 export async function listNotices(options: ListNoticesOptions = {}): Promise<NoticeRecord[]> {
   const db = await getDb();
   const rows = await db
     .select()
     .from(notices)
-    .orderBy(
-      sql`case when ${notices.status} = 'open' then 0 else 1 end`,
-      sql`case when ${notices.deadlineAt} is null then 1 else 0 end`,
-      asc(notices.deadlineAt),
-      desc(notices.fetchedAt),
-    )
+    .orderBy(...AGGREGATION_ORDER)
     .limit(options.limit ?? 50);
   return rows.map(toNoticeRecord);
+}
+
+/**
+ * 分类浏览查询（issue #9）：领域标签 / 发布机关 / 关键词三维度可任意组合
+ * （全部可分享于 querystring：/?category=…&agency=…&q=…），排序沿用
+ * AGGREGATION_ORDER 的倒计时排序 —— 筛选只过滤行，不改变顺序。
+ *
+ * 过滤语义：
+ * - category：领域标签精确命中（categoryTagsJson 存 JSON 数组文本，用带引号
+ *   的整词匹配，避免子串误命中——查「数据」不会命中「数据与网络安全」）；
+ * - agency：发布机关精确相等；
+ * - keyword：标题或正文包含匹配（lower() 后比对，Latin 不区分大小写；
+ *   关键词中的 % / _ 按 LIKE 通配符解释，参数化绑定无注入面）。
+ */
+export interface ListNoticesFilteredOptions {
+  /** 领域标签精确值（应为 src/lib/categories.ts 词表内的标签） */
+  category?: string;
+  /** 发布机关精确值 */
+  agency?: string;
+  /** 标题 / 正文包含匹配的关键词 */
+  keyword?: string;
+  limit?: number;
+}
+
+export async function listNoticesFiltered(
+  options: ListNoticesFilteredOptions = {},
+): Promise<NoticeRecord[]> {
+  const db = await getDb();
+  const conditions = [];
+  if (options.category) {
+    // JSON 数组文本形如 ["医疗卫生","市场监管"]，带引号整词即为数组元素级匹配
+    conditions.push(sql`${notices.categoryTagsJson} like ${JSON.stringify(options.category)}`);
+  }
+  if (options.agency) {
+    conditions.push(eq(notices.agency, options.agency));
+  }
+  if (options.keyword) {
+    const needle = `%${options.keyword.toLowerCase()}%`;
+    conditions.push(
+      sql`(lower(${notices.title}) like ${needle} or lower(${notices.bodyText}) like ${needle})`,
+    );
+  }
+  const rows = await db
+    .select()
+    .from(notices)
+    .where(conditions.length > 0 ? and(...conditions) : undefined)
+    .orderBy(...AGGREGATION_ORDER)
+    .limit(options.limit ?? 50);
+  return rows.map(toNoticeRecord);
+}
+
+/**
+ * 库内去重后的发布机关清单（issue #9 列表页机关筛选下拉选项），按名称排序。
+ */
+export async function listNoticeAgencies(): Promise<string[]> {
+  const db = await getDb();
+  const rows = await db
+    .selectDistinct({ agency: notices.agency })
+    .from(notices)
+    .orderBy(asc(notices.agency));
+  return rows.map((row) => row.agency);
 }
 
 /**
@@ -119,11 +189,16 @@ export async function listAllNoticesForReindex(): Promise<NoticeRecord[]> {
  * 状态、正文、附件、抓取时间），不触碰 id / 点击计数 / AI 摘要（属摘要管线）。
  * 返回 'inserted' | 'updated' 供抓取日志统计。
  *
+ * 领域标签自动打标（issue #9）：调用方未提供 categoryTags 时，按关键词规则
+ * 从标题 / 正文推导（src/lib/categories.ts），更新路径同样重算——重复抓取
+ * 后标签始终与最新标题 / 正文一致。这是抓取管线与手动补录共用的唯一打标入口。
+ *
  * 入库 / 更新后自动同步版本链（issue #10）：同一法案不同轮次公示按
  * 标题规范化 + 同机关关联为版本链（见 ./versions.ts），对调用方透明。
  */
 export async function upsertNotice(input: UpsertNoticeInput): Promise<'inserted' | 'updated'> {
   const db = await getDb();
+  const categoryTags = input.categoryTags ?? deriveCategoryTags(input.title, input.bodyText);
   const existing = await db
     .select({ id: notices.id, title: notices.title, agency: notices.agency })
     .from(notices)
@@ -139,7 +214,7 @@ export async function upsertNotice(input: UpsertNoticeInput): Promise<'inserted'
         publishedAt: input.publishedAt,
         deadlineAt: input.deadlineAt,
         status: input.status,
-        categoryTagsJson: JSON.stringify(input.categoryTags),
+        categoryTagsJson: JSON.stringify(categoryTags),
         bodyText: input.bodyText,
         attachmentsJson: JSON.stringify(input.attachments),
         fetchedAt: input.fetchedAt,
@@ -164,7 +239,7 @@ export async function upsertNotice(input: UpsertNoticeInput): Promise<'inserted'
     publishedAt: input.publishedAt,
     deadlineAt: input.deadlineAt,
     status: input.status,
-    categoryTagsJson: JSON.stringify(input.categoryTags),
+    categoryTagsJson: JSON.stringify(categoryTags),
     bodyText: input.bodyText,
     attachmentsJson: JSON.stringify(input.attachments),
     fetchedAt: input.fetchedAt,

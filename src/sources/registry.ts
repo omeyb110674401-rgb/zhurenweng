@@ -26,6 +26,12 @@ export interface NormalizedNotice {
   bodyText: string | null;
   /** 附件清单（通常在详情页解析） */
   attachments: NoticeAttachment[];
+  /**
+   * 适配器已知领域标签（issue #9 适配器规则，可选）：源自身带有权威领域
+   * 信息时由适配器直接给出；未提供时入库路径按关键词规则自动打标
+   * （src/lib/categories.ts 的 deriveCategoryTags，抓取与手动补录共用）。
+   */
+  categoryTags?: string[];
 }
 
 /** 详情页解析结果：与列表层数据按字段合并（只覆盖解析出值的字段）。 */
@@ -36,6 +42,8 @@ export interface ParsedDetail {
   deadlineAt?: string | null;
   bodyText?: string | null;
   attachments?: NoticeAttachment[];
+  /** 适配器已知领域标签（可选，见 NormalizedNotice.categoryTags） */
+  categoryTags?: string[];
 }
 
 export interface SourceAdapter {

@@ -1,23 +1,18 @@
 import type { NoticeRecord, SubscriptionRecord } from '../db/types.ts';
+import { DOMAIN_CATEGORIES } from './categories.ts';
 
 /**
  * 订阅规则（issue #7）：关键词命中条目标题 / 正文，领域命中条目领域标签。
  * 纯函数实现 —— 订阅页输入校验与提醒任务的规则匹配共用同一份逻辑。
  */
 
-/** 订阅表单可选的领域清单（与条目 categoryTags 的取值约定一致）。 */
-export const CATEGORY_OPTIONS = [
-  '立法与司法',
-  '经济与产业',
-  '科技与互联网',
-  '教育与科研',
-  '医疗卫生',
-  '生态环境',
-  '交通运输',
-  '市场监管',
-  '社会保障',
-  '数据与网络安全',
-] as const;
+/**
+ * 订阅表单可选的领域清单（issue #9 起与条目 categoryTags 同源：
+ * 取自 src/lib/categories.ts 的领域标签体系，条目打标与订阅领域共用一份词表）。
+ */
+export const CATEGORY_OPTIONS: readonly string[] = DOMAIN_CATEGORIES.map(
+  (domain) => domain.label,
+);
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const MAX_EMAIL_LENGTH = 254;

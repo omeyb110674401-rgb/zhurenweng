@@ -24,6 +24,9 @@ import type { Job, JobContext } from '../registry.ts';
  *
  * 健康与告警（issue #12）：失败登记源的错误列（健康看板展示）并发送告警邮件
  * （收件人 ALERT_EMAIL；同日 × 任务 × 源去重）；管理后台停用的源整轮跳过。
+ *
+ * 领域标签（issue #9）：入库路径（upsertNotice）自动按关键词规则打标；
+ * 适配器可通过 NormalizedNotice.categoryTags 直接给出权威领域（优先采用）。
  */
 
 const FETCH_TIMEOUT_MS = 15_000;
@@ -61,6 +64,7 @@ function mergeDetail(notice: NormalizedNotice, detail: ParsedDetail): Normalized
     deadlineAt: detail.deadlineAt ?? notice.deadlineAt,
     bodyText: detail.bodyText ?? notice.bodyText,
     attachments: detail.attachments ?? notice.attachments,
+    categoryTags: detail.categoryTags ?? notice.categoryTags,
   };
 }
 
@@ -141,7 +145,9 @@ export const crawlNoticesJob: Job = {
             publishedAt: normalized.publishedAt,
             deadlineAt: normalized.deadlineAt,
             status: deriveStatus(normalized.deadlineAt, now),
-            categoryTags: [],
+            // 领域标签（issue #9）：适配器规则优先（NormalizedNotice.categoryTags），
+            // 未提供时不传 —— 入库路径按关键词规则自动打标（与手动补录单一入口）
+            categoryTags: normalized.categoryTags,
             bodyText: normalized.bodyText,
             attachments: normalized.attachments,
             fetchedAt: now.toISOString(),
