@@ -1,6 +1,7 @@
 import { asc, desc, eq, inArray, sql } from 'drizzle-orm';
 import { getDb } from '../client.ts';
 import { notices } from '../schema/sqlite.ts';
+import { syncNoticeVersionLinks } from './versions.ts';
 import {
   safeParseJson,
   safeParseJsonArray,
@@ -116,11 +117,14 @@ export async function listAllNoticesForReindex(): Promise<NoticeRecord[]> {
  * 幂等入库：以原文 URL 为唯一键。已存在则更新内容字段（标题、机关、日期、
  * 状态、正文、附件、抓取时间），不触碰 id / 点击计数 / AI 摘要（属摘要管线）。
  * 返回 'inserted' | 'updated' 供抓取日志统计。
+ *
+ * 入库 / 更新后自动同步版本链（issue #10）：同一法案不同轮次公示按
+ * 标题规范化 + 同机关关联为版本链（见 ./versions.ts），对调用方透明。
  */
 export async function upsertNotice(input: UpsertNoticeInput): Promise<'inserted' | 'updated'> {
   const db = await getDb();
   const existing = await db
-    .select({ id: notices.id })
+    .select({ id: notices.id, title: notices.title, agency: notices.agency })
     .from(notices)
     .where(eq(notices.url, input.url))
     .limit(1);
@@ -140,6 +144,13 @@ export async function upsertNotice(input: UpsertNoticeInput): Promise<'inserted'
         fetchedAt: input.fetchedAt,
       })
       .where(eq(notices.url, input.url));
+    // 版本链同步（issue #10）：标题 / 机关变化时旧链同样重算
+    await syncNoticeVersionLinks({
+      id: existing[0].id,
+      title: input.title,
+      agency: input.agency,
+      previous: { title: existing[0].title, agency: existing[0].agency },
+    });
     return 'updated';
   }
 
@@ -157,6 +168,8 @@ export async function upsertNotice(input: UpsertNoticeInput): Promise<'inserted'
     attachmentsJson: JSON.stringify(input.attachments),
     fetchedAt: input.fetchedAt,
   });
+  // 版本链同步（issue #10）：首版入库时自动尝试与既有条目关联
+  await syncNoticeVersionLinks({ id: input.id, title: input.title, agency: input.agency });
   return 'inserted';
 }
 
@@ -191,6 +204,8 @@ function toNoticeRecord(row: typeof notices.$inferSelect): NoticeRecord {
     summaryModel: row.summaryModel,
     fetchedAt: row.fetchedAt,
     outboundClicks: row.outboundClicks,
+    versionOf: row.versionOf,
+    versionSeq: row.versionSeq,
   };
 }
 

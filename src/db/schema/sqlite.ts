@@ -56,6 +56,15 @@ export const notices = sqliteTable('notices', {
   fetchedAt: text('fetched_at').notNull(),
   /** 出站提意点击数（北极星指标） */
   outboundClicks: integer('outbound_clicks').notNull().default(0),
+  /**
+   * 版本链（issue #10）：本条目的上一轮版本条目 id（notices 自引用）。
+   * 由抓取入库时的版本关联逻辑自动维护（src/db/repo/versions.ts，
+   * 匹配规则 = 标题规范化 + 同一发布机关）；首版 / 未关联条目为 NULL。
+   * 不建自引用外键约束：关联完全由应用层维护，且保持双方言迁移简单。
+   */
+  versionOf: text('version_of'),
+  /** 版本轮次序号（1 = 首轮公示），随 versionOf 一并由版本关联逻辑维护；未关联为 NULL */
+  versionSeq: integer('version_seq'),
 });
 
 /**
