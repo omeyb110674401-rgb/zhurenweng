@@ -1,0 +1,14 @@
+# dependencies
+node_modules/
+
+# next.js
+.next/
+out/
+
+# local data（SQLite 文件库、stub 输出等运行时产物）
+data/
+
+# misc
+*.tsbuildinfo
+*.log
+.DS_Store
