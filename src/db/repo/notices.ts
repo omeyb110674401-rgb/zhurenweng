@@ -94,8 +94,11 @@ export async function listNoticesFiltered(
   const db = await getDb();
   const conditions = [];
   if (options.category) {
-    // JSON 数组文本形如 ["医疗卫生","市场监管"]，带引号整词即为数组元素级匹配
-    conditions.push(sql`${notices.categoryTagsJson} like ${JSON.stringify(options.category)}`);
+    // JSON 数组文本形如 ["医疗卫生","市场监管"]：用 %“带引号整词”% 包含匹配，
+    // 引号保证元素级完整命中（查「数据」不会命中「数据与网络安全」）
+    conditions.push(
+      sql`${notices.categoryTagsJson} like ${`%${JSON.stringify(options.category)}%`}`,
+    );
   }
   if (options.agency) {
     conditions.push(eq(notices.agency, options.agency));
