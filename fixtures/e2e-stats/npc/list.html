@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>法律草案征求意见_中国人大网</title>
+  </head>
+  <body>
+    <!--
+      fixture 快照（合成数据，issue #11 统计页场景专用）：全国人大网
+      「法律草案征求意见」列表页，仿 npc.gov.cn 真实页面结构。
+      与 fixtures/npc/ 不同：本目录（fixtures/e2e-stats/）是统计场景的
+      fixture 源站根目录，发布日期也使用日期令牌（{{CN_DATE-40}} /
+      {{CN_DATE-100}}），使统计页的「公示量月度趋势」断言恒落在最近
+      6 个月窗口内，不随测试运行日期衰减。
+      两条目机关均为列表层兜底值（详情页不带「发布机关：」行）：
+      全国人大常委会法制工作委员会 ×2。
+    -->
+    <div class="header">
+      <div class="logo">中国人大网</div>
+      <div class="header-nav">
+        <a href="/">首页</a>
+        <a href="/npc/c2/c30834/list.shtml">法律草案征求意见</a>
+      </div>
+    </div>
+
+    <div class="position">
+      当前位置：<a href="/">首页</a>&gt;<a href="/npc/c2/c30834/list.shtml">法律草案征求意见</a>
+    </div>
+
+    <div class="list_00">
+      <div class="list-title">法律草案征求意见</div>
+      <ul>
+        <li>
+          <a href="/npc/c2/c30834/t20260912_910001.html" target="_blank">中华人民共和国慈善法（修正草案）征求意见</a>
+          <span class="time">{{CN_DATE-40}}</span>
+        </li>
+        <li>
+          <a href="/npc/c2/c30834/t20260912_910002.html" target="_blank">中华人民共和国广播电视法（草案征求意见稿）征求意见</a>
+          <span class="time">{{CN_DATE-100}}</span>
+        </li>
+      </ul>
+    </div>
+
+    <div class="page">
+      <ul class="page-nav">
+        <li><a href="/npc/c2/c30834/list.shtml">首页</a></li>
+        <li><a href="/npc/c2/c30834/list_2.shtml">下一页</a></li>
+      </ul>
+    </div>
+
+    <div class="footer">
+      <p>中国人大网　版权所有</p>
+      <p>京ICP备05000001号</p>
+    </div>
+  </body>
+</html>

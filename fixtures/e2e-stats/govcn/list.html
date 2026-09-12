@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>意见征集_中国政府网</title>
+  </head>
+  <body>
+    <!--
+      fixture 快照（合成数据，issue #11 统计页场景专用）：中国政府网「意见征集」
+      栏目列表页（纯表格版式，与 fixtures/govcn/ 同结构）。
+      两行发布日期同为 {{DATE-20}}（同月双机关行，验证月度趋势矩阵按机关分列）：
+      - 国家发展改革委：截止 {{CN_DATE+10}} → 公示期 30 天（16-30 桶）；
+      - 国家铁路局：截止 {{CN_DATE-5}} → 公示期 15 天（8-15 桶），已截止。
+    -->
+    <div class="header">
+      <div class="logo">中国政府网</div>
+      <div class="header-nav">
+        <a href="/">首页</a>
+        <a href="/govcn/zhengce/yjzj/list.htm">意见征集</a>
+      </div>
+    </div>
+
+    <div class="location">
+      当前位置：<a href="/">首页</a>&gt;<a href="/govcn/zhengce/list.htm">政策</a>&gt;<a href="/govcn/zhengce/yjzj/list.htm">意见征集</a>
+    </div>
+
+    <div class="page-title">意见征集</div>
+
+    <table class="yjzj-list">
+      <thead>
+        <tr>
+          <th>标题</th>
+          <th>发布机关</th>
+          <th>发布日期</th>
+          <th>意见征集截止日期</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td class="zc-title"><a href="/govcn/zhengce/yjzj/202609/content_930001.html">国家发展改革委关于《中华人民共和国能源法（草案征求意见稿）》公开征求意见的通知</a></td>
+          <td class="zc-agency">国家发展改革委</td>
+          <td class="zc-date">{{DATE-20}}</td>
+          <td class="zc-deadline">{{CN_DATE+10}}</td>
+        </tr>
+        <tr>
+          <td class="zc-title"><a href="/govcn/zhengce/yjzj/202609/content_930002.html">国家铁路局关于《地方铁路安全管理条例（修订草案征求意见稿）》公开征求意见的通知</a></td>
+          <td class="zc-agency">国家铁路局</td>
+          <td class="zc-date">{{DATE-20}}</td>
+          <td class="zc-deadline">{{CN_DATE-5}}</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <div class="page">
+      <a href="/govcn/zhengce/yjzj/list.htm">首页</a>
+      <a href="/govcn/zhengce/yjzj/list_2.htm">下一页</a>
+    </div>
+
+    <div class="footer">
+      <p>中华人民共和国国务院　版权所有</p>
+      <p>京ICP备05070418号</p>
+    </div>
+  </body>
+</html>

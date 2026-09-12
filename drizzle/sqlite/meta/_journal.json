@@ -43,6 +43,13 @@
       "when": 1789300000000,
       "tag": "0005_add_notice_version_chain",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "6",
+      "when": 1789300000001,
+      "tag": "0006_add_outbound_click_daily",
+      "breakpoints": true
     }
   ]
 }
