@@ -19,14 +19,21 @@ services:
       # LLM 与邮件在生产通过环境变量接入真实服务商（ADR-0001 第 5 条）
       LLM_PROVIDER: glm
       LLM_API_KEY: ${LLM_API_KEY:-}
-      LLM_API_BASE_URL: ${LLM_API_BASE_URL:-}
+      GLM_API_BASE: ${GLM_API_BASE:-}
+      GLM_MODEL: ${GLM_MODEL:-}
       MAILER_PROVIDER: smtp
-      SMTP_URL: ${SMTP_URL:-}
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASS: ${SMTP_PASS:-}
+      SMTP_SECURE: ${SMTP_SECURE:-}
       MAIL_FROM: ${MAIL_FROM:-}
       SEARCH_PROVIDER: meilisearch
       MEILI_URL: http://meilisearch:7700
       MEILI_MASTER_KEY: ${MEILI_MASTER_KEY:-}
       # 管理后台令牌与告警收件邮箱（issue #12）
+      SITE_URL: ${SITE_URL:-}
+      APP_BASE_URL: ${APP_BASE_URL:-}
       ADMIN_TOKEN: ${ADMIN_TOKEN:-}
       ALERT_EMAIL: ${ALERT_EMAIL:-}
     ports:
@@ -48,14 +55,20 @@ services:
       DATABASE_URL: postgres://zhurenweng:zhurenweng@db:5432/zhurenweng
       LLM_PROVIDER: glm
       LLM_API_KEY: ${LLM_API_KEY:-}
-      LLM_API_BASE_URL: ${LLM_API_BASE_URL:-}
+      GLM_API_BASE: ${GLM_API_BASE:-}
+      GLM_MODEL: ${GLM_MODEL:-}
       MAILER_PROVIDER: smtp
-      SMTP_URL: ${SMTP_URL:-}
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASS: ${SMTP_PASS:-}
+      SMTP_SECURE: ${SMTP_SECURE:-}
       MAIL_FROM: ${MAIL_FROM:-}
       SEARCH_PROVIDER: meilisearch
       MEILI_URL: http://meilisearch:7700
       MEILI_MASTER_KEY: ${MEILI_MASTER_KEY:-}
       # 任务失败告警收件邮箱（issue #12；未配置则不发告警）
+      APP_BASE_URL: ${APP_BASE_URL:-}
       ALERT_EMAIL: ${ALERT_EMAIL:-}
     depends_on:
       db:
