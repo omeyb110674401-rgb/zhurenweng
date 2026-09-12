@@ -75,6 +75,62 @@ export function buildConfirmationEmail(input: {
 
 const STAGE_LABELS: Record<ReminderStage, string> = { d7: '截止前 7 天', d3: '截止前 3 天' };
 
+/**
+ * 任务失败告警邮件（issue #12）：worker 任务失败时发给站长（ALERT_EMAIL）。
+ * 内容含任务名、源（任务级失败为「—」）、发生时间与错误摘要（截断防爆炸）；
+ * 去重（同日 × 任务 × 源只发一封）在发送方 src/lib/alerts.ts 落表控制。
+ */
+
+/** 错误摘要截断长度：告警邮件只要能定位问题，不需要整段堆栈 */
+const MAX_ALERT_ERROR_LENGTH = 600;
+
+/** 源健康告警的展示标签：任务级失败（无具体源）用「—」。 */
+export const ALERT_NO_SOURCE_LABEL = '—';
+
+export function buildTaskFailureAlertEmail(input: {
+  to: string;
+  jobName: string;
+  /** 源 ID；任务级（与具体源无关）失败传 null */
+  sourceId: string | null;
+  sourceName: string | null;
+  error: string;
+  now: Date;
+}): MailMessage {
+  const sourceLabel = input.sourceId
+    ? `${input.sourceName ?? input.sourceId}（${input.sourceId}）`
+    : ALERT_NO_SOURCE_LABEL;
+  const occurredAt = input.now.toISOString();
+  const errorSummary =
+    input.error.length > MAX_ALERT_ERROR_LENGTH
+      ? `${input.error.slice(0, MAX_ALERT_ERROR_LENGTH)}…（已截断）`
+      : input.error;
+  const subject = `【主人翁】任务失败告警：${input.jobName}（源：${sourceLabel}）`;
+  return {
+    to: input.to,
+    subject,
+    text: [
+      '主人翁数据管线任务失败：',
+      '',
+      `任务：${input.jobName}`,
+      `源：${sourceLabel}`,
+      `时间：${occurredAt}`,
+      `错误摘要：${errorSummary}`,
+      '',
+      '同一任务同一源同一天只发送一封告警；修复后下一轮调度会自动重试。',
+      '',
+      `——`,
+      SITE_FOOTER,
+    ].join('\n'),
+    html: [
+      '<p>主人翁数据管线任务失败：</p>',
+      `<p>任务：<strong>${input.jobName}</strong><br>源：<strong>${sourceLabel}</strong><br>时间：${occurredAt}</p>`,
+      `<pre>${errorSummary}</pre>`,
+      '<p>同一任务同一源同一天只发送一封告警；修复后下一轮调度会自动重试。</p>',
+      `<p>——<br>${SITE_FOOTER}</p>`,
+    ].join('\n'),
+  };
+}
+
 /** 截止提醒邮件：标题、剩余天数、截止日期、站内详情与官方原文（提意）链接。 */
 export function buildReminderEmail(input: {
   email: string;

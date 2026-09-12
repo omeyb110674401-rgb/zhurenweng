@@ -1,7 +1,8 @@
-import { createHash } from 'node:crypto';
 import type { NoticeStatus } from '../../src/db/types.ts';
+import { sendTaskFailureAlert } from '../../src/lib/alerts.ts';
+import { noticeIdForUrl } from '../../src/lib/notice-id.ts';
 import { upsertNotice } from '../../src/db/repo/notices.ts';
-import { upsertSource } from '../../src/db/repo/sources.ts';
+import { getSourceById, recordSourceFailure, upsertSource } from '../../src/db/repo/sources.ts';
 import { syncNoticesToSearchIndex } from '../../src/lib/search/sync.ts';
 import { localDateIso } from '../../src/lib/dates.ts';
 import {
@@ -20,6 +21,9 @@ import type { Job, JobContext } from '../registry.ts';
  * 重写为 `<base>/<源ID>/list.html`，E2E 借此把全部源指向本地 fixture 源站
  * （ADR-0001：测试不访问真实源站）。每日调度由 worker 主循环的
  * WORKER_INTERVAL_MS 控制（生产 compose 设为每日），WORKER_ONCE=1 可单轮运行。
+ *
+ * 健康与告警（issue #12）：失败登记源的错误列（健康看板展示）并发送告警邮件
+ * （收件人 ALERT_EMAIL；同日 × 任务 × 源去重）；管理后台停用的源整轮跳过。
  */
 
 const FETCH_TIMEOUT_MS = 15_000;
@@ -37,12 +41,10 @@ export function resolveListUrl(adapter: SourceAdapter): string {
 }
 
 /**
- * 条目主键：原文 URL 的 SHA-256 前缀。确定性强 —— 重复抓取、跨库重建都命中
- * 同一 id，/go/<id> 的点击计数因此能稳定累计。
+ * 条目主键：原文 URL 的 SHA-256 前缀。确定性强 —— 重复抓取、跨库重建、
+ * 手动补录（issue #12）都命中同一 id，/go/<id> 的点击计数因此能稳定累计。
+ * 实现见 src/lib/notice-id.ts（与手动补录共用）。
  */
-function noticeIdFor(url: string): string {
-  return createHash('sha256').update(url).digest('hex').slice(0, 16);
-}
 
 /** 状态推导：截止日期早于今天 → 已截止；无截止日期默认征求意见中。 */
 function deriveStatus(deadlineAt: string | null, now: Date): NoticeStatus {
@@ -104,6 +106,12 @@ export const crawlNoticesJob: Job = {
 
     for (const adapter of sourceAdapters) {
       const listUrl = resolveListUrl(adapter);
+      // 源管理（issue #12）：管理后台停用的源整轮跳过，既不抓取也不计失败
+      const registered = await getSourceById(adapter.id).catch(() => null);
+      if (registered && !registered.enabled) {
+        ctx.logger(`源 ${adapter.id} 已停用，本轮跳过`);
+        continue;
+      }
       try {
         // 先登记源行（notices.source_id 外键引用 sources.id，必须先于条目入库存在）；
         // 健康状态乐观置为 true，本轮失败再翻回 false。
@@ -123,7 +131,7 @@ export const crawlNoticesJob: Job = {
         const changedNoticeIds: string[] = [];
         for (const notice of listItems) {
           const normalized = await enrichWithDetail(adapter, notice, ctx);
-          const id = noticeIdFor(normalized.url);
+          const id = noticeIdForUrl(normalized.url);
           const result = await upsertNotice({
             id,
             sourceId: adapter.id,
@@ -165,15 +173,25 @@ export const crawlNoticesJob: Job = {
           );
         }
       } catch (error) {
-        await upsertSource({
+        const message = errorMessage(error);
+        await recordSourceFailure({
           id: adapter.id,
           name: adapter.name,
           adapterType: adapter.id,
-          healthy: false,
+          error: message,
+          now: now.toISOString(),
         }).catch(() => {
           // 健康状态登记失败不掩盖原始抓取错误
         });
-        ctx.logger(`源 ${adapter.id} 抓取失败（listUrl=${listUrl}）：${errorMessage(error)}`);
+        // 源健康告警（issue #12）：同日 × 任务 × 源去重，邮件失败不影响本轮
+        await sendTaskFailureAlert({
+          jobName: 'crawl-notices',
+          sourceId: adapter.id,
+          error: message,
+          now,
+          log: ctx.logger,
+        });
+        ctx.logger(`源 ${adapter.id} 抓取失败（listUrl=${listUrl}）：${message}`);
       }
     }
   },

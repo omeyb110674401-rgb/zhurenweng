@@ -60,6 +60,8 @@ npm run dev            # http://localhost:3000
 | `FIXTURES_DIR` / `FIXTURE_SERVER_PORT` | `fixtures/` / `4170` | fixture 源站目录与端口 |
 | `WORKER_INTERVAL_MS` / `WORKER_ONCE` | `60000` / （空） | worker 调度间隔（生产 compose 设为每日） / 单轮模式 |
 | `SOURCES_FIXTURE_BASE` | （空） | 设置后所有源适配器的列表页 URL 重写为 `<base>/<源ID>/list.html`（测试注入 fixture 源站；不设则抓取真实源站） |
+| `ADMIN_TOKEN` | （空） | 管理后台 `/admin` 共享密钥（issue #12）。未配置时恒 401；配置后凭会话 Cookie 或 `?token=` 访问，详见「管理后台与健康告警」 |
+| `ALERT_EMAIL` | （空） | worker 任务失败告警收件邮箱（issue #12）。未配置则不发送告警 |
 
 本地验证抓取管线（fixture 注入）：
 
@@ -123,6 +125,15 @@ npm run e2e            # 等价命令：npm test
   昨天 3 次）→ 统计页概览 / 各部门公示量 / 最近 6 个月趋势矩阵 / 公示期
   长度分布四桶 / 点击 Top 榜回链详情页 / 按日期聚合逐项断言 → 重复抓取
   幂等不重算。
+- **issue #12 管理后台与健康告警场景**（`tests/e2e/admin.test.mjs`）：仅复制
+  npc fixture（moj / govcn 404 天然构造部分源失败）→ 未带 token 401 引导页、
+  错误 token 恒 401、登录 303 下发 HttpOnly Cookie 后可访问 → 看板展示各源
+  最近成功时间与最近错误（HTTP 404）→ 失败源与摘要失败各触发一封告警邮件
+  （stub outbox 断言收件人与错误摘要）→ 摘要失败条目进复核队列 → 重置重试
+  （stub 恢复）自动补齐摘要 → 另一条人工编辑摘要保存 done → 手动补录条目
+  走同一入库 / 摘要 / 索引管线（列表 / 检索 / 摘要断言 + 同 URL 幂等更新 +
+  表单校验）→ 同日重复失败与任务级失败（非法 SEARCH_PROVIDER）均按
+  （日 × 任务 × 源）去重 → 源停用后抓取跳过、看板即时反映、未授权 POST 401。
 
 本地手动验证订阅提醒全链路：
 
@@ -259,6 +270,41 @@ worker 注册表中的 `summarize-notices` 任务（`worker/jobs/summarize-notic
   按日期聚合即对该表 `GROUP BY click_date` 求和。
 - **隐私边界**：点击数据只有条目 ID 与日期两个维度，纯计数聚合，
   无 IP、无 Cookie、无账号（`/go` 端点保持不变）。
+
+## 管理后台与健康告警（issue #12）
+
+### 访问保护（`/admin`）
+
+- 共享密钥 = 环境变量 `ADMIN_TOKEN`，**未配置时所有 `/admin*` 请求一律 401**
+  配置指引页。配置后两种放行方式：登录表单（`POST /admin/login`，令牌正确则
+  303 回 `/admin` 并下发 HttpOnly + SameSite=Lax 会话 Cookie，7 天有效）或直接
+  在 URL 带 `?token=<ADMIN_TOKEN>`（脚本 / curl 友好）；`POST /admin/logout` 退出。
+- 令牌比较为常量时间（双方各做 SHA-256 后 `timingSafeEqual`）；后台为自包含
+  HTML + 表单 POST（零客户端 JS、零认证依赖），写操作未授权一律 401。
+
+### 三个功能
+
+- **源健康看板**：每个抓取源一行 —— 健康 / 异常、启用 / 停用、最近成功抓取
+  时间、最近错误信息与时间（成功不清空最近错误，便于排查曾停摆的源）。
+  启停开关（`POST /admin/sources`）即时生效：抓取任务整轮跳过停用源。
+- **摘要人工复核队列**：`summary_status='failed_review'` 的条目两种处置 ——
+  「重置并重试」清空摘要列并置回 pending（摘要任务下一轮自动重新生成）；或
+  直接编辑五段式摘要文本保存为 done（`summary_model=manual`，详情页立即展示
+  并同步检索索引）。
+- **手动补录**：结构化表单（标题 / 发布机关 / 原文 URL / 发布与截止日期 /
+  正文纯文本）→ 与爬虫完全相同的管线：以原文 URL 为唯一键幂等 upsert
+  （条目 id 同为 URL 的 SHA-256 前缀）、状态推导一致、入库即同步检索索引、
+  摘要列保持 pending 由摘要任务自动生成 AI 摘要。条目登记在专用源
+  「manual（人工补录）」下，看板可见。
+
+### 失败邮件告警
+
+- 三类失败发告警到 `ALERT_EMAIL`（未配置则整体跳过）：源抓取失败（按源）、
+  条目摘要重试耗尽转人工复核（按条目所属源）、任务级整任务抛错（源显示 `—`）。
+  邮件含任务名、源、发生时间与错误摘要（600 字截断）。
+- **去重落表**：`alert_sends` 按（本地日历日 × 任务名 × 源）复合主键 ——
+  同一天同一源同一任务类型只发一封，worker 重启后依然有效；邮件发送失败不落
+  去重标记，下一轮任务再失败时重试发送。
 
 ## 如何添加 fixture 源
 

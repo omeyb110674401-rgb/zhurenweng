@@ -18,6 +18,12 @@ export const sources = pgTable('sources', {
   /** 0 = 不健康 / 1 = 健康（双方言交集内没有 boolean，用 INTEGER 表达） */
   healthy: integer('healthy').notNull().default(1),
   lastSuccessAt: text('last_success_at'),
+  /** 最近一次管线错误信息（issue #12 源健康看板；成功不清空，保留最近一次错误便于排查） */
+  lastErrorMessage: text('last_error_message'),
+  /** 最近一次错误时间，ISO 8601 */
+  lastErrorAt: text('last_error_at'),
+  /** 1 = 启用 / 0 = 停用（issue #12 源管理：停用后抓取任务跳过该源） */
+  enabled: integer('enabled').notNull().default(1),
 });
 
 export const notices = pgTable('notices', {
@@ -85,6 +91,29 @@ export const outboundClickDaily = pgTable(
     clicks: integer('clicks').notNull().default(0),
   },
   (table) => [primaryKey({ columns: [table.noticeId, table.clickDate] })],
+);
+
+/**
+ * 任务失败告警发送去重记录（issue #12）：同一天（本地日历日）× 同一任务 ×
+ * 同一源只发一封告警邮件，避免同一故障重复轰炸收件箱。复合主键天然幂等，
+ * 落表使去重在 worker 重启后依然有效。
+ * 与某具体源无关的任务级失败（如索引重建任务抛错）source_id 记为空字符串。
+ */
+export const alertSends = pgTable(
+  'alert_sends',
+  {
+    /** 告警日期，本地日历日（YYYY-MM-DD），去重键的一部分 */
+    alertDate: text('alert_date').notNull(),
+    /** 触发告警的任务名（如 crawl-notices） */
+    jobName: text('job_name').notNull(),
+    /** 源 ID；任务级（与具体源无关）失败用空字符串 */
+    sourceId: text('source_id').notNull(),
+    /** 发送时间，ISO 8601 */
+    sentAt: text('sent_at').notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.alertDate, table.jobName, table.sourceId] }),
+  ],
 );
 
 /**

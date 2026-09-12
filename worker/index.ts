@@ -1,4 +1,5 @@
 import { jobs, type JobContext } from './registry.ts';
+import { sendTaskFailureAlert } from '../src/lib/alerts.ts';
 
 /**
  * worker 进程入口（占位实现，issue #2）。
@@ -8,6 +9,7 @@ import { jobs, type JobContext } from './registry.ts';
  * 环境变量：
  * - WORKER_INTERVAL_MS：调度间隔，默认 60000；
  * - WORKER_ONCE=1：执行一轮后退出（本地验证 / 手动触发用）。
+ * - ALERT_EMAIL：任务失败告警收件邮箱（issue #12）；未配置则不发送。
  */
 
 const intervalMs = Number(process.env.WORKER_INTERVAL_MS ?? 60000);
@@ -32,7 +34,11 @@ async function tick(): Promise<void> {
       logger(`执行任务 ${job.name}`);
       await job.run(ctx);
     } catch (error) {
-      logger(`任务 ${job.name} 失败：${error instanceof Error ? error.message : String(error)}`);
+      const message = error instanceof Error ? error.message : String(error);
+      logger(`任务 ${job.name} 失败：${message}`);
+      // 任务级失败告警（issue #12）：与具体源无关的整任务抛错；源内失败
+      // （如单源抓取失败）在任务内部按源粒度告警，不会走到这里。
+      await sendTaskFailureAlert({ jobName: job.name, sourceId: null, error: message, now: new Date(), log: logger });
     }
   }
 }

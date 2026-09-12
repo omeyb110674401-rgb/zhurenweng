@@ -1,4 +1,5 @@
 import { createLlmPort } from '../../src/lib/ports.ts';
+import { sendTaskFailureAlert } from '../../src/lib/alerts.ts';
 import { syncNoticesToSearchIndex } from '../../src/lib/search/sync.ts';
 import {
   buildQuotedSummary,
@@ -108,10 +109,19 @@ export const summarizeNoticesJob: Job = {
           );
         }
       } catch (error) {
+        const message = errorMessage(error);
         await markNoticeSummaryForReview(target.id);
         sentToReview += 1;
+        // 摘要失败告警（issue #12）：转人工复核的同时通知站长，同日 × 任务 × 源去重
+        await sendTaskFailureAlert({
+          jobName: 'summarize-notices',
+          sourceId: target.sourceId,
+          error: `条目 ${target.id} 摘要重试耗尽转人工复核：${message}`,
+          now: ctx.now(),
+          log: ctx.logger,
+        });
         ctx.logger(
-          `条目 ${target.id} 摘要失败：已重试 ${MAX_RETRIES} 次仍失败，转人工复核（最后错误：${errorMessage(error)}）`,
+          `条目 ${target.id} 摘要失败：已重试 ${MAX_RETRIES} 次仍失败，转人工复核（最后错误：${message}）`,
         );
       }
     }
