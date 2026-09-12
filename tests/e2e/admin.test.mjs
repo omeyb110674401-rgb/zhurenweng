@@ -98,6 +98,11 @@ function postAdmin(pathname, params, useCookie = true) {
   });
 }
 
+/** React SSR 会在文本 + 表达式混排处插入 <!-- --> 注释，文本断言前剥掉。 */
+function stripSsrComments(html) {
+  return html.replaceAll('<!-- -->', '');
+}
+
 /** 复核队列条目：[{ id, title }]（按页面展示顺序）。 */
 function extractReviewItems(html) {
   return [...html.matchAll(/data-testid="review-item-link" href="\/notices\/([0-9a-f]+)"[^>]*>([^<]+)</g)].map(
@@ -314,11 +319,12 @@ describe('issue #12：管理后台与健康告警', () => {
     assert.ok(!after.includes('data-testid="review-queue-item"'), '无残留待复核条目');
 
     const detail = await (await fetch(`${app.url}/notices/${target.id}`)).text();
+    const readable = stripSsrComments(detail);
     assert.match(detail, /data-testid="ai-summary"/, '详情页渲染人工摘要');
-    assert.match(detail, /【人工】这是医疗保障法草案的征求意见公告。/, '人工摘要内容（这是什么）');
-    assert.match(detail, /【人工】第二条 健全多层次保障体系/, '人工摘要关键条款');
-    assert.match(detail, /摘要模型：manual/, '人工摘要与自动摘要可区分');
-    assert.ok(!detail.includes('摘要生成中'), '占位消失');
+    assert.match(readable, /【人工】这是医疗保障法草案的征求意见公告。/, '人工摘要内容（这是什么）');
+    assert.match(readable, /【人工】第二条 健全多层次保障体系/, '人工摘要关键条款');
+    assert.match(readable, /摘要模型：manual/, '人工摘要与自动摘要可区分');
+    assert.ok(!readable.includes('摘要生成中'), '占位消失');
   });
 
   it('手动补录：条目出现在列表页并走完整管线（摘要 + 检索索引），URL 幂等去重', async () => {
@@ -355,7 +361,7 @@ describe('issue #12：管理后台与健康告警', () => {
     const adminHtml = await (await getAdmin()).text();
     const manualRow = /data-testid="source-health-row" data-source-id="manual"[\s\S]*?<\/tr>/.exec(adminHtml)?.[0] ?? '';
     assert.ok(manualRow, '看板包含人工补录源行');
-    assert.match(manualRow, /data-field="last-success">\d{4}-\d{2}-\d{2}T/);
+    assert.match(manualRow, /data-field="last-success"><span class="mono">\d{4}-\d{2}-\d{2}T/);
 
     // 摘要任务下一轮自动补齐 AI 摘要（stub）
     const workerRun = await runWorkerOnce();
