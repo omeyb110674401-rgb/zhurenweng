@@ -564,3 +564,52 @@ body {
 .result-card a {
   color: var(--accent);
 }
+
+/* ===== 站内搜索（issue #8）===== */
+
+.search-form {
+  display: flex;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.search-input {
+  flex: 1;
+  min-width: 0;
+  padding: 10px 14px;
+  font-size: 15px;
+  font-family: inherit;
+  color: var(--ink);
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+.search-input:focus {
+  outline: 2px solid var(--accent);
+  outline-offset: -1px;
+  border-color: var(--accent);
+}
+
+.search-button {
+  padding: 10px 20px;
+  font-size: 15px;
+  font-weight: 600;
+  color: #fff;
+  background: var(--accent);
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.search-button:hover {
+  background: #92400e;
+}
+
+.search-back-link {
+  color: var(--accent);
+}
+
+.search-back-link:hover {
+  text-decoration: underline;
+}

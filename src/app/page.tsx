@@ -1,28 +1,9 @@
-import Link from 'next/link';
 import { listNotices } from '@/db/repo/notices';
-import type { NoticeRecord } from '@/db/types';
-import { Countdown, StatusBadge, formatDate } from '@/app/_lib/notice-display';
+import { NoticeItem } from '@/app/_lib/notice-item';
+import { SearchForm } from '@/app/_lib/search-form';
 
 // 数据随抓取管线持续更新，首页始终服务端实时渲染，不做静态预渲染。
 export const dynamic = 'force-dynamic';
-
-function NoticeItem({ notice }: { notice: NoticeRecord }) {
-  return (
-    <li className="notice-item" data-testid="notice-item">
-      <div className="notice-item-head">
-        <StatusBadge status={notice.status} />
-        <Countdown notice={notice} now={new Date()} />
-      </div>
-      <Link className="notice-title" href={`/notices/${notice.id}`} data-testid="notice-title-link">
-        {notice.title}
-      </Link>
-      <div className="notice-meta">
-        {notice.agency} · 发布：{formatDate(notice.publishedAt)} · 截止：
-        {formatDate(notice.deadlineAt)}
-      </div>
-    </li>
-  );
-}
 
 export default async function HomePage() {
   // 仓库层排序：征求意见中在前、截止日期升序（即将截止在前）、无截止日期靠后
@@ -35,6 +16,8 @@ export default async function HomePage() {
           主人<span className="brand-accent">翁</span>
         </h1>
         <p className="tagline">政府公示与征求意见信息聚合 —— 发现 · 读懂 · 行动</p>
+        {/* 站内搜索（issue #8）：GET 表单提交到 /search?q=…，不依赖客户端 JS */}
+        <SearchForm />
       </header>
 
       <section className="notice-section" aria-labelledby="notice-list-title">
