@@ -5,6 +5,8 @@
  * worker 主循环只遍历注册表，不因新增任务而修改。
  */
 
+import { crawlNoticesJob } from './jobs/crawl-notices.ts';
+
 export interface JobContext {
   /** 统一前缀的日志函数 */
   readonly logger: (message: string) => void;
@@ -20,4 +22,4 @@ export interface Job {
 }
 
 /** 注册表：所有 worker 任务在此登记，主循环按此数组调度。 */
-export const jobs: Job[] = [];
+export const jobs: Job[] = [crawlNoticesJob];
