@@ -51,9 +51,39 @@ const MOJ = {
 
 const NPC_FIRST_TITLE = '中华人民共和国医疗保障法（草案征求意见稿）征求意见';
 
+const GOVCN = {
+  shared: {
+    title: '司法部关于《中华人民共和国仲裁法（修订草案）》公开征求意见的通知',
+    detailPath: '/govcn/zhengce/yjzj/202609/content_6923101.html',
+    agency: '司法部',
+    publishedAt: '2026-09-02',
+    bodyMarker: 'zcf@moj.gov.cn',
+    attachments: [
+      '中华人民共和国仲裁法（修订草案）.docx',
+      '关于《中华人民共和国仲裁法（修订草案）》的起草说明.pdf',
+    ],
+  },
+  multiDept: {
+    title: '国家发展改革委关于《中华人民共和国社会信用体系建设法（草案征求意见稿）》公开征求意见的通知',
+    detailPath: '/govcn/zhengce/yjzj/202609/content_6923112.html',
+    agency: '国家发展改革委',
+    bodyMarker: 'xyjstx@ndrc.gov.cn',
+    attachments: ['中华人民共和国社会信用体系建设法（草案征求意见稿）.pdf'],
+  },
+  native: {
+    title: '国家铁路局关于《铁路交通事故应急救援和调查处理条例（修订草案征求意见稿）》公开征求意见的通知',
+    detailPath: '/govcn/zhengce/yjzj/202609/content_6923118.html',
+    agency: '国家铁路局',
+    publishedAt: '2026-09-10',
+    bodyMarker: 'tljfgc@nra.gov.cn',
+    attachments: ['铁路交通事故应急救援和调查处理条例（修订草案征求意见稿）.pdf'],
+  },
+};
+
 const SOURCE_NAME = {
   npc: '全国人大网·法律草案征求意见',
   moj: '司法部·立法意见征集',
+  govcn: '中国政府网·意见征集',
 };
 
 let app;
@@ -115,7 +145,24 @@ async function fixtureMojDeadline(detailPath) {
   const html = await (await fetch(`${fixtureUrl}${detailPath}`)).text();
   const match = /征求意见截止时间：<b>(\d{4}-\d{2}-\d{2})<\/b>/.exec(html);
   assert.ok(match, 'fixture moj 详情页应含已替换的 ISO 截止日期');
-  const iso = match[1];
+  return deadlineFromIso(match[1]);
+}
+
+/**
+ * 从 fixture 源站取已替换日期令牌的 govcn 详情页，返回 { iso, days }：
+ * 截止日期框的中文日期距今天的日历天数与对应 ISO 文本。
+ */
+async function fixtureGovcnDeadline(detailPath) {
+  const html = await (await fetch(`${fixtureUrl}${detailPath}`)).text();
+  const match =
+    /<div class="deadline-value">(\d{4})年(\d{1,2})月(\d{1,2})日<\/div>/.exec(html);
+  assert.ok(match, 'fixture govcn 详情页应含已替换的截止日期框日期');
+  const [, y, m, d] = match;
+  const pad = (value) => String(value).padStart(2, '0');
+  return deadlineFromIso(`${y}-${pad(m)}-${pad(d)}`);
+}
+
+function deadlineFromIso(iso) {
   const now = new Date();
   const todayUtc = Date.UTC(now.getFullYear(), now.getMonth(), now.getDate());
   const [y, m, d] = iso.split('-').map(Number);
@@ -145,37 +192,42 @@ after(async () => {
   await fixtures?.stop();
 });
 
-describe('issue #5：源注册配置化与多源聚合（moj 源）', () => {
-  it('worker 单轮抓取：npc + moj 两源逐源入库（日志逐源统计）', async () => {
+describe('issue #5：源注册配置化与多源聚合', () => {
+  it('worker 单轮抓取：npc + moj + govcn 三源逐源入库（日志逐源统计）', async () => {
     const first = await runWorkerOnce();
     assert.equal(first.code, 0, `worker 应正常退出，输出：${first.output}`);
     assert.match(first.output, /源 npc 抓取完成：列表 3 条，新增 3，更新 0/);
     assert.match(first.output, /源 moj 抓取完成：列表 3 条，新增 3，更新 0/);
+    assert.match(first.output, /源 govcn 抓取完成：列表 3 条，新增 3，更新 0/);
   });
 
-  it('两源条目并存于列表页：moj 条目按详情页面包屑展示机关，不与 npc 串扰', async () => {
+  it('三源条目并存于列表页：各自机关、来源独立，互不串扰', async () => {
     const html = stripSsrComments(await (await fetch(`${app.url}/`)).text());
     const items = extractListItems(html);
-    assert.equal(items.length, 6, '两源共 6 条条目');
+    assert.equal(items.length, 9, '三源共 9 条条目');
 
-    const mojTitles = [MOJ.card.title, MOJ.noAttachment.title];
-    for (const title of mojTitles) {
+    // 每源条目恰好出现一次
+    const titlesOnce = [
+      MOJ.card.title,
+      MOJ.noAttachment.title,
+      GOVCN.shared.title,
+      GOVCN.native.title,
+      NPC_FIRST_TITLE,
+    ];
+    for (const title of titlesOnce) {
       assert.equal(
         items.filter((item) => item.title === title).length,
         1,
-        `moj 条目「${title}」应恰好出现一次`,
+        `条目「${title}」应恰好出现一次`,
       );
     }
-    // moj 条目元信息：机关（详情页面包屑）+ 发布/截止日期
+
+    // 各源机关文本并存且不串扰
     assert.match(html, /司法部立法一局 · 发布：2026-09-08 · 截止：\d{4}-\d{2}-\d{2}/);
     assert.match(html, /司法部 · 发布：2026-09-01 · 截止：\d{4}-\d{2}-\d{2}/);
-    // 互不串扰：npc 条目保持 npc 机关文本且仍然在列（条目数由 npc 场景断言）
+    assert.match(html, /国家发展改革委 · 发布：2026-09-05 · 截止：\d{4}-\d{2}-\d{2}/);
+    assert.match(html, /国家铁路局 · 发布：2026-09-10 · 截止：\d{4}-\d{2}-\d{2}/);
     assert.match(html, /全国人民代表大会常务委员会法制工作委员会/);
-    assert.equal(
-      items.filter((item) => item.title === NPC_FIRST_TITLE).length,
-      1,
-      'npc 条目应与 moj 条目并存',
-    );
   });
 
   it('moj 卡片置顶条目详情页：面包屑机关、截止提示条日期、正文与文末附件区', async () => {
@@ -218,13 +270,49 @@ describe('issue #5：源注册配置化与多源聚合（moj 源）', () => {
     assert.ok(html.includes(iso), `截止日期应为 fixture 令牌值 ${iso}`);
   });
 
-  it('重复抓取幂等：两源条目数不变、去重按原文 URL 命中更新', async () => {
+  it('govcn 详情页：关联部门框、截止日期框、列表机关列与附件清单', async () => {
+    const noticeId = await fetchDetailIdByTitle(GOVCN.native.title);
+    const html = await (await fetch(`${app.url}/notices/${noticeId}`)).text();
+
+    assert.match(html, new RegExp(GOVCN.native.title));
+    assert.match(html, /发布机关[\s\S]{0,40}国家铁路局/, '机关 = 关联部门框牵头部门');
+    assert.match(html, new RegExp(SOURCE_NAME.govcn), '应展示来源（源适配器名称）');
+    assert.match(html, /2026-09-10/, '发布日期');
+
+    const { iso, days } = await fixtureGovcnDeadline(GOVCN.native.detailPath);
+    assert.match(html, new RegExp(`截止日期[\\s\\S]{0,40}${iso}`), `截止日期应为 fixture 令牌值 ${iso}`);
+    assert.match(html, new RegExp(`剩 ${days} 天`), '倒计时按日历日一致');
+
+    assert.match(html, new RegExp(GOVCN.native.bodyMarker), '正文纯文本');
+    for (const name of GOVCN.native.attachments) {
+      assert.match(html, new RegExp(name.replace(/[().]/g, '\\$&')), `附件：${name}`);
+    }
+
+    const officialUrl = `${fixtureUrl}${GOVCN.native.detailPath}`;
+    assert.ok(html.includes(`href="${officialUrl}"`), '官方原文链接 = fixture 快照地址');
+    const go = await fetch(`${app.url}/go/${noticeId}`, { redirect: 'manual' });
+    assert.equal(go.status, 302);
+    assert.equal(go.headers.get('location'), officialUrl);
+  });
+
+  it('govcn 多部门联合征求意见：关联部门框首个为牵头部门', async () => {
+    const noticeId = await fetchDetailIdByTitle(GOVCN.multiDept.title);
+    const html = await (await fetch(`${app.url}/notices/${noticeId}`)).text();
+
+    assert.match(html, /发布机关[\s\S]{0,40}国家发展改革委/, '牵头部门为国家发展改革委');
+    assert.match(html, new RegExp(GOVCN.multiDept.bodyMarker), '正文纯文本');
+    const { iso } = await fixtureGovcnDeadline(GOVCN.multiDept.detailPath);
+    assert.match(html, new RegExp(`截止日期[\\s\\S]{0,40}${iso}`));
+  });
+
+  it('重复抓取幂等：三源条目数不变、去重按原文 URL 命中更新', async () => {
     const second = await runWorkerOnce();
     assert.equal(second.code, 0, `worker 应正常退出，输出：${second.output}`);
     assert.match(second.output, /源 npc 抓取完成：列表 3 条，新增 0，更新 3/);
     assert.match(second.output, /源 moj 抓取完成：列表 3 条，新增 0，更新 3/);
+    assert.match(second.output, /源 govcn 抓取完成：列表 3 条，新增 0，更新 3/);
 
     const items = extractListItems(await (await fetch(`${app.url}/`)).text());
-    assert.equal(items.length, 6, '重复抓取不应产生重复条目');
+    assert.equal(items.length, 9, '重复抓取不应产生重复条目');
   });
 });
