@@ -6,6 +6,14 @@
 /** 公示状态（PRD：征求意见中 / 已截止 / 已出结果） */
 export type NoticeStatus = 'open' | 'closed' | 'resulted';
 
+/** 公示附件（官方原文页面上的草案文本、说明等文件） */
+export interface NoticeAttachment {
+  /** 展示名（含扩展名，如「xxx（草案征求意见稿）.pdf」） */
+  name: string;
+  /** 绝对 URL */
+  url: string;
+}
+
 /** 公示条目（PRD「数据模型」中的核心实体） */
 export interface NoticeRecord {
   id: string;
@@ -24,6 +32,8 @@ export interface NoticeRecord {
   categoryTags: string[];
   /** 正文纯文本 */
   bodyText: string | null;
+  /** 附件清单 */
+  attachments: NoticeAttachment[];
   /** 结构化 AI 摘要（形状见 src/lib/ports.ts 的 StructuredSummary） */
   aiSummary: unknown;
   /** 摘要模型名与版本 */

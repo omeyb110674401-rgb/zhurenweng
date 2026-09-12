@@ -1,19 +1,21 @@
+import Link from 'next/link';
 import { listNotices } from '@/db/repo/notices';
 import type { NoticeRecord } from '@/db/types';
+import { Countdown, StatusBadge, formatDate } from '@/app/_lib/notice-display';
 
 // 数据随抓取管线持续更新，首页始终服务端实时渲染，不做静态预渲染。
 export const dynamic = 'force-dynamic';
 
-function formatDate(iso: string | null): string {
-  return iso ?? '未标注';
-}
-
 function NoticeItem({ notice }: { notice: NoticeRecord }) {
   return (
-    <li className="notice-item">
-      <a className="notice-title" href={`/notices/${notice.id}`}>
+    <li className="notice-item" data-testid="notice-item">
+      <div className="notice-item-head">
+        <StatusBadge status={notice.status} />
+        <Countdown notice={notice} now={new Date()} />
+      </div>
+      <Link className="notice-title" href={`/notices/${notice.id}`} data-testid="notice-title-link">
         {notice.title}
-      </a>
+      </Link>
       <div className="notice-meta">
         {notice.agency} · 发布：{formatDate(notice.publishedAt)} · 截止：
         {formatDate(notice.deadlineAt)}
@@ -23,6 +25,7 @@ function NoticeItem({ notice }: { notice: NoticeRecord }) {
 }
 
 export default async function HomePage() {
+  // 仓库层排序：征求意见中在前、截止日期升序（即将截止在前）、无截止日期靠后
   const notices = await listNotices({ limit: 50 });
 
   return (
@@ -36,6 +39,7 @@ export default async function HomePage() {
 
       <section className="notice-section" aria-labelledby="notice-list-title">
         <h2 id="notice-list-title">最新公示</h2>
+        <p className="section-hint">按征求意见截止日期排序，即将截止的排在最前。</p>
         {notices.length === 0 ? (
           <div className="empty-state" data-testid="notice-empty-state">
             <p className="empty-title">暂无公示条目</p>

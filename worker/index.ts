@@ -42,19 +42,21 @@ const names = jobs.map((job) => job.name);
 if (runOnce) {
   logger(`单轮模式：已注册任务 [${names.join(', ') || '（无）'}]`);
   await tick();
-  process.exit(0);
-}
+  // 不调用 process.exit(0)：Windows 上强退会与尚未关闭的句柄（HTTP keep-alive
+  // 连接等）竞争，触发 libuv 断言使退出码非 0。置退出码后由事件循环自然排空退出。
+  logger('单轮模式完成，退出');
+} else {
+  logger(`worker 启动：已注册 ${jobs.length} 个任务 [${names.join(', ') || '（无）'}]，间隔 ${intervalMs}ms`);
+  await tick();
+  const timer = setInterval(() => {
+    void tick();
+  }, intervalMs);
 
-logger(`worker 启动：已注册 ${jobs.length} 个任务 [${names.join(', ') || '（无）'}]，间隔 ${intervalMs}ms`);
-await tick();
-const timer = setInterval(() => {
-  void tick();
-}, intervalMs);
-
-for (const signal of ['SIGINT', 'SIGTERM'] as const) {
-  process.on(signal, () => {
-    logger(`收到 ${signal}，停止调度并退出`);
-    clearInterval(timer);
-    process.exit(0);
-  });
+  for (const signal of ['SIGINT', 'SIGTERM'] as const) {
+    process.on(signal, () => {
+      logger(`收到 ${signal}，停止调度并退出`);
+      clearInterval(timer);
+      process.exit(0);
+    });
+  }
 }

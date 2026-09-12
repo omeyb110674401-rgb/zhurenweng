@@ -6,21 +6,35 @@
 
 ```
 fixtures/
-  npc-law-drafts/            # 全国人大网"法律草案征求意见"
-    list.html                # 列表页快照
-    detail-fl-001.html       # 详情页快照（文件名即页面标识）
+  npc/                       # 全国人大网「法律草案征求意见」（issue #3，真实感合成快照）
+    list.html                # 列表页快照（含导航等噪声链接，适配器负责过滤）
+    c2/c30834/*.html         # 条目详情页快照（仿 npc.gov.cn 栏目路径）
+  npc-law-drafts/            # issue #2 的占位快照，仅供 fixture 源站冒烟场景使用
+    list.html
+    detail-fl-001.html
 ```
+
+## 日期令牌（fixture 源站服务时替换）
+
+快照中的 `{{CN_DATE±N}}`（→ `YYYY年M月D日`）与 `{{DATE±N}}`（→ `YYYY-MM-DD`）
+由本地 fixture 源站（`tests/e2e/helpers/fixture-server.mjs`）在**每次 start() 时
+锚定当天日期**替换为具体日期。截止日期等影响状态与倒计时断言的字段一律用令牌，
+保证「征求意见中 / 已截止」的判定与「剩 N 天」的断言不随测试运行日期衰减；
+锚定在启动时刻又保证同一次运行内多次响应内容一致（重复抓取幂等）。
+发布日期等历史事实不用令牌，直接写死。
 
 ## 如何添加一个新的 fixture 源
 
 1. 在 `fixtures/` 下新建以源 ID 命名的目录，放入该源列表页 / 详情页的 HTML 快照；
 2. 在 `src/sources/registry.ts` 的 `sourceAdapters` 数组登记对应适配器；
-3. 为该源写一条端到端场景（node:test，放 `tests/e2e/`）：启动 fixture 源站
-   （`tests/e2e/helpers/fixture-server.mjs`），以快照 URL 作为适配器 `listUrl`，
-   从 HTTP 层断言抓取入库结果。
+3. 为该源写一条端到端场景（node:test，放 `tests/e2e/`）：给应用 / worker 注入
+   `SOURCES_FIXTURE_BASE=<fixture 源站地址>`，抓取即被重定向到
+   `<base>/<source>/list.html`，从 HTTP 层断言抓取入库结果。
 
 快照建议只保留页面结构与关键文本（可脱敏、可截断），并在文件头注释标注来源与
 快照日期。E2E 运行期间 fixture 由本地 HTTP 服务提供，不访问真实源站。
+`npc/` 快照为仿真实 npc.gov.cn 页面结构的**合成数据**（含中文正文与附件链接），
+其中附件文件本体不随快照提供（下载链接指向 fixture 源站会 404，仅断言其展示）。
 
 ## 本地预览
 
@@ -28,4 +42,5 @@ fixtures/
 npm run fixtures            # 默认 127.0.0.1:4170，按 fixtures/ 目录服务
 ```
 
-URL 映射：`/<source>/<file>` → `fixtures/<source>/<file>`（防路径穿越，缺失返回 404）。
+URL 映射：`/<source>/<file>` → `fixtures/<source>/<file>`（防路径穿越，缺失返回 404；
+文本快照在服务时替换日期令牌）。

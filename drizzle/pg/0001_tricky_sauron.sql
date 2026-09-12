@@ -1,0 +1,1 @@
+ALTER TABLE "notices" ADD COLUMN "attachments_json" text DEFAULT '[]' NOT NULL;
