@@ -11,7 +11,11 @@
       仿 moj.gov.cn 真实页面结构（TRS CMS 版式）。
       与全国人大源不同：本列表为「卡片 + 表格」混合版式 —— 置顶条目为卡片，
       其余条目为含发布机关 / 日期 / 状态列的表格。
-      快照内链接按仓库 fixture 约定以源 ID 段（/moj/）开头，解析后落在本地
+      最后一行《仲裁法（修订草案）》为跨源转发条目：该征求意见由司法部起草、
+      中国政府网（国务院渠道）发布，本列表同步转发，原文 URL 指向中国政府网
+      发布页快照（fixture 扁平化为 /govcn/… 路径），与 fixtures/govcn/ 列表的
+      首行构成 issue #5 的跨源去重场景（按原文 URL 唯一键只入库一条）。
+      快照内其余链接按仓库 fixture 约定以源 ID 段（/moj/）开头，解析后落在本地
       fixture 源站（真实站点为 https://www.moj.gov.cn/... 路径）。
       日期令牌 {{DATE±N}} / {{CN_DATE±N}} 由 fixture 源站在服务时替换；
       发布日期为固定历史事实，不使用令牌。
@@ -61,6 +65,12 @@
           <td class="zqyj-title"><a href="/moj/pub/sfbgw/zqyj/t20260901_523101.html">司法部关于《中华人民共和国历史文化遗产保护法（草案征求意见稿）》公开征求意见的通知</a></td>
           <td class="zqyj-agency">司法部</td>
           <td class="zqyj-date">2026-09-01</td>
+          <td class="zqyj-state">征求意见中</td>
+        </tr>
+        <tr>
+          <td class="zqyj-title"><a href="/govcn/zhengce/yjzj/202609/content_6923101.html">司法部关于《中华人民共和国仲裁法（修订草案）》公开征求意见的通知</a></td>
+          <td class="zqyj-agency">司法部</td>
+          <td class="zqyj-date">2026-09-02</td>
           <td class="zqyj-state">征求意见中</td>
         </tr>
       </tbody>

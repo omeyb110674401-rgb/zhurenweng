@@ -40,6 +40,13 @@ const MOJ = {
       '关于《中华人民共和国人民调解法（修订草案）》的说明.pdf',
     ],
   },
+  gongzheng: {
+    title: '司法部关于《中华人民共和国公证法（修订草案）》公开征求意见的通知',
+    detailPath: '/moj/pub/sfbgw/zqyj/t20260903_523105.html',
+    agency: '司法部立法三局',
+    publishedAt: '2026-09-03',
+    bodyMarker: 'gzf@moj.gov.cn',
+  },
   noAttachment: {
     title: '司法部关于《中华人民共和国历史文化遗产保护法（草案征求意见稿）》公开征求意见的通知',
     detailPath: '/moj/pub/sfbgw/zqyj/t20260901_523101.html',
@@ -49,7 +56,11 @@ const MOJ = {
   },
 };
 
-const NPC_FIRST_TITLE = '中华人民共和国医疗保障法（草案征求意见稿）征求意见';
+const NPC = {
+  first: { title: '中华人民共和国医疗保障法（草案征求意见稿）征求意见' },
+  park: { title: '中华人民共和国国家公园法（草案二次审议稿）征求意见' },
+  fishery: { title: '中华人民共和国渔业法（修订草案）征求意见' },
+};
 
 const GOVCN = {
   shared: {
@@ -193,12 +204,15 @@ after(async () => {
 });
 
 describe('issue #5：源注册配置化与多源聚合', () => {
-  it('worker 单轮抓取：npc + moj + govcn 三源逐源入库（日志逐源统计）', async () => {
+  it('worker 单轮抓取：三源逐源入库，跨源重复 URL 命中更新而非重复插入', async () => {
     const first = await runWorkerOnce();
     assert.equal(first.code, 0, `worker 应正常退出，输出：${first.output}`);
     assert.match(first.output, /源 npc 抓取完成：列表 3 条，新增 3，更新 0/);
-    assert.match(first.output, /源 moj 抓取完成：列表 3 条，新增 3，更新 0/);
-    assert.match(first.output, /源 govcn 抓取完成：列表 3 条，新增 3，更新 0/);
+    // moj 列表含 4 条（其中《仲裁法》转发条目的原文 URL 指向 govcn 发布页，
+    // 本轮首次入库，全部新增）
+    assert.match(first.output, /源 moj 抓取完成：列表 4 条，新增 4，更新 0/);
+    // govcn 后抓：同一《仲裁法》原文 URL 命中已入库条目 → 更新（去重证明）
+    assert.match(first.output, /源 govcn 抓取完成：列表 3 条，新增 2，更新 1/);
   });
 
   it('三源条目并存于列表页：各自机关、来源独立，互不串扰', async () => {
@@ -206,13 +220,15 @@ describe('issue #5：源注册配置化与多源聚合', () => {
     const items = extractListItems(html);
     assert.equal(items.length, 9, '三源共 9 条条目');
 
-    // 每源条目恰好出现一次
+    // 每源条目恰好出现一次（含跨源转发的《仲裁法》：两源列表各出现一次，
+    // 入库去重后聚合页只展示一条）
     const titlesOnce = [
       MOJ.card.title,
+      MOJ.gongzheng.title,
       MOJ.noAttachment.title,
       GOVCN.shared.title,
       GOVCN.native.title,
-      NPC_FIRST_TITLE,
+      NPC.first.title,
     ];
     for (const title of titlesOnce) {
       assert.equal(
@@ -224,10 +240,78 @@ describe('issue #5：源注册配置化与多源聚合', () => {
 
     // 各源机关文本并存且不串扰
     assert.match(html, /司法部立法一局 · 发布：2026-09-08 · 截止：\d{4}-\d{2}-\d{2}/);
+    assert.match(html, /司法部立法三局 · 发布：2026-09-03 · 截止：\d{4}-\d{2}-\d{2}/);
     assert.match(html, /司法部 · 发布：2026-09-01 · 截止：\d{4}-\d{2}-\d{2}/);
     assert.match(html, /国家发展改革委 · 发布：2026-09-05 · 截止：\d{4}-\d{2}-\d{2}/);
     assert.match(html, /国家铁路局 · 发布：2026-09-10 · 截止：\d{4}-\d{2}-\d{2}/);
     assert.match(html, /全国人民代表大会常务委员会法制工作委员会/);
+  });
+
+  it('三源条目全局排序：征求意见中按截止日期升序，跨源不串扰排序', async () => {
+    const html = stripSsrComments(await (await fetch(`${app.url}/`)).text());
+    const items = extractListItems(html);
+    // 全局按截止日期升序（即将截止在前），已截止条目沉底；
+    // 三个源的条目按各自截止日期交错排布，证明排序只看数据不看来源
+    assert.deepEqual(
+      items.map((item) => item.title),
+      [
+        GOVCN.native.title, // {{CN_DATE+12}}
+        GOVCN.shared.title, // {{CN_DATE+18}}（跨源去重条目）
+        NPC.first.title, // {{CN_DATE+21}}
+        MOJ.gongzheng.title, // {{CN_DATE+22}}
+        GOVCN.multiDept.title, // {{CN_DATE+26}}
+        MOJ.card.title, // {{DATE+30}}
+        MOJ.noAttachment.title, // {{DATE+44}}
+        NPC.park.title, // {{CN_DATE+45}}
+        NPC.fishery.title, // {{CN_DATE-10}} 已截止，沉底
+      ],
+    );
+
+    const badges = [...html.matchAll(/<span[^>]*notice-status-badge[^>]*>([^<]+)<\/span>/g)].map(
+      (match) => match[1],
+    );
+    assert.deepEqual(badges, [
+      '征求意见中',
+      '征求意见中',
+      '征求意见中',
+      '征求意见中',
+      '征求意见中',
+      '征求意见中',
+      '征求意见中',
+      '征求意见中',
+      '已截止',
+    ]);
+  });
+
+  it('跨源去重条目详情页：同一原文 URL 只有一条，字段由后抓取源补全', async () => {
+    const noticeId = await fetchDetailIdByTitle(GOVCN.shared.title);
+    const html = await (await fetch(`${app.url}/notices/${noticeId}`)).text();
+
+    assert.match(html, new RegExp(GOVCN.shared.title));
+    // 条目由 moj 列表首次入库（sourceId 保留 moj），字段随后被 govcn 详情解析覆盖补全
+    assert.match(html, /发布机关[\s\S]{0,40}司法部/, '机关来自 govcn 关联部门框');
+    assert.match(html, new RegExp(SOURCE_NAME.moj), '来源 = 首个收录渠道 moj');
+    assert.match(html, /2026-09-02/, '发布日期');
+
+    const { iso, days } = await fixtureGovcnDeadline(GOVCN.shared.detailPath);
+    assert.match(
+      html,
+      new RegExp(`截止日期[\\s\\S]{0,40}${iso}`),
+      '截止日期来自 govcn 截止日期框（moj 列表转发行无截止日期）',
+    );
+    assert.match(html, new RegExp(`剩 ${days} 天`));
+
+    assert.match(html, new RegExp(GOVCN.shared.bodyMarker), '正文来自 govcn 详情页');
+    for (const name of GOVCN.shared.attachments) {
+      assert.match(html, new RegExp(name.replace(/[().]/g, '\\$&')), `附件：${name}`);
+    }
+
+    // 官方原文 = govcn 发布页快照地址（即两个源列表里共同的原文 URL）
+    const officialUrl = `${fixtureUrl}${GOVCN.shared.detailPath}`;
+    assert.ok(html.includes(`href="${officialUrl}"`), '官方原文链接 = govcn 发布页地址');
+    const go = await fetch(`${app.url}/go/${noticeId}`, { redirect: 'manual' });
+    assert.equal(go.status, 302);
+    assert.equal(go.headers.get('location'), officialUrl);
   });
 
   it('moj 卡片置顶条目详情页：面包屑机关、截止提示条日期、正文与文末附件区', async () => {
@@ -305,14 +389,20 @@ describe('issue #5：源注册配置化与多源聚合', () => {
     assert.match(html, new RegExp(`截止日期[\\s\\S]{0,40}${iso}`));
   });
 
-  it('重复抓取幂等：三源条目数不变、去重按原文 URL 命中更新', async () => {
+  it('重复抓取幂等：三源条目数不变，跨源去重条目不重复', async () => {
     const second = await runWorkerOnce();
     assert.equal(second.code, 0, `worker 应正常退出，输出：${second.output}`);
     assert.match(second.output, /源 npc 抓取完成：列表 3 条，新增 0，更新 3/);
-    assert.match(second.output, /源 moj 抓取完成：列表 3 条，新增 0，更新 3/);
+    assert.match(second.output, /源 moj 抓取完成：列表 4 条，新增 0，更新 4/);
     assert.match(second.output, /源 govcn 抓取完成：列表 3 条，新增 0，更新 3/);
 
-    const items = extractListItems(await (await fetch(`${app.url}/`)).text());
+    const html = stripSsrComments(await (await fetch(`${app.url}/`)).text());
+    const items = extractListItems(html);
     assert.equal(items.length, 9, '重复抓取不应产生重复条目');
+    assert.equal(
+      items.filter((item) => item.title === GOVCN.shared.title).length,
+      1,
+      '跨源去重条目仍只展示一条',
+    );
   });
 });
