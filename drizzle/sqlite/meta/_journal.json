@@ -50,6 +50,13 @@
       "when": 1789300000001,
       "tag": "0006_add_outbound_click_daily",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "6",
+      "when": 1789206920002,
+      "tag": "0007_add_source_health_and_alert_sends",
+      "breakpoints": true
     }
   ]
 }
