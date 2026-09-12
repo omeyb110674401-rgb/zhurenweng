@@ -18,11 +18,11 @@
 ## 目录结构
 
 ```
-src/app/        Next.js 应用（页面）
+src/app/        Next.js 应用（列表 / 详情 /go/<id> 出站跳转）
 src/db/         数据层：schema（sqlite / postgres 镜像）、client、repo
-src/lib/        端口接口（ports.ts）与适配器（stubs / 未来真实实现）
-src/sources/    源适配器注册表（数据接入唯一扩展点）
-worker/         worker 进程：registry.ts（任务注册表）+ index.ts（主循环）
+src/lib/        端口接口（ports.ts）、日期工具（dates.ts）与适配器（stubs）
+src/sources/    源适配器注册表 + adapters/（数据接入唯一扩展点）
+worker/         worker 进程：registry.ts（任务注册表）+ index.ts（主循环）+ jobs/（抓取等任务）
 fixtures/       各源页面快照，fixtures/<source>/*.html
 tests/e2e/      端到端测试（node:test）与 fixture 源站 helper
 scripts/        fixture 源站 CLI、迁移 CLI
@@ -49,7 +49,15 @@ npm run dev            # http://localhost:3000
 | `MAILER_PROVIDER` | `stub` | `stub`（捕获邮件）/ `smtp`（邮件切片交付） |
 | `MAILER_OUTBOX_FILE` | （空） | stub 邮件追加写入的 JSONL 文件，供跨进程断言 |
 | `FIXTURES_DIR` / `FIXTURE_SERVER_PORT` | `fixtures/` / `4170` | fixture 源站目录与端口 |
-| `WORKER_INTERVAL_MS` / `WORKER_ONCE` | `60000` / （空） | worker 调度间隔 / 单轮模式 |
+| `WORKER_INTERVAL_MS` / `WORKER_ONCE` | `60000` / （空） | worker 调度间隔（生产 compose 设为每日） / 单轮模式 |
+| `SOURCES_FIXTURE_BASE` | （空） | 设置后所有源适配器的列表页 URL 重写为 `<base>/<源ID>/list.html`（测试注入 fixture 源站；不设则抓取真实源站） |
+
+本地验证抓取管线（fixture 注入）：
+
+```bash
+npm run fixtures   # 终端 1：本地 fixture 源站 http://127.0.0.1:4170
+SOURCES_FIXTURE_BASE=http://127.0.0.1:4170 WORKER_ONCE=1 npm run worker   # 终端 2：单轮抓取
+```
 
 ## 运行端到端测试
 
@@ -62,7 +70,11 @@ npm run e2e            # 等价命令：npm test
 
 - 首页 200，含「主人翁」品牌与公示列表空态；
 - fixture 源站按 `fixtures/<source>/` 目录服务快照（404 / 路径穿越防护）；
-- stub LLM 返回固定结构化摘要、stub 邮件按 JSONL 捕获发出的邮件。
+- stub LLM 返回固定结构化摘要、stub 邮件按 JSONL 捕获发出的邮件；
+- **issue #3 全链路场景**（`tests/e2e/npc-pipeline.test.mjs`）：真实 worker 进程
+  抓取 `fixtures/npc/` 快照 → 幂等入库 → 列表页倒计时 / 排序 / 状态徽标 →
+  详情页字段与「摘要生成中」占位 → `/go/<id>` 302 至官方原文并计数 →
+  重复抓取条目数不变。
 
 数据库迁移在应用首连时自动应用（`drizzle/<driver>/`）；CI（GitHub Actions）运行
 lint 与 e2e 两个 job，同样只依赖 npm。
@@ -73,7 +85,8 @@ lint 与 e2e 两个 job，同样只依赖 npm。
 
 1. `fixtures/<source>/` 放入列表页 / 详情页 HTML 快照（`<source>` 即源 ID）；
 2. 在 `src/sources/registry.ts` 的 `sourceAdapters` 数组登记适配器；
-3. 在 `tests/e2e/` 为该源新增端到端场景，`listUrl` 指向 fixture 源站地址。
+3. 在 `tests/e2e/` 为该源新增端到端场景，经 `SOURCES_FIXTURE_BASE` 把抓取指向
+   fixture 源站。
 
 ## 扩展点约定（并行切片必须遵守）
 
