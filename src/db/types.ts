@@ -54,6 +54,33 @@ export interface SourceRecord {
   lastSuccessAt: string | null;
 }
 
+/** 提醒档（issue #7）：截止前 7 天 / 3 天各一次 */
+export type ReminderStage = 'd7' | 'd3';
+
+/**
+ * 邮件订阅（double opt-in，issue #7）。
+ * 未确认（confirmed=false）的订阅绝不接收任何提醒；退订后不再发送任何邮件。
+ */
+export interface SubscriptionRecord {
+  id: string;
+  /** 仅存储订阅邮箱（PRD 合规姿态），统一小写 */
+  email: string;
+  /** 关键词规则：命中条目标题或正文 */
+  keywords: string[];
+  /** 领域规则：命中条目领域标签 */
+  categories: string[];
+  /** false = 待确认 / true = 已确认 */
+  confirmed: boolean;
+  /** 确认令牌（确认邮件链接） */
+  confirmToken: string;
+  /** 一键退订令牌（所有邮件底部链接） */
+  unsubscribeToken: string;
+  confirmedAt: string | null;
+  unsubscribedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
 /** 安全解析 JSON 列（解析失败返回 null，不抛出）。 */
 export function safeParseJson(text: string | null): unknown {
   if (text === null || text === '') return null;

@@ -12,6 +12,10 @@ fixtures/
   npc-law-drafts/            # issue #2 的占位快照，仅供 fixture 源站冒烟场景使用
     list.html
     detail-fl-001.html
+  e2e-reminders/             # issue #7 截止提醒场景专用（截止日期 = 今天 +7 / +3 天，
+    npc/                     #   条目按订阅关键词 / 领域规则设计命中与不命中对照）
+      list.html
+      c2/c30834/*.html
 ```
 
 ## 日期令牌（fixture 源站服务时替换）

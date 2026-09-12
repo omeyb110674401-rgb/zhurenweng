@@ -470,3 +470,86 @@ body {
   font-size: 13px;
   color: #9a3412;
 }
+
+/* ===== 订阅与退订（issue #7）===== */
+
+.form-banner {
+  border-radius: 8px;
+  padding: 12px 16px;
+  font-size: 14px;
+  margin: 0 0 16px;
+}
+
+.form-banner-ok {
+  background: #ecfdf5;
+  border: 1px solid #a7f3d0;
+  color: #065f46;
+}
+
+.form-banner-error {
+  background: #fef2f2;
+  border: 1px solid #fecaca;
+  color: #991b1b;
+}
+
+.subscribe-section h2 {
+  font-size: 20px;
+  margin: 0 0 4px;
+}
+
+.subscribe-form {
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 20px;
+  margin-top: 12px;
+}
+
+.form-field {
+  margin: 0 0 16px;
+  border: none;
+  padding: 0;
+}
+
+.form-field label,
+.form-field legend {
+  display: block;
+  font-size: 13px;
+  font-weight: 600;
+  margin-bottom: 6px;
+}
+
+.form-field input[type='email'],
+.form-field input[type='text'] {
+  width: 100%;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 8px 10px;
+  font-size: 14px;
+  font-family: inherit;
+}
+
+.category-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+}
+
+.category-option {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 400 !important;
+}
+
+.result-card {
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 20px;
+}
+
+.result-card a {
+  color: var(--accent);
+}

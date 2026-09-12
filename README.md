@@ -49,8 +49,10 @@ npm run dev            # http://localhost:3000
 | `GLM_API_KEY` / `GLM_API_BASE` / `GLM_MODEL` | （空）/ `https://open.bigmodel.cn/api/paas/v4` / `glm-4-flash` | GLM 大模型接入配置（`LLM_PROVIDER=glm` 时必填 Key） |
 | `LLM_STUB_FAILURES` / `LLM_STUB_CALLS_FILE` | （空） | stub LLM 注入失败（前 N 次调用抛错，或 `always`）/ stub 调用日志 JSONL（跨进程断言调用次数） |
 | `SUMMARY_MAX_RETRIES` / `SUMMARY_RETRY_DELAY_MS` | `3` / `500` | 摘要失败重试次数 / 指数退避基数（毫秒） |
-| `MAILER_PROVIDER` | `stub` | `stub`（捕获邮件）/ `smtp`（邮件切片交付） |
+| `MAILER_PROVIDER` | `stub` | `stub`（捕获邮件）/ `smtp`（nodemailer 生产实现） |
 | `MAILER_OUTBOX_FILE` | （空） | stub 邮件追加写入的 JSONL 文件，供跨进程断言 |
+| `SMTP_HOST` / `SMTP_PORT` / `SMTP_SECURE` / `SMTP_USER` / `SMTP_PASS` / `MAIL_FROM` | （空） | `MAILER_PROVIDER=smtp` 时的 SMTP 接入配置（`SMTP_SECURE=1` 走 TLS 直连，端口 465 默认 TLS） |
+| `APP_BASE_URL` | `http://localhost:3000` | 邮件内确认 / 退订 / 详情链接的站点基础地址 |
 | `FIXTURES_DIR` / `FIXTURE_SERVER_PORT` | `fixtures/` / `4170` | fixture 源站目录与端口 |
 | `WORKER_INTERVAL_MS` / `WORKER_ONCE` | `60000` / （空） | worker 调度间隔（生产 compose 设为每日） / 单轮模式 |
 | `SOURCES_FIXTURE_BASE` | （空） | 设置后所有源适配器的列表页 URL 重写为 `<base>/<源ID>/list.html`（测试注入 fixture 源站；不设则抓取真实源站） |
@@ -82,6 +84,36 @@ npm run e2e            # 等价命令：npm test
   全部失败 → 每条目首调 + 3 次重试（调用日志精确计数）→ `failed_review` 转人工
   复核占位，且不再自动重试；追加新条目 → 成功路径 → 详情页五段式摘要 + 显著
   AI 标注 + 各段原文引用（一键跳官方原文）+ 占位消失。
+- **issue #7 邮件订阅与截止提醒场景**（`tests/e2e/deadline-reminders.test.mjs`）：
+  `/subscribe` 表单校验 → double opt-in 确认邮件（outbox 断言）→ 未确认时
+  触发提醒任务不发送 → 确认后触发：截止前 7 天 / 3 天各一封，内容含标题、
+  剩余天数、截止日期、站内详情与官方原文链接（关键词命中标题 / 正文与领域
+  命中标签均覆盖）→ 重跑不重发（`reminder_sends` 去重）→ 规则外条目不发 →
+  一键退订立即生效，退订后新条目不再发送。
+
+本地手动验证订阅提醒全链路：
+
+```bash
+npm run fixtures   # 终端 1：本地 fixture 源站 http://127.0.0.1:4170
+APP_BASE_URL=http://localhost:3000 npm run dev                        # 终端 2：应用（/subscribe 订阅）
+SOURCES_FIXTURE_BASE=http://127.0.0.1:4170 APP_BASE_URL=http://localhost:3000 WORKER_ONCE=1 npm run worker   # 终端 3：单轮抓取 + 提醒
+```
+
+## 邮件订阅与截止提醒（issue #7）
+
+- **订阅**（`/subscribe`）：邮箱 + 关键词 / 领域规则，double opt-in —— 提交后
+  先发确认邮件（`/subscribe/confirm?token=…`），点击确认订阅才生效；未确认的
+  订阅绝不接收任何提醒。重复提交同邮箱只更新规则（不重复建行），并轮换确认
+  token 使旧链接失效。
+- **提醒**（worker 任务 `send-deadline-reminders`，每日调度）：计算截止日期
+  恰为今天 + 7 / + 3 天的「征求意见中」条目，与每个已确认（未退订）订阅的
+  规则匹配（关键词命中标题 / 正文，或领域命中条目标签），发送提醒邮件（标题、
+  剩余天数、截止日期、站内详情链接、官方原文提意链接）。
+- **去重**：`reminder_sends` 表以（条目 × 提醒档 d7/d3 × 订阅）为复合主键，
+  同一条目同一档对同一订阅只发一次，任务重复运行不重发。
+- **退订**：所有邮件底部带一键退订链接（`/unsubscribe?token=…`），点击立即
+  生效，之后不再收到任何邮件。
+- **合规**：仅存储订阅邮箱，不建用户账号；确认 / 提醒邮件均可一键退订。
 
 数据库迁移在应用首连时自动应用（`drizzle/<driver>/`）；CI（GitHub Actions）运行
 lint 与 e2e 两个 job，同样只依赖 npm。
