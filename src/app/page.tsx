@@ -18,6 +18,12 @@ export default async function HomePage() {
         <p className="tagline">政府公示与征求意见信息聚合 —— 发现 · 读懂 · 行动</p>
         {/* 站内搜索（issue #8）：GET 表单提交到 /search?q=…，不依赖客户端 JS */}
         <SearchForm />
+        {/* 站内导航（issue #11）：数据统计页入口 */}
+        <nav className="site-nav" aria-label="站内导航">
+          <a href="/stats" data-testid="stats-nav-link">
+            数据统计
+          </a>
+        </nav>
       </header>
 
       <section className="notice-section" aria-labelledby="notice-list-title">
