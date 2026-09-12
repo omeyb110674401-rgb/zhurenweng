@@ -613,3 +613,177 @@ body {
 .search-back-link:hover {
   text-decoration: underline;
 }
+
+/* ===== 版本链与条款对比（issue #10）===== */
+
+.version-line {
+  margin: 0 0 16px;
+  padding: 10px 14px;
+  font-size: 14px;
+  color: var(--ink);
+  background: #fffbeb;
+  border: 1px solid #fde68a;
+  border-radius: 8px;
+}
+
+.diff-entry-link {
+  margin-left: 8px;
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.diff-entry-link:hover {
+  text-decoration: underline;
+}
+
+.diff-banner {
+  margin: 0 0 16px;
+  padding: 12px 14px;
+  font-size: 15px;
+  font-weight: 600;
+  color: #92400e;
+  background: #fffbeb;
+  border: 1px solid #fde68a;
+  border-left: 4px solid var(--accent);
+  border-radius: 8px;
+}
+
+.diff-versions {
+  display: grid;
+  gap: 10px;
+  margin: 0 0 12px;
+}
+
+.diff-version {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 14px;
+}
+
+.diff-version-label {
+  flex-shrink: 0;
+  padding: 2px 8px;
+  font-size: 12px;
+  color: var(--ink-soft);
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+}
+
+.diff-version-title {
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.diff-version-date {
+  color: var(--ink-soft);
+}
+
+.diff-legend {
+  margin: 0 0 16px;
+  font-size: 13px;
+  color: var(--ink-soft);
+}
+
+.diff-rows {
+  display: grid;
+  gap: 10px;
+}
+
+.diff-row {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  padding: 12px 14px;
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+.diff-row-added {
+  background: #f0fdf4;
+  border-color: #bbf7d0;
+}
+
+.diff-row-removed {
+  background: #fef2f2;
+  border-color: #fecaca;
+}
+
+.diff-row-modified {
+  background: #fffbeb;
+  border-color: #fde68a;
+}
+
+.diff-row-same {
+  color: var(--ink-soft);
+  font-size: 14px;
+}
+
+.diff-badge {
+  flex-shrink: 0;
+  padding: 2px 8px;
+  font-size: 12px;
+  font-weight: 600;
+  border-radius: 999px;
+}
+
+.diff-badge-added {
+  color: #166534;
+  background: #dcfce7;
+}
+
+.diff-badge-removed {
+  color: #991b1b;
+  background: #fee2e2;
+}
+
+.diff-badge-modified {
+  color: #92400e;
+  background: #fef3c7;
+}
+
+.diff-badge-same {
+  color: var(--ink-soft);
+  background: var(--paper);
+}
+
+.diff-text {
+  min-width: 0;
+  white-space: pre-line;
+}
+
+.diff-side {
+  margin: 0 0 6px;
+}
+
+.diff-side:last-child {
+  margin-bottom: 0;
+}
+
+.diff-side-old {
+  color: var(--ink-soft);
+}
+
+.diff-del {
+  color: #991b1b;
+  background: #fecaca;
+  text-decoration: line-through;
+}
+
+.diff-ins {
+  color: #166534;
+  background: #bbf7d0;
+  text-decoration: none;
+}
+
+.diff-empty {
+  padding: 20px;
+  font-size: 14px;
+  color: var(--ink-soft);
+  background: #fff;
+  border: 1px dashed var(--line);
+  border-radius: 8px;
+}

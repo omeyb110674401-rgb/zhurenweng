@@ -56,6 +56,19 @@ export default async function NoticeDetailPage({ params }: NoticeDetailPageProps
           </dl>
         </header>
 
+        {notice.versionOf ? (
+          <p className="version-line" data-testid="version-line">
+            这是第 {notice.versionSeq ?? 1} 轮公示。
+            <Link
+              href={`/notices/${notice.id}/diff`}
+              className="diff-entry-link"
+              data-testid="compare-previous-link"
+            >
+              对比上一版
+            </Link>
+          </p>
+        ) : null}
+
         {summaryInfo?.aiSummaryJson ? (
           <SummaryView
             notice={notice}
