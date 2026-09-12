@@ -1,4 +1,4 @@
-import { integer, sqliteTable, text } from 'drizzle-orm/sqlite-core';
+import { integer, primaryKey, sqliteTable, text } from 'drizzle-orm/sqlite-core';
 
 /**
  * SQLite schema（开发 / 测试方言，ADR-0001）。
@@ -57,3 +57,55 @@ export const notices = sqliteTable('notices', {
   /** 出站提意点击数（北极星指标） */
   outboundClicks: integer('outbound_clicks').notNull().default(0),
 });
+
+/**
+ * 邮件订阅（issue #7，double opt-in）。
+ *
+ * - 邮箱唯一：重复订阅同邮箱更新规则而非重复建行；
+ * - confirmed = 0（待确认）/ 1（已生效）：未确认的订阅绝不接收任何提醒；
+ * - 确认 / 退订各持一个独立随机 token（出现在邮件链接里）；
+ * - unsubscribed_at 非空即已退订，之后不再收到任何邮件（行保留，便于审计与防重发）。
+ */
+export const subscriptions = sqliteTable('subscriptions', {
+  id: text('id').primaryKey(),
+  email: text('email').notNull().unique(),
+  /** JSON 存 TEXT：关键词规则数组（命中标题或正文） */
+  keywordsJson: text('keywords_json').notNull().default('[]'),
+  /** JSON 存 TEXT：领域规则数组（命中条目领域标签） */
+  categoriesJson: text('categories_json').notNull().default('[]'),
+  /** 0 = 待确认 / 1 = 已确认（双方言交集内没有 boolean，用 INTEGER 表达） */
+  confirmed: integer('confirmed').notNull().default(0),
+  /** 订阅确认令牌（确认邮件链接） */
+  confirmToken: text('confirm_token').notNull().unique(),
+  /** 一键退订令牌（所有邮件底部链接） */
+  unsubscribeToken: text('unsubscribe_token').notNull().unique(),
+  /** 确认时间，ISO 8601；未确认为 null */
+  confirmedAt: text('confirmed_at'),
+  /** 退订时间，ISO 8601；未退订为 null */
+  unsubscribedAt: text('unsubscribed_at'),
+  createdAt: text('created_at').notNull(),
+  updatedAt: text('updated_at').notNull(),
+});
+
+/**
+ * 提醒发送去重记录（issue #7）：同一条目 × 同一提醒档（7 天 / 3 天）×
+ * 同一订阅只发一次。复合主键天然幂等，重复触发任务不会重发。
+ */
+export const reminderSends = sqliteTable(
+  'reminder_sends',
+  {
+    noticeId: text('notice_id')
+      .notNull()
+      .references(() => notices.id),
+    subscriptionId: text('subscription_id')
+      .notNull()
+      .references(() => subscriptions.id),
+    /** 提醒档：d7 = 截止前 7 天 / d3 = 截止前 3 天 */
+    reminderStage: text('reminder_stage').notNull(),
+    /** 发送时间，ISO 8601 */
+    sentAt: text('sent_at').notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.noticeId, table.reminderStage, table.subscriptionId] }),
+  ],
+);
