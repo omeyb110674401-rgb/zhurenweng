@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import type { NoticeStatus } from '../../src/db/types.ts';
 import { upsertNotice } from '../../src/db/repo/notices.ts';
 import { upsertSource } from '../../src/db/repo/sources.ts';
+import { syncNoticesToSearchIndex } from '../../src/lib/search/sync.ts';
 import { localDateIso } from '../../src/lib/dates.ts';
 import {
   sourceAdapters,
@@ -118,10 +119,13 @@ export const crawlNoticesJob: Job = {
 
         let inserted = 0;
         let updated = 0;
+        // 本轮新增 / 更新的条目 id：入库与更新时同步检索索引（issue #8）
+        const changedNoticeIds: string[] = [];
         for (const notice of listItems) {
           const normalized = await enrichWithDetail(adapter, notice, ctx);
+          const id = noticeIdFor(normalized.url);
           const result = await upsertNotice({
-            id: noticeIdFor(normalized.url),
+            id,
             sourceId: adapter.id,
             title: normalized.title,
             agency: normalized.agency,
@@ -139,6 +143,7 @@ export const crawlNoticesJob: Job = {
           } else {
             updated += 1;
           }
+          changedNoticeIds.push(id);
         }
 
         await upsertSource({
@@ -151,6 +156,14 @@ export const crawlNoticesJob: Job = {
         ctx.logger(
           `源 ${adapter.id} 抓取完成：列表 ${listItems.length} 条，新增 ${inserted}，更新 ${updated}`,
         );
+        // 索引同步钩子（issue #8）：同步失败只降级记日志，由重建任务兜底，不中断抓取
+        try {
+          await syncNoticesToSearchIndex(changedNoticeIds, ctx.logger);
+        } catch (error) {
+          ctx.logger(
+            `源 ${adapter.id} 检索索引同步失败（由重建任务兜底）：${errorMessage(error)}`,
+          );
+        }
       } catch (error) {
         await upsertSource({
           id: adapter.id,

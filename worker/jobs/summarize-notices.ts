@@ -1,4 +1,5 @@
 import { createLlmPort } from '../../src/lib/ports.ts';
+import { syncNoticesToSearchIndex } from '../../src/lib/search/sync.ts';
 import {
   buildQuotedSummary,
   llmModelName,
@@ -97,6 +98,15 @@ export const summarizeNoticesJob: Job = {
         });
         succeeded += 1;
         ctx.logger(`条目 ${target.id} 摘要完成（model=${model}）`);
+        // 索引同步钩子（issue #8）：摘要落库后重刷该条目，摘要文本即刻可被检索；
+        // 失败只降级记日志，由重建任务兜底，不影响摘要主管线
+        try {
+          await syncNoticesToSearchIndex([target.id], ctx.logger);
+        } catch (error) {
+          ctx.logger(
+            `条目 ${target.id} 检索索引同步失败（由重建任务兜底）：${errorMessage(error)}`,
+          );
+        }
       } catch (error) {
         await markNoticeSummaryForReview(target.id);
         sentToReview += 1;
