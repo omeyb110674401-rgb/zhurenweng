@@ -15,6 +15,8 @@ export interface PendingSummaryTarget {
   title: string;
   url: string;
   bodyText: string | null;
+  /** 所属源 ID（issue #12 告警去重键的一部分） */
+  sourceId: string;
 }
 
 /**
@@ -30,6 +32,7 @@ export async function listNoticesForSummary(limit = 50): Promise<PendingSummaryT
       title: notices.title,
       url: notices.url,
       bodyText: notices.bodyText,
+      sourceId: notices.sourceId,
     })
     .from(notices)
     .where(
@@ -41,6 +44,48 @@ export async function listNoticesForSummary(limit = 50): Promise<PendingSummaryT
     )
     .orderBy(asc(notices.fetchedAt), asc(notices.id))
     .limit(limit);
+}
+
+/**
+ * 人工复核队列（issue #12）：全部 summary_status='failed_review' 的条目，
+ * 按抓取时间升序（最早失败的最先复核）。
+ */
+export async function listNoticesForReview(limit = 50): Promise<PendingSummaryTarget[]> {
+  const db = await getDb();
+  return db
+    .select({
+      id: notices.id,
+      title: notices.title,
+      url: notices.url,
+      bodyText: notices.bodyText,
+      sourceId: notices.sourceId,
+    })
+    .from(notices)
+    .where(eq(notices.summaryStatus, 'failed_review'))
+    .orderBy(asc(notices.fetchedAt), asc(notices.id))
+    .limit(limit);
+}
+
+/**
+ * 复核队列「重置重试」（issue #12）：清空摘要列并置回 pending，让摘要任务
+ * 在下一轮自动重新生成。仅对 failed_review 状态的条目生效，条目不存在或
+ * 不在待复核状态返回 false。
+ */
+export async function resetNoticeSummaryForRetry(id: string): Promise<boolean> {
+  const db = await getDb();
+  const existing = await db
+    .select({ id: notices.id, status: notices.summaryStatus })
+    .from(notices)
+    .where(eq(notices.id, id))
+    .limit(1);
+  if (existing.length === 0 || existing[0].status !== 'failed_review') {
+    return false;
+  }
+  await db
+    .update(notices)
+    .set({ aiSummaryJson: null, summaryModel: null, summaryStatus: 'pending' })
+    .where(eq(notices.id, id));
+  return true;
 }
 
 /** 详情页 / 复核队列所需的摘要列信息；条目不存在返回 null。 */

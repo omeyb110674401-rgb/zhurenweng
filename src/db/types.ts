@@ -56,6 +56,12 @@ export interface SourceRecord {
   scheduleConfig: Record<string, unknown>;
   healthy: boolean;
   lastSuccessAt: string | null;
+  /** 最近一次管线错误信息（issue #12 源健康看板）；成功不清空，null = 从未失败 */
+  lastErrorMessage: string | null;
+  /** 最近一次错误时间，ISO 8601 */
+  lastErrorAt: string | null;
+  /** false = 已停用（抓取任务跳过该源） */
+  enabled: boolean;
 }
 
 /** 提醒档（issue #7）：截止前 7 天 / 3 天各一次 */
