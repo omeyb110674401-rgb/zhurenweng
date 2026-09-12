@@ -15,7 +15,8 @@ import { createFixtureServer } from './helpers/fixture-server.mjs';
  * 替换，保证「征求意见中 / 已截止」与倒计时断言不随运行日期衰减）
  *   → 触发抓取（真实 worker 进程，WORKER_ONCE=1，SOURCES_FIXTURE_BASE 注入 fixture 源站）
  *   → 列表页：按截止日期升序（即将截止在前）+ 倒计时 + 状态徽标
- *   → 详情页：全部字段 + 官方原文链接 + 提意指引 + 「摘要生成中」占位
+ *   → 详情页：全部字段 + 官方原文链接 + 提意指引 + AI 摘要展示（issue #4：
+ *     同轮 worker 内完成摘要；已截止条目保持「摘要生成中」占位）
  *   → /go/<id>：302 至官方原文且点击计数 +1
  *   → 重复抓取：条目数不变（幂等）
  *
@@ -169,7 +170,7 @@ describe('issue #3：全国人大源 → 入库 → 列表/详情 → 出站跳�
     assert.match(visibleText, /发布：2026-08-30/);
   });
 
-  it('详情页：全部字段、官方原文链接、分步提意指引与「摘要生成中」占位', async () => {
+  it('详情页：全部字段、官方原文链接、分步提意指引与 AI 摘要展示', async () => {
     const listResponse = await fetch(`${app.url}/`);
     const listHtml = await listResponse.text();
     const items = extractListItems(listHtml);
@@ -213,9 +214,21 @@ describe('issue #3：全国人大源 → 入库 → 列表/详情 → 出站跳�
     assert.match(html, /分步提意指引/);
     assert.match(html, /本站只引流，不代替官方受理意见/);
 
-    // 摘要位：占位（AI 摘要属 issue #4）
-    assert.match(html, /摘要生成中/);
-    assert.match(html, /AI 摘要/);
+    // 摘要位（issue #4）：同一 worker 轮次内抓取后即执行摘要任务（stub LLM），
+    // 未截止条目详情页渲染五段式摘要 + 显著 AI 标注，不再显示占位。
+    assert.match(html, /data-testid="ai-summary"/, '渲染 AI 摘要卡片');
+    assert.match(html, /AI 生成，仅供参考，以官方原文为准/, '显著的 AI 生成标注');
+    assert.match(html, /【stub】这是一份政府公示征求意见稿（固定测试摘要）。/, '五段式摘要内容');
+    assert.match(html, /data-testid="summary-quote"/, '摘要附原文引用（可点击跳官方原文）');
+    assert.ok(!html.includes('摘要生成中'), '摘要完成后占位消失');
+
+    // 已截止条目不参与摘要（issue #4）：仍显示「摘要生成中」占位
+    const closedHtml = await (
+      await fetch(`${app.url}/notices/${extractNoticeId(items[2].href)}`)
+    ).text();
+    assert.match(closedHtml, /data-testid="summary-placeholder"/, '占位块保留');
+    assert.match(closedHtml, /摘要生成中/);
+    assert.ok(!closedHtml.includes('待人工复核'), '已截止条目未被尝试摘要，非待复核状态');
   });
 
   it('出站跳转：/go/<id> 记录点击并 302 到官方原文 URL', async () => {

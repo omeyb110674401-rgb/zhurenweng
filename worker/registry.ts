@@ -6,6 +6,7 @@
  */
 
 import { crawlNoticesJob } from './jobs/crawl-notices.ts';
+import { summarizeNoticesJob } from './jobs/summarize-notices.ts';
 
 export interface JobContext {
   /** 统一前缀的日志函数 */
@@ -22,4 +23,4 @@ export interface Job {
 }
 
 /** 注册表：所有 worker 任务在此登记，主循环按此数组调度。 */
-export const jobs: Job[] = [crawlNoticesJob];
+export const jobs: Job[] = [crawlNoticesJob, summarizeNoticesJob];

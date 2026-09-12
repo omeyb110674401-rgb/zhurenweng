@@ -1,0 +1,1 @@
+ALTER TABLE `notices` ADD `summary_status` text DEFAULT 'pending' NOT NULL;

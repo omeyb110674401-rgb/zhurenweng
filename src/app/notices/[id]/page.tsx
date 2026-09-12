@@ -1,8 +1,10 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { getNoticeById } from '@/db/repo/notices';
+import { getNoticeSummary } from '@/db/repo/summaries';
 import { getSourceById } from '@/db/repo/sources';
 import { Countdown, StatusBadge, formatDate } from '@/app/_lib/notice-display';
+import { SummaryPlaceholder, SummaryView } from '@/app/_lib/summary-view';
 
 // 详情数据随抓取管线更新，服务端实时渲染。
 export const dynamic = 'force-dynamic';
@@ -18,6 +20,8 @@ export default async function NoticeDetailPage({ params }: NoticeDetailPageProps
     notFound();
   }
   const source = await getSourceById(notice.sourceId);
+  // 摘要列（issue #4）：done → 渲染五段式摘要；pending / failed_review → 占位
+  const summaryInfo = await getNoticeSummary(notice.id);
 
   return (
     <main>
@@ -52,16 +56,15 @@ export default async function NoticeDetailPage({ params }: NoticeDetailPageProps
           </dl>
         </header>
 
-        <section className="summary-slot" data-testid="summary-placeholder">
-          <div className="summary-head">
-            <span className="summary-tag">AI 摘要</span>
-            <span className="summary-pending">摘要生成中</span>
-          </div>
-          <p className="summary-note">
-            本站正在为本条公示生成结构化 AI 摘要（这是什么 / 影响谁 / 关键条款 / 如何提意见）。
-            AI 生成内容将显著标注并附原文引用，仅供参考，以官方原文为准。
-          </p>
-        </section>
+        {summaryInfo?.aiSummaryJson ? (
+          <SummaryView
+            notice={notice}
+            summaryJson={summaryInfo.aiSummaryJson}
+            summaryModel={summaryInfo.summaryModel}
+          />
+        ) : (
+          <SummaryPlaceholder status={summaryInfo?.summaryStatus ?? 'pending'} />
+        )}
 
         <section className="action-slot">
           <a
