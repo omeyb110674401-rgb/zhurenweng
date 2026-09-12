@@ -57,6 +57,28 @@ export const notices = pgTable('notices', {
 });
 
 /**
+ * 出站提意点击按日聚合（issue #11，北极星指标）。
+ *
+ * /go/<id> 每次点击写两处：notices.outbound_clicks 总计数（issue #5 起累计）+
+ * 本表按（条目 × 本地日历日）+1。只记录条目与日期，不记录任何个人身份
+ * （无 IP、无 Cookie、无账号）；复合主键天然幂等，同一日重复点击按行累加，
+ * 统计页据此做按条目 / 按日期的 SQL 聚合。
+ */
+export const outboundClickDaily = pgTable(
+  'outbound_click_daily',
+  {
+    noticeId: text('notice_id')
+      .notNull()
+      .references(() => notices.id),
+    /** 点击日期，本地日历日（YYYY-MM-DD） */
+    clickDate: text('click_date').notNull(),
+    /** 当日点击次数 */
+    clicks: integer('clicks').notNull().default(0),
+  },
+  (table) => [primaryKey({ columns: [table.noticeId, table.clickDate] })],
+);
+
+/**
  * 邮件订阅（issue #7，double opt-in）。
  *
  * - 邮箱唯一：重复订阅同邮箱更新规则而非重复建行；

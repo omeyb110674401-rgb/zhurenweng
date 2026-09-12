@@ -36,6 +36,13 @@
       "when": 1789216000000,
       "tag": "0004_add_notice_search_index",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1789202850866,
+      "tag": "0005_add_outbound_click_daily",
+      "breakpoints": true
     }
   ]
 }
