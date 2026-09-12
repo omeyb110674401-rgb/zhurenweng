@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>法律草案征求意见_中国人大网</title>
+  </head>
+  <body>
+    <!--
+      fixture 快照（合成数据，issue #7 截止提醒 E2E 专用）：全国人大网
+      「法律草案征求意见」列表页，仿 npc.gov.cn 真实页面结构。
+      E2E（tests/e2e/deadline-reminders.test.mjs）会先把本目录拷贝到临时目录，
+      经 fixture 源站以 SOURCES_FIXTURE_BASE 提供给抓取管线；不影响 fixtures/npc/
+      的既有场景。日期令牌 {{CN_DATE±N}} 在服务时按当天日期替换，使条目截止
+      日期恰好落在「今天 + 7 天 / 今天 + 3 天」两个提醒档上。
+      发布日期为固定历史事实，不使用令牌。
+    -->
+    <div class="header">
+      <div class="logo">中国人大网</div>
+      <div class="header-nav">
+        <a href="/">首页</a>
+        <a href="/npc/c2/c30834/list.shtml">法律草案征求意见</a>
+      </div>
+    </div>
+
+    <div class="position">
+      当前位置：<a href="/">首页</a>&gt;<a href="/npc/c2/c30834/list.shtml">法律草案征求意见</a>
+    </div>
+
+    <div class="list_00">
+      <div class="list-title">法律草案征求意见</div>
+      <ul>
+        <li>
+          <a href="/npc/c2/c30834/t20260910_210001.html" target="_blank">中华人民共和国噪声污染防治法（修订草案）征求意见</a>
+          <span class="time">2026年9月10日</span>
+        </li>
+        <li>
+          <a href="/npc/c2/c30834/t20260910_210002.html" target="_blank">中华人民共和国公民身份证法（修正草案）征求意见</a>
+          <span class="time">2026年9月10日</span>
+        </li>
+        <li>
+          <a href="/npc/c2/c30834/t20260910_210003.html" target="_blank">中华人民共和国渔业法（修订草案）征求意见</a>
+          <span class="time">2026年9月10日</span>
+        </li>
+      </ul>
+    </div>
+
+    <div class="footer">
+      <p>中国人大网　版权所有</p>
+      <p>京ICP备05000001号</p>
+    </div>
+  </body>
+</html>
