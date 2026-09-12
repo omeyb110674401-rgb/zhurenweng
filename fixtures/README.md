@@ -16,6 +16,10 @@ fixtures/
     npc/                     #   条目按订阅关键词 / 领域规则设计命中与不命中对照）
       list.html
       c2/c30834/*.html
+  e2e-feed/                  # issue #6 RSS feed 场景专用（条目标题含 & / < 用于
+    npc/                     #   XML 转义断言，含已截止对照条目；与 npc/ 同构独立成目录）
+      list.html
+      c2/c30834/*.html
 ```
 
 ## 日期令牌（fixture 源站服务时替换）
