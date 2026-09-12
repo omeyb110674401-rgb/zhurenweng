@@ -1,0 +1,86 @@
+# 生产对齐工件（docs/adr/0001-local-dev-without-docker.md）：
+# web / worker / PostgreSQL / Meilisearch 四服务，与 PRD「部署」一致。
+#
+# 注意：开发机没有 Docker，本文件**在开发机上不可运行**，仅供生产部署对齐。
+# 本地开发与测试使用 SQLite + stub（npm run dev / npm run e2e），见 README。
+#
+# 说明：web 与 worker 启动前都执行 scripts/db-migrate.mjs（drizzle 迁移按
+# 迁移表幂等；首次并发启动的竞态为已知简化，生产可用单次 init 任务消除）。
+
+services:
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile.web
+    environment:
+      NODE_ENV: production
+      DB_DRIVER: postgres
+      DATABASE_URL: postgres://zhurenweng:zhurenweng@db:5432/zhurenweng
+      # LLM 与邮件在生产通过环境变量接入真实服务商（ADR-0001 第 5 条）
+      LLM_PROVIDER: glm
+      LLM_API_KEY: ${LLM_API_KEY:-}
+      LLM_API_BASE_URL: ${LLM_API_BASE_URL:-}
+      MAILER_PROVIDER: smtp
+      SMTP_URL: ${SMTP_URL:-}
+      MAIL_FROM: ${MAIL_FROM:-}
+      SEARCH_PROVIDER: meilisearch
+      MEILI_URL: http://meilisearch:7700
+      MEILI_MASTER_KEY: ${MEILI_MASTER_KEY:-}
+    ports:
+      - "3000:3000"
+    depends_on:
+      db:
+        condition: service_healthy
+      meilisearch:
+        condition: service_started
+    command: sh -c "node scripts/db-migrate.mjs && npm run start"
+
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile.worker
+    environment:
+      NODE_ENV: production
+      DB_DRIVER: postgres
+      DATABASE_URL: postgres://zhurenweng:zhurenweng@db:5432/zhurenweng
+      LLM_PROVIDER: glm
+      LLM_API_KEY: ${LLM_API_KEY:-}
+      LLM_API_BASE_URL: ${LLM_API_BASE_URL:-}
+      MAILER_PROVIDER: smtp
+      SMTP_URL: ${SMTP_URL:-}
+      MAIL_FROM: ${MAIL_FROM:-}
+      SEARCH_PROVIDER: meilisearch
+      MEILI_URL: http://meilisearch:7700
+      MEILI_MASTER_KEY: ${MEILI_MASTER_KEY:-}
+    depends_on:
+      db:
+        condition: service_healthy
+    command: sh -c "node scripts/db-migrate.mjs && npm run worker"
+
+  db:
+    image: postgres:17
+    environment:
+      POSTGRES_USER: zhurenweng
+      POSTGRES_PASSWORD: zhurenweng
+      POSTGRES_DB: zhurenweng
+    volumes:
+      - db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U zhurenweng"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  meilisearch:
+    image: getmeili/meilisearch:v1.13
+    environment:
+      MEILI_MASTER_KEY: ${MEILI_MASTER_KEY:-zhurenweng-change-me}
+      MEILI_NO_ANALYTICS: "true"
+    volumes:
+      - meili-data:/meili_data
+    ports:
+      - "7700:7700"
+
+volumes:
+  db-data:
+  meili-data:

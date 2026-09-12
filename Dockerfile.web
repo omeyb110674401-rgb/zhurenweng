@@ -1,0 +1,15 @@
+# web 服务（Next.js 生产构建）。仅生产部署使用，开发机不可运行 Docker（ADR-0001）。
+FROM node:24-slim
+
+WORKDIR /app
+
+COPY package.json package-lock.json ./
+RUN npm ci
+
+COPY . .
+RUN npm run build
+
+ENV NODE_ENV=production
+EXPOSE 3000
+
+CMD ["npm", "run", "start"]

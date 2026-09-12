@@ -1,0 +1,17 @@
+# worker 服务（与 web 同仓的后台任务进程）。仅生产部署使用，开发机不可运行 Docker。
+FROM node:24-slim
+
+WORKDIR /app
+
+COPY package.json package-lock.json ./
+RUN npm ci
+
+# worker 运行时依赖的源码、迁移与脚本（Node 24 原生类型剥离直接运行 TS）
+COPY src ./src
+COPY worker ./worker
+COPY drizzle ./drizzle
+COPY scripts ./scripts
+
+ENV NODE_ENV=production
+
+CMD ["npm", "run", "worker"]
