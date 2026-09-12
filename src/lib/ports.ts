@@ -1,3 +1,4 @@
+import { GlmLlm } from './adapters/glm-llm.ts';
 import { StubLlm } from './adapters/stubs/stub-llm.ts';
 import { StubMailer } from './adapters/stubs/stub-mailer.ts';
 
@@ -76,9 +77,8 @@ export function createLlmPort(): LlmPort {
     case 'stub':
       return new StubLlm();
     case 'glm':
-      throw new Error(
-        'GLM LLM 适配器尚未实现（AI 摘要切片交付）；本地与测试请设 LLM_PROVIDER=stub',
-      );
+      // GLM 系列（智谱开放平台）：GLM_API_KEY / GLM_API_BASE / GLM_MODEL 配置，见 adapters/glm-llm.ts
+      return new GlmLlm();
     default:
       throw new Error(`未知的 LLM_PROVIDER "${provider}"（可选：stub | glm）`);
   }
