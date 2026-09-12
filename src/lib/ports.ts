@@ -2,6 +2,8 @@ import { GlmLlm } from './adapters/glm-llm.ts';
 import { StubLlm } from './adapters/stubs/stub-llm.ts';
 import { StubMailer } from './adapters/stubs/stub-mailer.ts';
 import { createSmtpMailerFromEnv } from './adapters/smtp-mailer.ts';
+import { LocalSearch } from './search/local-search.ts';
+import { createMeilisearchSearchFromEnv } from './search/meilisearch-search.ts';
 
 /**
  * 端口（Port）定义 —— 生产实现与测试 stub 之间的接缝（ADR-0001）。
@@ -64,10 +66,15 @@ export interface SearchHit {
   title: string;
 }
 
-/** SearchPort：生产实现为 Meilisearch 适配器，开发 / 测试为本地实现（检索切片交付）。 */
+/**
+ * SearchPort：生产实现为 Meilisearch 适配器，开发 / 测试为本地实现（检索切片交付）。
+ * `index()` 为幂等 upsert（同 id 先删后写）；`remove()` 在条目从库中删除时同步
+ * 清理索引（当前管线只有 upsert，无删除路径，接口先行以固化契约）。
+ */
 export interface SearchPort {
   readonly provider: string;
   index(documents: SearchDocument[]): Promise<void>;
+  remove(ids: string[]): Promise<void>;
   search(query: string, limit?: number): Promise<SearchHit[]>;
 }
 
@@ -99,5 +106,22 @@ export function createMailerPort(): MailerPort {
       return createSmtpMailerFromEnv();
     default:
       throw new Error(`未知的 MAILER_PROVIDER "${provider}"（可选：stub | smtp）`);
+  }
+}
+
+/**
+ * 按环境变量创建检索端口（issue #8）：
+ * - local（默认）：SQLite FTS5 / PG ILIKE 本地实现，开发与测试零外部依赖；
+ * - meilisearch：生产适配器，配置 MEILI_HOST / MEILI_API_KEY / MEILI_INDEX_UID。
+ */
+export function createSearchPort(): SearchPort {
+  const provider = process.env.SEARCH_PROVIDER ?? 'local';
+  switch (provider) {
+    case 'local':
+      return new LocalSearch();
+    case 'meilisearch':
+      return createMeilisearchSearchFromEnv();
+    default:
+      throw new Error(`未知的 SEARCH_PROVIDER "${provider}"（可选：local | meilisearch）`);
   }
 }

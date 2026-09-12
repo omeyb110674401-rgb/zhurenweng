@@ -1,4 +1,4 @@
-import { asc, desc, eq, sql } from 'drizzle-orm';
+import { asc, desc, eq, inArray, sql } from 'drizzle-orm';
 import { getDb } from '../client.ts';
 import { notices } from '../schema/sqlite.ts';
 import {
@@ -84,6 +84,32 @@ export async function getNoticeById(id: string): Promise<NoticeRecord | null> {
   const db = await getDb();
   const rows = await db.select().from(notices).where(eq(notices.id, id)).limit(1);
   return rows.length > 0 ? toNoticeRecord(rows[0]) : null;
+}
+
+/**
+ * 按主键批量取条目，返回顺序与传入 ids 一致（检索结果按相关性排序，
+ * 页面渲染必须保持该顺序）；库中不存在的 id 被跳过（索引孤儿行兜底）。
+ * 空列表直接返回空数组（inArray 空集无意义）。
+ */
+export async function getNoticesByIds(ids: string[]): Promise<NoticeRecord[]> {
+  if (ids.length === 0) return [];
+  const db = await getDb();
+  const rows = await db.select().from(notices).where(inArray(notices.id, ids));
+  const byId = new Map(rows.map((row) => [row.id, toNoticeRecord(row)]));
+  return ids.flatMap((id) => {
+    const record = byId.get(id);
+    return record ? [record] : [];
+  });
+}
+
+/**
+ * 全量条目（检索索引重建用，issue #8）：收录量级为每月数十条，
+ * 一次取全量即可；按主键排序保证重建输出稳定。
+ */
+export async function listAllNoticesForReindex(): Promise<NoticeRecord[]> {
+  const db = await getDb();
+  const rows = await db.select().from(notices).orderBy(asc(notices.id));
+  return rows.map(toNoticeRecord);
 }
 
 /**

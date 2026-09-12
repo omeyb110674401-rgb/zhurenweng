@@ -8,6 +8,7 @@
 import { crawlNoticesJob } from './jobs/crawl-notices.ts';
 import { summarizeNoticesJob } from './jobs/summarize-notices.ts';
 import { sendDeadlineRemindersJob } from './jobs/send-deadline-reminders.ts';
+import { reindexNoticesJob } from './jobs/reindex-notices.ts';
 
 export interface JobContext {
   /** 统一前缀的日志函数 */
@@ -24,4 +25,10 @@ export interface Job {
 }
 
 /** 注册表：所有 worker 任务在此登记，主循环按此数组调度。 */
-export const jobs: Job[] = [crawlNoticesJob, summarizeNoticesJob, sendDeadlineRemindersJob];
+export const jobs: Job[] = [
+  crawlNoticesJob,
+  summarizeNoticesJob,
+  sendDeadlineRemindersJob,
+  // 检索索引全量重建（issue #8）注册在末位：每轮先抓取 / 摘要，最后重刷索引
+  reindexNoticesJob,
+];

@@ -51,6 +51,9 @@ npm run dev            # http://localhost:3000
 | `SUMMARY_MAX_RETRIES` / `SUMMARY_RETRY_DELAY_MS` | `3` / `500` | 摘要失败重试次数 / 指数退避基数（毫秒） |
 | `MAILER_PROVIDER` | `stub` | `stub`（捕获邮件）/ `smtp`（nodemailer 生产实现） |
 | `MAILER_OUTBOX_FILE` | （空） | stub 邮件追加写入的 JSONL 文件，供跨进程断言 |
+| `SEARCH_PROVIDER` | `local` | `local`（本地实现：SQLite FTS5 / PG ILIKE 退化）/ `meilisearch`（生产检索后端，issue #8） |
+| `MEILI_HOST` / `MEILI_API_KEY` | （空） | `SEARCH_PROVIDER=meilisearch` 时的服务地址与 API 密钥（`MEILI_HOST` 必填；兼容 docker-compose 的 `MEILI_URL` / `MEILI_MASTER_KEY` 命名） |
+| `MEILI_INDEX_UID` / `MEILI_TASK_TIMEOUT_MS` | `notices` / `10000` | Meilisearch 索引 uid / 异步索引任务等待上限（毫秒） |
 | `SMTP_HOST` / `SMTP_PORT` / `SMTP_SECURE` / `SMTP_USER` / `SMTP_PASS` / `MAIL_FROM` | （空） | `MAILER_PROVIDER=smtp` 时的 SMTP 接入配置（`SMTP_SECURE=1` 走 TLS 直连，端口 465 默认 TLS） |
 | `APP_BASE_URL` | `http://localhost:3000` | 邮件内确认 / 退订 / 详情链接的站点基础地址 |
 | `SITE_URL` | `http://localhost:3000` | RSS feed 内站点链接 / 条目链接的对外绝对地址（issue #6，与 `APP_BASE_URL` 各司其职，见「RSS Feed」） |
@@ -103,6 +106,11 @@ npm run e2e            # 等价命令：npm test
   详情页绝对链接、`guid isPermaLink=false`、RFC 822 pubDate、description
   含机关 / 截止日期 / 官方原文 / 显著标注的 AI 摘要片段）→ `&` / `<` 转义
   且全文档无裸 `&` → 补插 205 条合成条目后上限恰 200 条且顺序稳定。
+- **issue #8 站内搜索场景**（`tests/e2e/search.test.mjs`）：worker 单轮抓取
+  fixture → 索引同步（入库钩子 + 全量重建日志）→ 首页搜索框 → 标题关键词
+  命中（「国家公园法」）→ 正文关键词命中（「监督检查」）→ AI 摘要文本命中
+  → 结果项复用列表条目展示（状态 / 机关 / 截止日期 / 详情链接）→ 无关
+  关键词空态 → `q` 为空重定向回列表 → 更新条目正文重新抓取后新关键词命中。
 
 本地手动验证订阅提醒全链路：
 
@@ -168,6 +176,37 @@ worker 注册表中的 `summarize-notices` 任务（`worker/jobs/summarize-notic
   配置，模型被要求只输出 JSON，解析做防御性校验）。本地不配 Key 联调 GLM 适配器
   的行为可参考 stub 的失败注入（`LLM_STUB_FAILURES`）。
 
+## 站内全文检索（issue #8）
+
+- **可插拔检索后端**（ADR-0001 第 2 条）：`src/lib/ports.ts` 的 `SearchPort`
+  （`index` / `remove` / `search`），经 `createSearchPort()` 按 `SEARCH_PROVIDER`
+  创建；worker 钩子与搜索页只依赖接口，不感知具体后端。
+- **索引字段**：标题、AI 摘要各段 text 拼接（原文引用 quote **不入索引**）、
+  正文纯文本（`src/lib/search/search-text.ts` 统一构建，本地与 Meilisearch
+  两个后端共用同一文档形状）。
+- **本地实现（默认 `SEARCH_PROVIDER=local`，开发 / 测试零外部依赖）**：
+  SQLite 方言走迁移 0004 建立的 FTS5 虚表 `notices_fts`。unicode61 分词器对
+  连续汉字只建一个长词、无法子串命中，故索引写入前在相邻汉字之间插空格、
+  查询把中文片段还原为同规则短语 —— 短语相邻性等价原文本连续子串（中文按
+  子串语义命中任意长关键词），英文 / 数字走前缀匹配；结果按 BM25 相关性排序，
+  索引孤儿行与 `notices` 表联查兜底。PostgreSQL 方言不建本地索引结构，检索
+  退化为对 `notices` 的 ILIKE（应用层按同一字段语义复核候选行）。
+- **Meilisearch 适配器（`SEARCH_PROVIDER=meilisearch`，生产）**：原生 fetch
+  直连 REST API（零新增依赖），首次使用自动建索引（`primaryKey=id`，重复
+  写入幂等更新）并设置可搜索属性（title > summary > body）；异步索引任务
+  轮询等待至成功，失败 / 超时抛出带详情的异常，由调用方决定降级。配置
+  `MEILI_HOST` / `MEILI_API_KEY`（兼容 docker-compose 的 `MEILI_URL` /
+  `MEILI_MASTER_KEY`）。开发机没有 Docker / Meilisearch，本适配器不做本地
+  集成验证，生产部署阶段联调（ADR-0001 已知风险）。
+- **索引同步（双层）**：抓取任务在每源入库 / 更新后、摘要任务在摘要落库后
+  **即时同步受影响条目**（失败仅记日志降级，不打断主管线）；worker 注册表
+  末位的 `reindex-notices` 任务每轮**全量重刷**兜底。一次性全量重建入口：
+  `node scripts/reindex-search.mjs`（更换检索后端 / 手动修复索引用）。
+- **搜索 UI**：列表页头部搜索框（GET 表单提交 `/search?q=…`，零客户端 JS）
+  + `/search` 结果页；结果项复用列表条目展示（状态徽标 / 截止倒计时 /
+  发布机关 / 发布与截止日期），按相关度排序；空结果给友好提示，`q` 为空
+  重定向回列表页，检索后端故障渲染错误态而非 500。
+
 ## 如何添加 fixture 源
 
 见 `fixtures/README.md`。要点：
@@ -187,7 +226,7 @@ worker 注册表中的 `summarize-notices` 任务（`worker/jobs/summarize-notic
 | worker 任务 | `worker/registry.ts` | 任务加入 `jobs` 数组 |
 | LLM 提供商 | `src/lib/ports.ts` 的 `createLlmPort()` | 新分支返回适配器（环境变量切换） |
 | 邮件提供商 | `src/lib/ports.ts` 的 `createMailerPort()` | 同上 |
-| 检索后端 | `src/lib/ports.ts` 的 `SearchPort` | 检索切片实现 Meilisearch / 本地实现 |
+| 检索后端 | `src/lib/ports.ts` 的 `createSearchPort()` | 新分支返回适配器（`SEARCH_PROVIDER=local \| meilisearch`） |
 
 代码约定：`src/lib`、`src/db`、`worker` 内的相对导入使用显式 `.ts` 扩展名
 （这些文件也会被 Node 24 类型剥离直接运行）；页面文件用 `@/` 别名。
