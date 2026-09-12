@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>法律草案征求意见_中国人大网</title>
+  </head>
+  <body>
+    <!--
+      fixture 快照（合成数据）：issue #10 版本链与条款对比场景专用，
+      仿 npc.gov.cn「法律草案征求意见」页面结构（与 fixtures/npc/ 同构独立成目录，
+      不影响既有场景的条目数断言）。
+      《湿地保护法》两个轮次：标题措辞不同（草案征求意见稿 / 草案二次征求意见稿）、
+      正文有增删改（第一条整句改写、第三条整条删除、第五条整条新增），
+      版本链应把两者按「标题规范化 + 同机关」关联；
+      《航道法》为无关单轮条目（不应有任何版本关联）。
+      列表顺序：首轮在前 —— 首版先入库，第二版入库时与既有条目自动关联。
+      截止日期使用日期令牌；发布日期为固定历史事实（决定版本链次序），不用令牌。
+    -->
+    <div class="header">
+      <div class="logo">中国人大网</div>
+      <div class="header-nav">
+        <a href="/">首页</a>
+        <a href="/npc/c2/c30834/list.shtml">法律草案征求意见</a>
+      </div>
+    </div>
+
+    <div class="position">
+      当前位置：<a href="/">首页</a>&gt;<a href="/npc/c2/c30834/list.shtml">法律草案征求意见</a>
+    </div>
+
+    <div class="list_00">
+      <div class="list-title">法律草案征求意见</div>
+      <ul>
+        <li>
+          <a href="/npc/c2/c30834/t20260820_180001.html" target="_blank">中华人民共和国湿地保护法（草案征求意见稿）征求意见</a>
+          <span class="time">2026年8月20日</span>
+        </li>
+        <li>
+          <a href="/npc/c2/c30834/t20260905_180002.html" target="_blank">中华人民共和国湿地保护法（草案二次征求意见稿）征求意见</a>
+          <span class="time">2026年9月5日</span>
+        </li>
+        <li>
+          <a href="/npc/c2/c30834/t20260908_180003.html" target="_blank">中华人民共和国航道法（修订草案）征求意见</a>
+          <span class="time">2026年9月8日</span>
+        </li>
+      </ul>
+    </div>
+
+    <div class="footer">
+      <p>中国人大网　版权所有</p>
+      <p>京ICP备05000001号</p>
+    </div>
+  </body>
+</html>
