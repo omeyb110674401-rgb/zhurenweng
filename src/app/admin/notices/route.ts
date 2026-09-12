@@ -79,7 +79,7 @@ export async function POST(request: Request): Promise<Response> {
     publishedAt,
     deadlineAt,
     status: deriveStatus(deadlineAt, now),
-    categoryTags: [],
+    // 领域标签不传：入库路径按关键词规则自动打标（issue #9，与抓取管线单一入口）
     bodyText,
     attachments: [],
     fetchedAt: now.toISOString(),
