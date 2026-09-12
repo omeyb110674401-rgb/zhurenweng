@@ -1,6 +1,7 @@
 import { and, asc, eq, isNull, ne } from 'drizzle-orm';
 import { getDb } from '../client.ts';
 import { notices } from '../schema/sqlite.ts';
+import type { NoticeStatus } from '../types.ts';
 import type { SummaryStatus } from '../../lib/summary-content.ts';
 
 /**
@@ -50,20 +51,33 @@ export async function listNoticesForSummary(limit = 50): Promise<PendingSummaryT
  * 人工复核队列（issue #12）：全部 summary_status='failed_review' 的条目，
  * 按抓取时间升序（最早失败的最先复核）。
  */
-export async function listNoticesForReview(limit = 50): Promise<PendingSummaryTarget[]> {
+export interface ReviewQueueItem {
+  id: string;
+  title: string;
+  agency: string;
+  url: string;
+  sourceId: string;
+  status: NoticeStatus;
+  deadlineAt: string | null;
+}
+
+export async function listNoticesForReview(limit = 50): Promise<ReviewQueueItem[]> {
   const db = await getDb();
-  return db
+  const rows = await db
     .select({
       id: notices.id,
       title: notices.title,
+      agency: notices.agency,
       url: notices.url,
-      bodyText: notices.bodyText,
       sourceId: notices.sourceId,
+      status: notices.status,
+      deadlineAt: notices.deadlineAt,
     })
     .from(notices)
     .where(eq(notices.summaryStatus, 'failed_review'))
     .orderBy(asc(notices.fetchedAt), asc(notices.id))
     .limit(limit);
+  return rows.map((row) => ({ ...row, status: row.status as NoticeStatus }));
 }
 
 /**
