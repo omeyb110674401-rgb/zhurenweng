@@ -55,6 +55,30 @@ export async function listNotices(options: ListNoticesOptions = {}): Promise<Not
   return rows.map(toNoticeRecord);
 }
 
+/**
+ * RSS feed 查询（issue #6）：全量条目按发布日期倒序（最新发布在前）。
+ * 与聚合列表（listNotices）的「截止日期升序」排序不同：feed 是时间线语义。
+ * 无发布日期的条目排最后 —— 显式 CASE 归一化 NULL 排序位置（双方言下
+ * SQLite 与 PostgreSQL 的 NULL 排序方向相反），同日按抓取时间、条目 ID
+ * 兜底保证顺序稳定。
+ */
+export async function listNoticesByPublishedDesc(
+  options: ListNoticesOptions = {},
+): Promise<NoticeRecord[]> {
+  const db = await getDb();
+  const rows = await db
+    .select()
+    .from(notices)
+    .orderBy(
+      sql`case when ${notices.publishedAt} is null then 1 else 0 end`,
+      desc(notices.publishedAt),
+      desc(notices.fetchedAt),
+      asc(notices.id),
+    )
+    .limit(options.limit ?? 200);
+  return rows.map(toNoticeRecord);
+}
+
 /** 按主键取单条；不存在返回 null（详情页与 /go 端点使用）。 */
 export async function getNoticeById(id: string): Promise<NoticeRecord | null> {
   const db = await getDb();

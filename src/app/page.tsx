@@ -39,7 +39,13 @@ export default async function HomePage() {
 
       <section className="notice-section" aria-labelledby="notice-list-title">
         <h2 id="notice-list-title">最新公示</h2>
-        <p className="section-hint">按征求意见截止日期排序，即将截止的排在最前。</p>
+        <p className="section-hint">
+          按征求意见截止日期排序，即将截止的排在最前。
+          {/* RSS 订阅入口（issue #6）：页面可见入口，配合 head 内的自动发现链接 */}
+          <a className="rss-link" href="/feed.xml" data-testid="rss-feed-link">
+            RSS 订阅
+          </a>
+        </p>
         {notices.length === 0 ? (
           <div className="empty-state" data-testid="notice-empty-state">
             <p className="empty-title">暂无公示条目</p>

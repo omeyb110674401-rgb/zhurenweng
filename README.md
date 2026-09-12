@@ -53,6 +53,7 @@ npm run dev            # http://localhost:3000
 | `MAILER_OUTBOX_FILE` | （空） | stub 邮件追加写入的 JSONL 文件，供跨进程断言 |
 | `SMTP_HOST` / `SMTP_PORT` / `SMTP_SECURE` / `SMTP_USER` / `SMTP_PASS` / `MAIL_FROM` | （空） | `MAILER_PROVIDER=smtp` 时的 SMTP 接入配置（`SMTP_SECURE=1` 走 TLS 直连，端口 465 默认 TLS） |
 | `APP_BASE_URL` | `http://localhost:3000` | 邮件内确认 / 退订 / 详情链接的站点基础地址 |
+| `SITE_URL` | `http://localhost:3000` | RSS feed 内站点链接 / 条目链接的对外绝对地址（issue #6，与 `APP_BASE_URL` 各司其职，见「RSS Feed」） |
 | `FIXTURES_DIR` / `FIXTURE_SERVER_PORT` | `fixtures/` / `4170` | fixture 源站目录与端口 |
 | `WORKER_INTERVAL_MS` / `WORKER_ONCE` | `60000` / （空） | worker 调度间隔（生产 compose 设为每日） / 单轮模式 |
 | `SOURCES_FIXTURE_BASE` | （空） | 设置后所有源适配器的列表页 URL 重写为 `<base>/<源ID>/list.html`（测试注入 fixture 源站；不设则抓取真实源站） |
@@ -90,6 +91,12 @@ npm run e2e            # 等价命令：npm test
   剩余天数、截止日期、站内详情与官方原文链接（关键词命中标题 / 正文与领域
   命中标签均覆盖）→ 重跑不重发（`reminder_sends` 去重）→ 规则外条目不发 →
   一键退订立即生效，退订后新条目不再发送。
+- **issue #6 全量 RSS feed 场景**（`tests/e2e/feed.test.mjs`）：worker 抓取
+  `fixtures/e2e-feed/` 快照（含标题带 `&` / `<` 的条目）→ `/feed.xml`
+  channel 结构（自动发现链接 + 页面可见入口）→ item 字段（发布日期倒序、
+  详情页绝对链接、`guid isPermaLink=false`、RFC 822 pubDate、description
+  含机关 / 截止日期 / 官方原文 / 显著标注的 AI 摘要片段）→ `&` / `<` 转义
+  且全文档无裸 `&` → 补插 205 条合成条目后上限恰 200 条且顺序稳定。
 
 本地手动验证订阅提醒全链路：
 
@@ -117,6 +124,24 @@ SOURCES_FIXTURE_BASE=http://127.0.0.1:4170 APP_BASE_URL=http://localhost:3000 WO
 
 数据库迁移在应用首连时自动应用（`drizzle/<driver>/`）；CI（GitHub Actions）运行
 lint 与 e2e 两个 job，同样只依赖 npm。
+
+## RSS Feed（issue #6）
+
+- **端点**（`GET /feed.xml`）：RSS 2.0，每次请求实时读库生成（`force-dynamic`，
+  不缓存），Content-Type `application/rss+xml; charset=utf-8`；XML 生成零依赖
+  （转义 / 拼接逻辑见 `src/lib/feed.ts`）。
+- **channel**：标题「主人翁 —— 政府公示信息聚合」、站点链接、描述、语言
+  `zh-cn`、`lastBuildDate` 与 `atom:link rel="self"`。
+- **item**：全量条目按**发布日期倒序**、上限 200 条；`link` 为站内详情页
+  **绝对 URL**，`guid isPermaLink="false"` 为条目 ID，`pubDate` 为 RFC 822，
+  `description` 含发布机关、截止日期、官方原文链接与 AI 摘要片段
+  （仅摘要就绪时出现，并显著标注「AI 生成，仅供参考，以官方原文为准」；
+  特殊字符按 XML 转义）。
+- **站点地址**：feed 内绝对 URL 的基础由 `SITE_URL` 提供（默认
+  `http://localhost:3000`）。它与 `APP_BASE_URL`（订阅邮件内链接的基础地址，
+  issue #7）**各司其职**：前者面向 RSS 阅读器与站外引用，后者面向邮件接收者，
+  两者部署形态不同（如邮件走独立发信域名）时可分别配置；默认值一致，本地
+  开发无需设置。
 
 ## AI 摘要器（issue #4）
 

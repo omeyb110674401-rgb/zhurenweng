@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>法律草案征求意见_中国人大网</title>
+  </head>
+  <body>
+    <!--
+      fixture 快照（合成数据，issue #6）：RSS feed E2E 场景专用。
+      与 fixtures/npc 同构（同一 npc 适配器解析），但单独成目录，避免改动
+      fixtures/npc 影响既有场景的条目计数断言。
+      - 条目 1 标题含 & 与 <（HTML 源码以 &amp; / &lt; 实体书写，解析后为
+        原始字符），用于验证 feed XML 的转义正确性；
+      - 截止日期使用 {{CN_DATE±N}} 令牌：条目 1/2 征求意见中，条目 3 已截止
+        （已截止条目不参与摘要，用于断言 feed description 无 AI 内容）；
+      - 发布日期为固定历史事实（决定 feed 排序），不使用令牌。
+    -->
+    <div class="header">
+      <div class="logo">中国人大网</div>
+      <div class="header-nav">
+        <a href="/">首页</a>
+        <a href="/npc/c2/c30834/list.shtml">法律草案征求意见</a>
+      </div>
+    </div>
+
+    <div class="position">
+      当前位置：<a href="/">首页</a>&gt;<a href="/npc/c2/c30834/list.shtml">法律草案征求意见</a>
+    </div>
+
+    <div class="list_00">
+      <div class="list-title">法律草案征求意见</div>
+      <ul>
+        <li>
+          <a href="/npc/c2/c30834/t20260912_160001.html" target="_blank">中华人民共和国航道法（修订草案）&lt;征求意见稿&gt;&amp;配套说明征求意见</a>
+          <span class="time">2026年9月12日</span>
+        </li>
+        <li>
+          <a href="/npc/c2/c30834/t20260901_160002.html" target="_blank">中华人民共和国公民身份证法（修正草案）征求意见</a>
+          <span class="time">2026年9月1日</span>
+        </li>
+        <li>
+          <a href="/npc/c2/c30834/t20260815_160003.html" target="_blank">中华人民共和国渔业法（修订草案）征求意见</a>
+          <span class="time">2026年8月15日</span>
+        </li>
+      </ul>
+    </div>
+
+    <div class="footer">
+      <p>中国人大网　版权所有</p>
+      <p>京ICP备05000001号</p>
+    </div>
+  </body>
+</html>

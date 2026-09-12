@@ -65,6 +65,17 @@ body {
   font-size: 13px;
 }
 
+/* ===== RSS feed（issue #6）===== */
+
+.rss-link {
+  margin-left: 10px;
+  color: var(--accent);
+}
+
+.rss-link:hover {
+  text-decoration: underline;
+}
+
 .empty-state {
   border: 1px dashed var(--line);
   border-radius: 8px;
