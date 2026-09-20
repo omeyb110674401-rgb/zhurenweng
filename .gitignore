@@ -18,4 +18,4 @@ data/
 .DS_Store
 
 # 线上核查用的临时落地页（curl -o 抓下来的 HTML，别进仓库）
-.live-*.html
+.live-*
