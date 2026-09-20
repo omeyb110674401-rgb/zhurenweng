@@ -167,6 +167,32 @@ async function fetchText(url: string, options?: SourceFetchOptions, hops = 0): P
   return response.text();
 }
 
+/**
+ * 详情内容地址的链式跳转上限（issue #20）：国家发展改革委实测 2 跳
+ * （access-url 接口 → 正文接口）；留出余量，但绝不能无限跟随 ——
+ * 适配器若因为页面改版而始终返回下一跳，整轮抓取会被拖死。
+ */
+const MAX_DETAIL_HOPS = 4;
+
+/**
+ * 取详情内容 body：先取首跳地址，再按适配器的 resolveDetailUrl 逐跳跟随，
+ * 直到适配器返回 null（「当前 body 即详情内容」）或到达跳数上限。
+ * 每一跳的请求都由抓取层发出（源级传输处置 / UA / 超时 / fixture 重写集中在此）。
+ */
+async function fetchDetailBody(adapter: SourceAdapter, firstUrl: string): Promise<string> {
+  let url = firstUrl;
+  let body = await fetchText(url, adapter.fetch);
+  if (!adapter.resolveDetailUrl) return body;
+
+  for (let hop = 0; hop < MAX_DETAIL_HOPS; hop += 1) {
+    const next = await adapter.resolveDetailUrl(body, url);
+    if (!next) return body;
+    url = next;
+    body = await fetchText(url, adapter.fetch);
+  }
+  throw new Error(`详情地址链式跳转超过 ${MAX_DETAIL_HOPS} 跳仍未取到正文：${firstUrl}`);
+}
+
 /** 抓取并解析详情页；单条详情失败只降级保留列表层数据，不中断整轮抓取。 */
 async function enrichWithDetail(
   adapter: SourceAdapter,
@@ -177,9 +203,9 @@ async function enrichWithDetail(
   // 详情内容默认取原文 URL；前端渲染型详情页由适配器指向数据接口（见 SourceAdapter）
   const contentUrl = adapter.detailContentUrl?.(notice) ?? notice.url;
   try {
-    const detailHtml = await fetchText(contentUrl, adapter.fetch);
+    const detailBody = await fetchDetailBody(adapter, contentUrl);
     // 第二参始终传人工页 URL：详情解析器用它解析相对链接（附件等）
-    const detail = await adapter.parseDetail(detailHtml, notice.url);
+    const detail = await adapter.parseDetail(detailBody, notice.url);
     return detail ? mergeDetail(notice, detail) : notice;
   } catch (error) {
     ctx.logger(

@@ -4,6 +4,7 @@ import { miitAdapter } from './adapters/miit.ts';
 import { moeAdapter } from './adapters/moe.ts';
 import { mojAdapter } from './adapters/moj.ts';
 import { motAdapter } from './adapters/mot.ts';
+import { ndrcAdapter } from './adapters/ndrc.ts';
 import { npcLawDraftsAdapter } from './adapters/npc.ts';
 import { samrAdapter } from './adapters/samr.ts';
 
@@ -100,30 +101,41 @@ export interface SourceAdapter {
    * 与用户可见的「官方原文」链接。返回 null 表示回退到原文 URL。
    */
   detailContentUrl?(notice: NormalizedNotice): string | null;
+  /**
+   * 详情内容的**链式跳转**（可选，issue #20）：有些源的正文地址要一跳一跳才拿得到
+   * （国家发展改革委实测：`sa.html#/<shortKey>` 前端渲染页 → access-url 接口拿到
+   * 文章页地址 → 文章页只是空壳、正文在 getArticleDetail 接口里）。
+   *
+   * 抓取层取到 body 后调用本方法，返回值 = **下一跳地址**；返回 null 表示
+   * 「当前 body 就是详情内容」，交给 parseDetail 解析。跳数有上限
+   * （crawl-notices 的 MAX_DETAIL_HOPS），超过即视为该源结构异常并报错降级。
+   *
+   * 为什么由抓取层负责每一跳的请求、而不是适配器自己 fetch：① 源级传输处置
+   * （`fetch.cookieChallenge`）、UA、超时、fixture 地址重写都集中在抓取层一处；
+   * ② 适配器自己发请求会让 E2E 打到真实站点（ADR-0001）。因此适配器只做
+   * 「从这一跳的 body / 地址推出下一跳地址」这件纯计算的事。
+   *
+   * 实现约定：下一跳地址应**相对当前跳的地址**推导（见 ndrc.ts 的 submissionRootOf），
+   * 这样生产环境落在真实站点、E2E 里落在 fixture 目录内，同一份代码两条路都通。
+   */
+  resolveDetailUrl?(body: string, pageUrl: string): Promise<string | null> | string | null;
 }
 
 /**
  * 注册表：所有源适配器在此登记，调度器按此数组驱动。
  *
- * 当前 7 个源（PRD M2 要求部委直爬源扩至 8 个，第 8 个见下方「已评估但未接入」）：
+ * 当前 8 个源（PRD M2 要求的「部委直爬源扩至 8 个」已达成）：
  * 全国人大 / 司法部 / 生态环境部（M1 三源）+ 交通运输部 / 市场监管总局 /
- * 工业和信息化部 / 教育部（M2 扩源）。
+ * 工业和信息化部 / 教育部 / 国家发展改革委（M2 扩源）。
  *
  * ## 已评估但未接入的源（附实测依据，避免后人重复踩）
  *
- * - **国家发展改革委**（`https://www.ndrc.gov.cn/hdjl/yjzq/`，栏目在运营、条目真实）：
- *   列表项链接全部是前端渲染页 `https://yyglxxbsgw.ndrc.gov.cn/sa.html#/<shortKey>`，
- *   正文要经**三跳**才能拿到：① `GET /public/submission-service/article/access-url?shortKey=<k>`
- *   返回 `{"data":"…/htmls/article/article.html?articleId=<uuid>"}`；② 该 article.html
- *   仍是空壳（`<h2></h2>`，正文由脚本填充）；③ 再用 articleId 取正文接口。
- *   现有适配器契约里 `detailContentUrl` 是同步单跳、且由抓取层负责请求，
- *   表达不了「先解析再请求」的链式跳转；且列表页**不含截止日期**（只有
- *   【进行中】/【已结束】标注），硬接会得到没有正文、没有截止日期的空条目。
- *   接入前需要给契约加一个「异步解析详情地址」的钩子（并让该跳转同样支持
- *   fixture 重写），属独立改动。
  * - **国家网信办**（www.cac.gov.cn）：首页导航无「征求意见」栏目入口，
  *   常见候选路径（/zcfg/、/xxfb/、/hdjl/yjzj/ 等）实测均 404。
  * - **中国政府网「意见征集」**：栏目已下线（见 mee.ts 文件头的实测记录）。
+ * - **国务院部门其它栏目**：生态环境部、交通运输部等已接入的部委，其「征求意见」
+ *   栏目是各自站点里唯一在运营的征求意见入口；其余部委（如财政部、卫健委）
+ *   未逐个排查，按 PRD 属后续扩展。
  */
 export const sourceAdapters: SourceAdapter[] = [
   npcLawDraftsAdapter,
@@ -133,4 +145,5 @@ export const sourceAdapters: SourceAdapter[] = [
   samrAdapter,
   miitAdapter,
   moeAdapter,
+  ndrcAdapter,
 ];

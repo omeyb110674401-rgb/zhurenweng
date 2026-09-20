@@ -144,9 +144,15 @@ export function createFixtureServer({ fixturesDir, host = '127.0.0.1', port = 0 
 
       for (const filePath of candidates) {
         const ext = path.extname(filePath).toLowerCase();
-        const contentType = CONTENT_TYPES[ext] ?? 'application/octet-stream';
+        // 无扩展名的文件按文本提供（并做日期令牌替换）：真实站点的数据接口路径
+        // 就是无扩展名的（如国家发展改革委的 …/article/access-url?shortKey=…），
+        // 快照按真实路径存放即无扩展名；扩展名与查询串都不参与 fixture 路径映射。
+        const isText = TEXT_EXTENSIONS.has(ext) || ext === '';
+        const contentType = isText
+          ? (CONTENT_TYPES[ext] ?? 'text/plain; charset=utf-8')
+          : 'application/octet-stream';
         try {
-          if (TEXT_EXTENSIONS.has(ext)) {
+          if (isText) {
             const body = substituteDateTokens(await readFile(filePath, 'utf8'), anchor);
             res.writeHead(200, { 'content-type': contentType });
             res.end(body);

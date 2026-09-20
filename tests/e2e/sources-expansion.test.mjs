@@ -9,9 +9,10 @@ import { startAppServer } from './helpers/app-server.mjs';
 import { createFixtureServer } from './helpers/fixture-server.mjs';
 
 /**
- * E2E（issue #18）：M2 扩源 —— 交通运输部 / 市场监管总局 / 工业和信息化部 / 教育部。
+ * E2E（issue #18 / #20）：M2 扩源 —— 交通运输部 / 市场监管总局 / 工业和信息化部 /
+ * 教育部 / 国家发展改革委（源 3 → 8）。
  *
- * 四个源各代表一类真实的接入形态，本场景逐类锁定行为：
+ * 五个源各代表一类真实的接入形态，本场景逐类锁定行为：
  * - **市场监管总局**：列表是站内 TRS jpaas 接口（JSON 片段），列表自带「征集期」
  *   （起 至 止）与状态列 —— 截止日期取自列表，详情正文多数没有截止句；
  * - **工业和信息化部**：同为接口列表，截止日期藏在隐藏字段 `span.endtime`
@@ -19,7 +20,9 @@ import { createFixtureServer } from './helpers/fixture-server.mjs';
  * - **交通运输部**：静态 HTML 列表，状态标注 `[进行中]/[已结束]` 是真实列表判据，
  *   条目链接跨域混排（民航局站点）；
  * - **教育部**：静态 HTML 列表，标题必须取 `title` 属性（链接文本被截断），
- *   栏目自 2024-02 起是历史归档（全部已截止）。
+ *   栏目自 2024-02 起是历史归档（全部已截止）；
+ * - **国家发展改革委**（issue #20）：**链式跳转源** —— 正文要经 access-url 接口 →
+ *   正文接口两跳才拿得到，是 `SourceAdapter.resolveDetailUrl` 契约的唯一使用者。
  *
  * 本场景另锁定两条**状态推导次序**（issue #18 引入 NormalizedNotice.status）：
  * ① 截止日期优先于源标注 —— 合成条目标注 [进行中] 但详情截止日期已过 → 已截止；
@@ -56,9 +59,16 @@ const TITLES = {
   moeClosed: '教育部关于《校外培训管理条例（征求意见稿）》公开征求意见的公告',
   moeJoint: '人力资源社会保障部办公厅 教育部办公厅关于《关于深化高等学校教师职称制度改革的指导意见（征求意见稿）》公开征求意见的通知',
   moeClosed2: '教育部关于《中华人民共和国教师法（修订草案）（征求意见稿）》公开征求意见的公告',
+  // 国家发展改革委（issue #20）：链式跳转源。标题入库前剥掉【进行中】/ [已结束]
+  // 标注与接口返回的 <BR> 换行标签。
+  ndrcOpen: '国家发展改革委关于向社会公开征求《售电公司管理办法（公开征求意见稿）》意见的公告',
+  ndrcOpen2: '关于向社会公开征求对《人民防空工程建设管理规定（征求意见稿）》意见的公告',
+  ndrcOpen3: '国家发展改革委关于向社会公开征求《能源行业行政处罚案件违法所得认定办法（公开征求意见稿）》意见的公告',
+  ndrcClosed: '国家发展改革委关于向社会公开征求《电网公平开放监管办法》（公开征求意见稿）意见的公告',
+  ndrcBrokenChain: '关于向社会公开征求《链式跳转断裂降级验证办法（征求意见稿）》意见的公告',
 };
 
-/** 全部入库条目（17 条：samr 5 + miit 4 + mot 5 + moe 3）。 */
+/** 全部入库条目（22 条：samr 5 + miit 4 + mot 5 + moe 3 + ndrc 5）。 */
 const ALL_TITLES = Object.values(TITLES);
 
 /** 未入库条目：交通运输部栏目里混入的非征求意见条目（状态位为空，适配器据此过滤）。 */
@@ -174,9 +184,12 @@ describe('issue #18：M2 扩源（交通运输部 / 市场监管总局 / 工业�
     // mot 列表 6 行 → 过滤掉 1 条非征求意见条目（答记者问 / 反馈情况）后入库 5 条
     assert.match(run.output, /源 mot 抓取完成：列表 5 条，新增 5，更新 0/);
     assert.match(run.output, /源 moe 抓取完成：列表 3 条，新增 3，更新 0/);
+    assert.match(run.output, /源 ndrc 抓取完成：列表 5 条，新增 5，更新 0/);
+    // 链式跳转断裂的那条：记日志降级、不中断整源（条目仍以列表层数据入库）
+    assert.match(run.output, /详情页抓取失败（保留列表层数据）[^\n]*access-url 响应缺少 articleId/);
   });
 
-  it('首页：17 条新源条目全部呈现，非征求意见条目被过滤', async () => {
+  it('首页：22 条新源条目全部呈现，非征求意见条目被过滤', async () => {
     const html = await fetch(`${app.url}/`).then((response) => response.text());
     const blocks = extractItemBlocks(html);
     assert.equal(blocks.length, ALL_TITLES.length, `首页应恰好 ${ALL_TITLES.length} 条`);
@@ -293,6 +306,45 @@ describe('issue #18：M2 扩源（交通运输部 / 市场监管总局 / 工业�
       (response) => response.text(),
     );
     assert.match(stripSsrComments(moeDetail), /本次征求意见截止日期为2024年3月8日/);
+  });
+
+  it('国家发展改革委：链式跳转取正文与截止日期，标注与 <BR> 剥离', async () => {
+    const html = await fetch(`${app.url}/`).then((response) => response.text());
+    const blocks = extractItemBlocks(html);
+
+    // 截止日期只存在于正文接口返回的内容里（「此次公开征求意见的时间为 X 至 Y」）
+    // → 能展示倒计时就证明整条链（access-url → 正文接口）跑通了
+    const open = blockOf(blocks, TITLES.ndrcOpen);
+    assert.equal(open.badge, '征求意见中');
+    assert.match(open.countdown, /^剩 \d+ 天$/, '截止日期来自链式跳转后的正文内容');
+
+    // 已结束条目：标注与正文里的截止日期一致（都是过去）
+    assert.equal(blockOf(blocks, TITLES.ndrcClosed).badge, '已截止');
+
+    // 详情页：正文、附件与官方原文链接（官方原文 = 人工可读的 sa.html#/<key> 页面，
+    // 不是链路中间的接口地址）
+    const detail = await fetch(`${app.url}${open.href}`).then((response) => response.text());
+    const text = stripSsrComments(detail);
+    assert.match(text, /为加快推进全国统一电力市场建设/, '正文来自 getArticleDetail 接口');
+    // 附件名取链接文本（不带扩展名），链接地址才是官方文件地址
+    assert.match(text, /附件清单[\s\S]{0,200}售电公司管理办法（公开征求意见稿）/);
+    assert.match(text, /yyglxxbs\.ndrc\.gov\.cn\/file-submission\/\d+\.docx/, '附件链接指向官方文件地址');
+    // 官方原文 = 人工可读的 sa.html#/<key> 页面（生产是数据服务域名下的地址，
+    // E2E 里被重写为 fixture 地址），而不是链路中间的接口地址
+    assert.match(text, /sa\.html#\//, '官方原文指向人工可读页面');
+    assert.ok(!/getArticleDetail|access-url/.test(text), '链路中间的接口地址不应出现在页面上');
+  });
+
+  it('链式跳转断裂时降级：条目保留列表层数据、状态退回源标注、不中断整源', async () => {
+    const html = await fetch(`${app.url}/`).then((response) => response.text());
+    const block = blockOf(extractItemBlocks(html), TITLES.ndrcBrokenChain);
+    assert.equal(block.badge, '征求意见中', '正文取不到时状态退回列表的【进行中】标注');
+    assert.equal(block.countdown, null, '没有截止日期就不展示倒计时');
+
+    const detail = await fetch(`${app.url}${block.href}`).then((response) => response.text());
+    const text = stripSsrComments(detail);
+    assert.match(text, /链式跳转断裂降级验证办法/, '条目照常入库并渲染');
+    assert.match(text, /2026-09-10/, '发布日期取自列表层');
   });
 
   it('检索：新源条目可按正文关键词命中（入库时已同步索引）', async () => {

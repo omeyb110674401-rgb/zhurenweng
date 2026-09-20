@@ -401,21 +401,41 @@ worker 注册表中的 `summarize-notices` 任务（`worker/jobs/summarize-notic
 | `samr` | 市场监管总局「征集调查」<br>`https://www.samr.gov.cn/hd/zjdc/` | 无特殊要求；列表是站内 TRS jpaas 接口<br>`/api-gateway/jpaas-publish-server/front/page/build/unit`（GET + queryData，返回 `{data:{html}}` 片段） | 列表行自带**征集期**（`2026-09-17至2026-10-17`）与状态列 —— 起作发布日期、止作截止日期（多数详情正文没有截止句）；正文 `.Three_xilan_07`；附件不在正文里，在「附件下载」清单 `ul.contentLeft0102box`（该 class 出现两次，前一个是空占位） |
 | `miit` | 工业和信息化部「意见征集」<br>`https://www.miit.gov.cn/gzcy/yjzj/` | 无特殊要求；列表同上 TRS jpaas 接口（参数不同） | 截止日期在列表隐藏字段 `span.endtime` 的**毫秒时间戳**（与详情正文「请于…前反馈意见」互为印证）；正文 `#con_con`；附件是正文内的 pdf 链接；标题多为「关于公开征求…的公示」，机关兜底为部本级 |
 | `moe` | 教育部「征求意见」<br>`http://www.moe.gov.cn/jyb_xwfb/s248/` | 无特殊要求（静态 HTML） | 列表 `#list li`，**标题必须取 `title` 属性**（联合发布条目的链接文本被截断）；状态标注在标题前缀；正文 `.moe-detail-box .TRS_Editor`（页面尾部的 `#detail-editor` 只是「责任编辑」一行，不是正文）。**该栏目自 2024-02 起未再更新**（历史归档，52 条全部已截止），接入理由见适配器文件头 |
+| `ndrc` | 国家发展改革委「意见征求」<br>`https://www.ndrc.gov.cn/hdjl/yjzq/` | 无特殊要求；**正文需链式跳转**（见下方「链式跳转」） | 列表 `ul.u-list > li > a[title] + span`，标题带 `【进行中】` 前缀 / `[已结束]` 后缀（两种都剥离）；条目链接是数据服务域名下的前端渲染页 `sa.html#/<shortKey>`；正文与截止日期（「此次公开征求意见的时间为 X 至 Y」）都在 `getArticleDetail` 接口返回的 `articleContent` 里，附件是正文 HTML 内的绝对链接；接口返回的标题含 `<BR>` 换行标签，入库前剥掉 |
 
 第三源为何不是中国政府网：原 `govcn`（中国政府网「政策 → 意见征集」）实测**已下线**
 （`/zhengce/yjzj/**` 全 404；政策频道仅剩最新政策 / 国务院公报 / 政策解读 / 图解政策，
 政策文件库路径对爬虫一律 403）。本产品承诺「聚合征求意见稿 + 截止提醒」，故换用真实
 在运营、可抓取且含截止日期的部委征求意见栏目（issue #14）。
 
-PRD M2 的「部委直爬源扩展至 8 个」当前为 **7 个**，第 8 个（国家发展改革委）已评估但
-未接入，原因与实测依据写在 `src/sources/registry.ts` 的注册表注释里（正文在
-`sa.html#/<key>` 前端渲染页之后，需经 access-url 接口 → article.html → 正文接口三跳，
-现有 `detailContentUrl` 契约表达不了；且列表页不含截止日期）。国家网信办首页无
-「征求意见」栏目入口、常见候选路径全 404，同样未接入。
+PRD M2 的「部委直爬源扩展至 8 个」**已达成**（上表 8 个源）。国家网信办首页无
+「征求意见」栏目入口、常见候选路径全 404，未接入（依据记在 `src/sources/registry.ts`
+的注册表注释里）。
 
 **状态推导次序**（issue #18）：截止日期是事实、优先；解析不到时采用源自身标注
 （`NormalizedNotice.status`，来自列表的状态列 / 标题标注）；都取不到才兜底「征求意见中」。
 否则跨域条目与详情缺截止句的条目会被误判为进行中。
+
+### 链式跳转（issue #20）
+
+有些源的正文地址要一跳一跳才拿得到。国家发展改革委实测：列表条目是前端渲染页
+`sa.html#/<shortKey>` → `access-url` 接口返回文章页地址 → 文章页只是空壳、
+正文在 `getArticleDetail` 接口里。
+
+- **契约**：`SourceAdapter.resolveDetailUrl(body, pageUrl)` 返回**下一跳地址**，
+  返回 null 表示「当前 body 即详情内容」。`detailContentUrl` 给首跳（同步）。
+  跳数上限 `MAX_DETAIL_HOPS = 4`，超限报错降级 —— 适配器若因页面改版始终返回
+  下一跳，不会把整轮抓取拖死。
+- **每一跳的请求都由抓取层发出**（不是适配器自己 fetch）：源级传输处置
+  （`fetch.cookieChallenge`）、UA、超时、fixture 地址重写集中在抓取层一处；
+  适配器自己发请求还会让 E2E 打到真实站点（ADR-0001）。适配器只做
+  「从这一跳的 body / 地址推出下一跳地址」这件纯计算的事。
+- **下一跳地址相对当前跳地址推导**（不硬编码域名）：生产落在真实站点、
+  E2E 里落在 fixture 目录内，同一份代码两条路都通。E2E 里按条目分目录
+  （`ndrc/i1/…`）—— fixture 源站按路径映射、不认查询串，而真实站点所有条目
+  共用同一路径、只靠 `?shortKey=` 区分。
+- **失败降级**：链断掉（如 access-url 响应缺 articleId）只记日志并保留列表层数据
+  （条目照常入库、状态退回源标注），不丢条目、不中断整源 —— E2E 有专门锚点。
 
 抓取礼貌性：详情请求之间固定间隔 400ms（`worker/jobs/crawl-notices.ts` 的
 `DETAIL_FETCH_INTERVAL_MS`），避免政府站点 WAF 限流封 IP。

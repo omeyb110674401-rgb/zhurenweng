@@ -1,0 +1,19 @@
+{
+  "_snapshot": {
+    "source": "https://yyglxxbsgw.ndrc.gov.cn/public/submission-service/column/getArticleDetail?articleId=2c97d16c-9ff00a63-01a0-5aaef6d2-0017",
+    "capturedAt": "2026-09-20",
+    "note": "真实接口响应裁剪：只保留正文 / 标题 / 日期 / 来源字段，正文里的截止日期换成 {{CN_DATE±N}} 令牌"
+  },
+  "status": 1,
+  "message": "成功",
+  "data": {
+    "articleId": "2c97d16c-9ff00a63-01a0-5aaef6d2-0017",
+    "articleTitle": "关于向社会公开征求对《人民防空工程建设管理规定（征求意见稿）》意见的公告",
+    "articleContent": "<p style=\"text-indent: 2em; text-align: justify;\">为推动人民防空工程建设高质量发展，有效规范建设管理行为，根据《中华人民共和国人民防空法》《中华人民共和国城乡规划法》等有关法律法规，我们制定了《人民防空工程建设管理规定（征求意见稿）》，现向社会公开征求意见。此次公开征求意见时间为2026年9月1日至{{CN_DATE+10}}。公众可登录国家发展改革委门户网站（<a href=\"https://www.ndrc.gov.cn/\" target=\"_blank\">www.ndrc.gov.cn</a>）首页“互动交流”板块，进入“意见征求”专栏，提出意见建议。</p><p style=\"text-indent: 2em;\">感谢您的参与和支持！</p><p style=\"text-indent: 2em;\">附件：<a href=\"https://yyglxxbs.ndrc.gov.cn/file-submission/20260901095635895499.doc\" target=\"_blank\" title=\"人民防空工程建设管理规定（征求意见稿）\" textvalue=\"人民防空工程建设管理规定（征求意见稿）\">人民防空工程建设管理规定（征求意见稿）</a></p><p><br/></p><p style=\"text-align: center;\">国家发展改革委</p><p style=\"text-align: center;\">2026年9月1日</p><p><br/></p>",
+    "publishDate": "2026-09-01",
+    "articleSource": "国防司",
+    "columnName": "意见征求",
+    "shortUrlKey": "rmfkgcjsglgd",
+    "insertApply": "YES"
+  }
+}

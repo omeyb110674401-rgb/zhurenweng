@@ -1,0 +1,19 @@
+{
+  "_snapshot": {
+    "source": "https://yyglxxbsgw.ndrc.gov.cn/public/submission-service/column/getArticleDetail?articleId=2c97d16b-93251263-019f-b244edde-011f",
+    "capturedAt": "2026-09-20",
+    "note": "真实接口响应裁剪：只保留正文 / 标题 / 日期 / 来源字段，正文里的截止日期换成 {{CN_DATE±N}} 令牌"
+  },
+  "status": 1,
+  "message": "成功",
+  "data": {
+    "articleId": "2c97d16b-93251263-019f-b244edde-011f",
+    "articleTitle": "国家发展改革委关于向社会公开征求《电网公平开放<BR>监管办法》（公开征求意见稿）意见的公告",
+    "articleContent": "<p style=\"text-indent: 2em; text-align: justify;\">为贯彻落实党中央、国务院关于加强自然垄断环节监管决策部署，进一步规范电网公平开放行为，我们组织对《电网公平开放监管办法》（国能发监管规〔2021〕49号）进行了修订，形成了《电网公平开放监管办法》（公开征求意见稿），现向社会公开征求意见。</p><p style=\"text-indent: 2em; text-align: justify;\">此次公开征求意见的时间为2026年7月30日至{{CN_DATE-21}}。欢迎社会各界人士通过网络等方式提出意见。请登录国家发展改革委门户网站（<a href=\"https://www.ndrc.gov.cn/\" target=\"_blank\">https://www.ndrc.gov.cn</a>）首页“互动交流”版块，进入“意见征求”专栏，提出意见建议。</p><p style=\"text-indent: 2em;\">感谢您的参与和支持！</p><p style=\"text-indent: 2em;\">附件：<a href=\"https://yyglxxbs.ndrc.gov.cn/file-submission/20260730141859701985.doc\" target=\"_blank\" title=\"电网公平开放监管办法（公开征求意见稿）\" textvalue=\"电网公平开放监管办法（公开征求意见稿）\">电网公平开放监管办法（公开征求意见稿）</a></p><p><br/></p><p style=\"text-align: center;\">国家发展改革委</p><p style=\"text-align: center;\">2026年7月30日</p><p><br/></p>",
+    "publishDate": "2026-07-30",
+    "articleSource": "国家能源局",
+    "columnName": "意见征求",
+    "shortUrlKey": "dwgpkfjgbf",
+    "insertApply": "NO"
+  }
+}

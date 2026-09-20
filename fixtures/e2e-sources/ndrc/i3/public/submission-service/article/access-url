@@ -1,0 +1,10 @@
+{
+  "_snapshot": {
+    "source": "https://yyglxxbsgw.ndrc.gov.cn/public/submission-service/article/access-url?shortKey=nyxzcf",
+    "capturedAt": "2026-09-20",
+    "note": "真实接口响应（原样）"
+  },
+  "status": 1,
+  "message": "成功",
+  "data": "https://yyglxxbsgw.ndrc.gov.cn/htmls/article/article.html?articleId=2c97d16b-9ff0098a-01a0-47fa5e58-0008"
+}

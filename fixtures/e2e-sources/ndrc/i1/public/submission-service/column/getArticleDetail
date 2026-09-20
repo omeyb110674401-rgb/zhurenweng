@@ -1,0 +1,19 @@
+{
+  "_snapshot": {
+    "source": "https://yyglxxbsgw.ndrc.gov.cn/public/submission-service/column/getArticleDetail?articleId=2c97d16b-9ff0098a-01a0-6c3a23f0-0013",
+    "capturedAt": "2026-09-20",
+    "note": "真实接口响应裁剪：只保留正文 / 标题 / 日期 / 来源字段，正文里的截止日期换成 {{CN_DATE±N}} 令牌"
+  },
+  "status": 1,
+  "message": "成功",
+  "data": {
+    "articleId": "2c97d16b-9ff0098a-01a0-6c3a23f0-0013",
+    "articleTitle": "国家发展改革委关于向社会公开征求《售电公司<BR>管理办法（公开征求意见稿）》意见的公告",
+    "articleContent": "<p dir=\"ltr\" style=\"text-indent: 2em; text-align: justify;\">为加快推进全国统一电力市场建设，规范售电公司经营行为，依法保护市场经营主体合法权益，我们组织对《售电公司管理办法》（发改体改规〔2021〕1595号）进行了修订，形成了《售电公司管理办法（公开征求意见稿）》，现向社会公开征求意见。</p><p dir=\"ltr\" style=\"text-indent: 2em; text-align: justify;\">此次公开征求意见的时间为2026年9月4日至{{CN_DATE+14}}。欢迎社会各界人士通过网络等方式提出意见。请登录国家发展改革委门户网站（<a href=\"https://www.ndrc.gov.cn/\" target=\"_blank\">https://www.ndrc.gov.cn</a>）首页“互动交流”版块，进入“意见征求”专栏，提出意见建议。</p><p dir=\"ltr\" style=\"text-indent: 2em;\">感谢您的参与和支持！</p><p dir=\"ltr\" style=\"text-indent: 2em;\">附件：<a href=\"https://yyglxxbs.ndrc.gov.cn/file-submission/20260904195539493697.docx\" target=\"_self\" title=\"售电公司管理办法（公开征求意见稿）\" textvalue=\"售电公司管理办法（公开征求意见稿）\">售电公司管理办法（公开征求意见稿）</a></p><p style=\"line-height: 16px;\">&nbsp;</p><p dir=\"ltr\" style=\"text-align: center;\">国家发展改革委</p><p dir=\"ltr\" style=\"text-align: center;\">2026年9月4日</p><p dir=\"ltr\"><br/></p>",
+    "publishDate": "2026-09-04",
+    "articleSource": "国家能源局",
+    "columnName": "意见征求",
+    "shortUrlKey": "sdgsglbf",
+    "insertApply": "YES"
+  }
+}

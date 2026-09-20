@@ -453,9 +453,160 @@ async function captureMoe() {
   }
 }
 
+// ─────────────────────────────── ndrc ───────────────────────────────
+
+/**
+ * 国家发展改革委（issue #20）：正文要经链式跳转才拿得到，快照按真实接口路径存放。
+ *
+ * 每个条目一份独立目录（`i1/`、`i2/`…）：fixture 源站按**路径**映射文件、不认查询串
+ * （`?shortKey=…` / `?articleId=…`），而真实站点所有条目共用 `/sa.html` 路径、
+ * 只靠查询串区分。适配器是相对当前地址推导下一跳的，所以把条目的 href 写成
+ * `i1/sa.html#/<key>` 就能让两跳各自落在自己的目录里（真实 href 是数据服务域名下的
+ * 绝对地址，快照注释里写明）。
+ */
+async function captureNdrc() {
+  console.log('ndrc：抓列表');
+  const listHtml = await get('https://www.ndrc.gov.cn/hdjl/yjzq/');
+  const $ = cheerio.load(listHtml);
+  const items = [];
+  $('ul.u-list li').each((_, element) => {
+    const anchor = $(element).find('a[href]').first();
+    const href = anchor.attr('href') ?? '';
+    if (href.length === 0) return;
+    items.push({
+      href,
+      key: (href.split('#/')[1] ?? '').split('?')[0],
+      title: anchor.attr('title') ?? '',
+      date: $(element).find('span').first().text().trim(),
+    });
+  });
+  console.log(`  条目 ${items.length} 条`);
+
+  // 取 4 条：进行中 2 条（含一条正文里截止日期写法不同的）+ 已结束 2 条
+  const open = items.filter((item) => item.title.includes('进行中')).slice(0, 3);
+  const closed = items.filter((item) => item.title.includes('已结束')).slice(0, 1);
+  const chosen = [...open, ...closed];
+  console.log(`  选用 ${chosen.length} 条（进行中 ${open.length} / 已结束 ${closed.length}）`);
+
+  const rows = [];
+  for (const [index, item] of chosen.entries()) {
+    const dir = `i${index + 1}`;
+    console.log(`  ${dir} ${item.key} ${item.date} ${item.title.slice(0, 34)}`);
+
+    // 第 2 跳：access-url 接口（真实地址在数据服务域名下）
+    const accessUrl = `https://yyglxxbsgw.ndrc.gov.cn/public/submission-service/article/access-url?shortKey=${item.key}`;
+    const access = await get(accessUrl);
+    const articleUrl = JSON.parse(access).data;
+    const articleId = /[?&]articleId=([0-9a-zA-Z-]+)/.exec(String(articleUrl))?.[1];
+    if (!articleId) throw new Error(`ndrc ${item.key} 的 access-url 响应缺 articleId`);
+
+    // 第 3 跳：正文接口
+    const detailUrl = `https://yyglxxbsgw.ndrc.gov.cn/public/submission-service/column/getArticleDetail?articleId=${articleId}`;
+    const detail = JSON.parse(await get(detailUrl));
+
+    // 截止日期换成令牌（正文里的「公开征求意见的时间为 X 至 Y」取结束日）
+    const contentHtml = String(detail.data.articleContent ?? '');
+    const period = /至\s*(\d{4})年(\d{1,2})月(\d{1,2})日/.exec(contentHtml.replace(/<[^>]+>/g, ''));
+    let content = contentHtml;
+    if (period) {
+      const days = daysFromToday(Number(period[1]), Number(period[2]), Number(period[3]));
+      content = content.replace(
+        `${period[1]}年${period[2]}月${period[3]}日`,
+        `{{CN_DATE${days >= 0 ? '+' : ''}${days}}}`,
+      );
+    }
+
+    write(
+      `ndrc/${dir}/public/submission-service/article/access-url`,
+      `${JSON.stringify({ _snapshot: { source: accessUrl, capturedAt: '2026-09-20', note: '真实接口响应（原样）' }, status: 1, message: '成功', data: articleUrl }, null, 2)}\n`,
+    );
+    write(
+      `ndrc/${dir}/public/submission-service/column/getArticleDetail`,
+      `${JSON.stringify(
+        {
+          _snapshot: {
+            source: detailUrl,
+            capturedAt: '2026-09-20',
+            note: '真实接口响应裁剪：只保留正文 / 标题 / 日期 / 来源字段，正文里的截止日期换成 {{CN_DATE±N}} 令牌',
+          },
+          status: 1,
+          message: '成功',
+          data: {
+            articleId: detail.data.articleId,
+            articleTitle: detail.data.articleTitle,
+            articleContent: content,
+            publishDate: detail.data.publishDate,
+            articleSource: detail.data.articleSource,
+            columnName: detail.data.columnName,
+            shortUrlKey: detail.data.shortUrlKey,
+            insertApply: detail.data.insertApply,
+          },
+        },
+        null,
+        2,
+      )}\n`,
+    );
+    rows.push({ ...item, dir });
+  }
+
+  // 合成条目（fixture 允许场景合成，见 fixtures/README.md）：access-url 响应缺 articleId
+  // —— 链式跳转在此断掉，抓取层应记日志并**降级保留列表层数据**（条目照常入库、
+  // 状态退回源标注），而不是丢掉条目或把接口响应当成正文。
+  write(
+    'ndrc/i5/public/submission-service/article/access-url',
+    `${JSON.stringify({ _snapshot: { source: '（场景合成）', capturedAt: '2026-09-20', note: 'access-url 响应缺 articleId：链式跳转断裂的降级锚点' }, status: 1, message: '成功', data: 'https://yyglxxbsgw.ndrc.gov.cn/htmls/article/article.html' }, null, 2)}\n`,
+  );
+
+  const listRows = rows.map(
+    (item) => `
+      <li><a href="${item.dir}/sa.html#/${item.key}" target="_blank" title="${item.title}">${item.title}</a><span>${item.date}</span></li>`,
+  );
+  listRows.push(`
+      <li><a href="i5/sa.html#/lianjiebroken" target="_blank" title="【进行中】关于向社会公开征求《链式跳转断裂降级验证办法（征求意见稿）》意见的公告">【进行中】关于向社会公开征求《链式跳转断裂降级验证办法（征求意见稿）》意见的公告</a><span>2026-09-10</span></li>`);
+  write(
+    'ndrc/list.html',
+    `<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <title>意见征求-国家发展和改革委员会</title>
+  </head>
+  <body>
+    <!--
+      fixture 快照：国家发展改革委「意见征求」列表页（真实结构，2026-09-20 实抓后裁剪）。
+      真实来源：https://www.ndrc.gov.cn/hdjl/yjzq/
+      结构要点：<ul class="u-list"><li><a href title>标题</a><span>2026/09/04</span></li>；
+      标题带状态标注 —— 【进行中】在前缀、[已结束] 在后缀（两种都要剥离）；
+      <li class="empty"> 是占位行，没有链接。
+      真实条目链接是**数据服务域名**下的前端渲染页
+      https://yyglxxbsgw.ndrc.gov.cn/sa.html#/<shortKey>；快照改写成
+      <条目目录>/sa.html#/<shortKey> 的相对路径 —— 适配器相对当前地址推导后续两跳
+      （access-url 接口 → 正文接口），于是每一跳都落在该条目自己的目录里
+      （fixture 源站按路径映射、不认查询串，见 fixtures/README.md）。
+      截止日期不在列表里，只在正文接口返回的 articleContent 内
+      （「此次公开征求意见的时间为 X 至 Y」），已换成 {{CN_DATE±N}} 令牌。
+    -->
+    <div class="list">
+      <ul class="u-list">${listRows.join('')}
+        <li class="empty"></li>
+      </ul>
+    </div>
+  </body>
+</html>
+`,
+  );
+}
+
+/** 相对今天的天数（用于把真实日期写成令牌；与 fixture 源站按启动时刻锚定一致）。 */
+function daysFromToday(year, month, day) {
+  const now = new Date();
+  const todayUtc = Date.UTC(now.getFullYear(), now.getMonth(), now.getDate());
+  return Math.round((Date.UTC(year, month - 1, day) - todayUtc) / (24 * 60 * 60 * 1000));
+}
+
 // 可用参数只重抓某个源：node scripts/capture-m2-fixtures.mjs moe
 const requested = process.argv.slice(2);
-const captures = { samr: captureSamr, miit: captureMiit, mot: captureMot, moe: captureMoe };
+const captures = { samr: captureSamr, miit: captureMiit, mot: captureMot, moe: captureMoe, ndrc: captureNdrc };
 const selected = requested.length > 0 ? requested : Object.keys(captures);
 let failed = 0;
 for (const name of selected) {

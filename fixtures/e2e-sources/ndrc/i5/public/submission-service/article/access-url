@@ -1,0 +1,10 @@
+{
+  "_snapshot": {
+    "source": "（场景合成）",
+    "capturedAt": "2026-09-20",
+    "note": "access-url 响应缺 articleId：链式跳转断裂的降级锚点"
+  },
+  "status": 1,
+  "message": "成功",
+  "data": "https://yyglxxbsgw.ndrc.gov.cn/htmls/article/article.html"
+}

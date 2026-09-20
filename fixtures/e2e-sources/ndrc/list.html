@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <title>意见征求-国家发展和改革委员会</title>
+  </head>
+  <body>
+    <!--
+      fixture 快照：国家发展改革委「意见征求」列表页（真实结构，2026-09-20 实抓后裁剪）。
+      真实来源：https://www.ndrc.gov.cn/hdjl/yjzq/
+      结构要点：<ul class="u-list"><li><a href title>标题</a><span>2026/09/04</span></li>；
+      标题带状态标注 —— 【进行中】在前缀、[已结束] 在后缀（两种都要剥离）；
+      <li class="empty"> 是占位行，没有链接。
+      真实条目链接是**数据服务域名**下的前端渲染页
+      https://yyglxxbsgw.ndrc.gov.cn/sa.html#/<shortKey>；快照改写成
+      <条目目录>/sa.html#/<shortKey> 的相对路径 —— 适配器相对当前地址推导后续两跳
+      （access-url 接口 → 正文接口），于是每一跳都落在该条目自己的目录里
+      （fixture 源站按路径映射、不认查询串，见 fixtures/README.md）。
+      截止日期不在列表里，只在正文接口返回的 articleContent 内
+      （「此次公开征求意见的时间为 X 至 Y」），已换成 {{CN_DATE±N}} 令牌。
+    -->
+    <div class="list">
+      <ul class="u-list">
+      <li><a href="i1/sa.html#/sdgsglbf" target="_blank" title="【进行中】国家发展改革委关于向社会公开征求《售电公司管理办法（公开征求意见稿）》意见的公告">【进行中】国家发展改革委关于向社会公开征求《售电公司管理办法（公开征求意见稿）》意见的公告</a><span>2026/09/04</span></li>
+      <li><a href="i2/sa.html#/rmfkgcjsglgd" target="_blank" title="【进行中】关于向社会公开征求对《人民防空工程建设管理规定（征求意见稿）》意见的公告">【进行中】关于向社会公开征求对《人民防空工程建设管理规定（征求意见稿）》意见的公告</a><span>2026/09/01</span></li>
+      <li><a href="i3/sa.html#/nyxzcf" target="_blank" title="【进行中】国家发展改革委关于向社会公开征求《能源行业行政处罚案件违法所得认定办法（公开征求意见稿）》意见的公告">【进行中】国家发展改革委关于向社会公开征求《能源行业行政处罚案件违法所得认定办法（公开征求意见稿）》意见的公告</a><span>2026/08/28</span></li>
+      <li><a href="i4/sa.html#/dwgpkfjgbf" target="_blank" title="国家发展改革委关于向社会公开征求《电网公平开放监管办法》（公开征求意见稿）意见的公告[已结束]">国家发展改革委关于向社会公开征求《电网公平开放监管办法》（公开征求意见稿）意见的公告[已结束]</a><span>2026/07/30</span></li>
+      <li><a href="i5/sa.html#/lianjiebroken" target="_blank" title="【进行中】关于向社会公开征求《链式跳转断裂降级验证办法（征求意见稿）》意见的公告">【进行中】关于向社会公开征求《链式跳转断裂降级验证办法（征求意见稿）》意见的公告</a><span>2026-09-10</span></li>
+        <li class="empty"></li>
+      </ul>
+    </div>
+  </body>
+</html>

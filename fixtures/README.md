@@ -54,7 +54,18 @@ fixtures/
     moe/                     #   教育部「征求意见」：list.html 静态列表，标题取 title 属性
       list.html              #   （联合发布条目的链接文本被截断）；历史归档，不用令牌
       jyb_xwfb/s248/*/*.html
+    ndrc/                    #   国家发展改革委「意见征求」：链式跳转源（issue #20），
+      list.html              #   条目 href 写成 <条目目录>/sa.html#/<shortKey>，后续两跳
+      i1/ i2/ …              #   各落在自己的目录里（fixture 源站按路径映射、不认查询串）
+        public/submission-service/article/access-url        # 第 2 跳：接口响应（无扩展名，
+                                                            #   源站按文本提供并替换令牌）
+        public/submission-service/column/getArticleDetail   # 第 3 跳：正文接口响应
+      i5/                    #   i5 = 场景合成的「链断掉」锚点（access-url 响应缺
+                             #   articleId → 抓取层记日志并降级保留列表层数据）
 ```
+
+无扩展名的快照文件（真实数据接口路径就无扩展名）由 fixture 源站按文本提供，
+同样做日期令牌替换。
 
 ## 快照命名与路径约定
 
