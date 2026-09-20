@@ -4,7 +4,8 @@ FROM node:24-slim
 WORKDIR /app
 
 COPY package.json package-lock.json ./
-RUN npm ci
+# better-sqlite3 自带预编译二进制，slim 镜像无 Python/工具链，跳过 install 脚本（ADR-0001 同源处理）
+RUN npm ci --ignore-scripts
 
 COPY . .
 RUN npm run build
