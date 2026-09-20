@@ -6,6 +6,7 @@ import {
   blockText,
   collectAttachments,
   extractDeadline,
+  firstContentSelector,
   normalizeWhitespace,
   resolveUrl,
   stripStatusMarker,
@@ -31,8 +32,10 @@ import {
  *   截止日期解析不到时采用（见 registry 的 NormalizedNotice.status）。
  * - 条目链接**跨域混排**：本部 `./202609/t….html`、民航局
  *   `https://www.caac.gov.cn/HDJL/YJZJ/…`、国家铁路局 `https://www.nra.gov.cn/…`。
- *   跨域条目的详情页结构不属于本源模板 → 详情解析不到正文 / 截止日期，
- *   但标题、机关（标题前缀「中国民航局关于…」）、发布日期、状态仍然完整入库。
+ *   跨域条目的详情页不属于本源模板，正文容器按候选列表**逐个探测**
+ *   （见 DETAIL_CONTENT_SELECTORS），三站模板都能取到正文、截止日期与附件；
+ *   将来出现第四种模板时，条目仍以「标题 + 机关（标题前缀）+ 发布日期 + 状态 +
+ *   官方链接」入库，不整条丢弃。
  * - 详情页（本部条目）：`h1.article-title` 标题、`.article-meta .publish-date`
  *   「2026-09-07 17:00」、正文 `#article-content`；截止句写法
  *   「意见反馈截止日期为2026年10月7日」，附件（.docx / .wps）在正文容器内。
@@ -49,6 +52,19 @@ const LIST_URL = 'https://www.mot.gov.cn/hudong/yijianzhengji/index.html';
 
 /** 栏目主办方兜底（标题取不到机关前缀时，如「关于《…》公开征求意见的通知」）。 */
 const DEFAULT_AGENCY = '交通运输部';
+
+/**
+ * 详情页正文容器候选（按序探测，取第一个有正文的）：
+ * - `#article-content`：交通运输部本站模板；
+ * - `#Zoom`：国家铁路局（www.nra.gov.cn）；
+ * - `div.content`：中国民用航空局（www.caac.gov.cn，正文与附件都在这一个容器里）。
+ *
+ * 列表条目跨域混排，三个站点模板各不相同。**按内容探测而非按 host 分派**：
+ * E2E fixture 源站的 host 是本地地址，按 host 分派会让快照与生产走两条不同代码路径
+ * （理由见 extract.ts 的 firstContentSelector）。全部探测不到时条目仍以
+ * 「标题 + 机关 + 发布日期 + 状态 + 官方链接」入库，不整条丢弃。
+ */
+const DETAIL_CONTENT_SELECTORS = ['#article-content', '#Zoom', 'div.content'] as const;
 
 export const motAdapter: SourceAdapter = {
   id: 'mot',
@@ -100,9 +116,11 @@ export const motAdapter: SourceAdapter = {
         normalizeWhitespace($('.article-meta .publish-date').first().text()).slice(0, 10),
       ) ?? undefined;
 
-    const bodyText = blockText($, '#article-content');
+    // 正文容器按内容探测（本站 / 民航局 / 铁路局模板不同）；正文与附件取同一容器
+    const container = firstContentSelector($, DETAIL_CONTENT_SELECTORS);
+    const bodyText = container ? blockText($, container) : undefined;
     const deadlineAt = extractDeadline(bodyText) ?? undefined;
-    const attachments = collectAttachments($, pageUrl, '#article-content');
+    const attachments = container ? collectAttachments($, pageUrl, container) : [];
 
     if (!title && !publishedAt && !deadlineAt && !bodyText && attachments.length === 0) {
       return null;

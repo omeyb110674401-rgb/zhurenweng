@@ -237,7 +237,7 @@ async function captureMot() {
   $('ul.news-list li.news-item').each((_, element) => {
     const row = $(element);
     const href = row.find('a.news-link').attr('href') ?? '';
-    if (!href.startsWith('./')) return; // 本部条目（跨域条目在 fixture 里单独合成）
+    if (!href.startsWith('./')) return; // 本部条目（跨域条目见 captureMotForeign）
     items.push({
       href: href.replace(/^\.\//, 'hudong/yijianzhengji/'),
       status: row.find('.statusX').text().trim(),
@@ -263,19 +263,28 @@ async function captureMot() {
       </li>`;
 
   // 合成条目（fixture 允许场景合成，见 fixtures/README.md「快照来源与裁剪标注」）：
-  // ① 跨域条目：真实站点里是 https://www.caac.gov.cn/… 的绝对地址，快照改写成
-  //    fixture 源站内的相对路径，指向一份「其它站点模板」的详情页 —— 用于验证
-  //    「跨域详情解析不到正文 / 截止日期时，状态退回源标注」；
+  // ① 跨域条目（民航局 / 铁路局 / 未知模板）：真实列表里是绝对地址（www.caac.gov.cn、
+  //    www.nra.gov.cn），快照改写成 fixture 源站内的相对路径，指向按真实模板裁剪的
+  //    详情页 —— 锁定「跨域模板也能取到正文 / 截止日期 / 附件」（issue #24）；
+  //    另有第三种「未知模板」占位页，锁定模板不认识时的降级行为；
   // ② 标注与截止日期冲突的条目：标注 [进行中] 但详情截止日期已过 ——
   //    用于锁定「截止日期优先于源标注」的推导次序。
   const rows = chosen.map(realRow);
-  rows.push(`
-      <li class="news-item">
-        <a href="foreign/caac-t20260908.html" target="_blank" class="news-link">
-          <span class="news-title"><span class="statusX">[进行中]</span> - 中国民航局关于《运输机场运营许可规定（征求意见稿）》公开征求意见的通知</span>
-          <span class="news-date">2026-09-09</span>
-        </a>
-      </li>`);
+  rows.push(crossDomainRow({
+    href: 'foreign/caac-t20260908.html',
+    title: '中国民航局关于《运输机场运营许可规定（征求意见稿）》公开征求意见的通知',
+    date: '2026-09-09',
+  }));
+  rows.push(crossDomainRow({
+    href: 'foreign/nra-t20260702.html',
+    title: '国家铁路局关于《铁路交通事故调查处理规则（修订草案征求意见稿）》公开征求意见的通知',
+    date: '2026-07-02',
+  }));
+  rows.push(crossDomainRow({
+    href: 'foreign/unknown-template.html',
+    title: '国家能源局关于《电力辅助服务市场基本规则（征求意见稿）》公开征求意见的通知',
+    date: '2026-06-15',
+  }));
   rows.push(`
       <li class="news-item">
         <a href="hudong/yijianzhengji/202609/t20260910_4299999.html" target="_blank" class="news-link">
@@ -353,26 +362,88 @@ async function captureMot() {
     write(`mot/${href}`, stripNoise(html));
   }
 
-  // 跨域站点的「其它模板」详情页：结构与 mot 本部模板不同，适配器解析不到正文与截止日期
+  await captureMotForeign();
+}
+
+/** 跨域条目行（合成：真实列表里是跨域绝对地址，快照改写成 fixture 源站内相对路径）。 */
+function crossDomainRow({ href, title, date }) {
+  return `
+      <li class="news-item">
+        <a href="${href}" target="_blank" class="news-link">
+          <span class="news-title"><span class="statusX">[进行中]</span> - ${title}</span>
+          <span class="news-date">${date}</span>
+        </a>
+      </li>`;
+}
+
+/**
+ * 跨域详情页（issue #24）：交通运输部栏目里混排了民航局（www.caac.gov.cn）与
+ * 国家铁路局（www.nra.gov.cn）的条目，两站模板与本部不同 —— 线上曾有 7 条因此
+ * 正文与截止日期全空。这里按**真实页面**裁剪出各自的正文容器，作为回归快照：
+ *
+ * - 民航局 `div.content`：正文与附件在同一个容器里，截止句写法是
+ *   「意见反馈截止日期**为：**2026年10月7日」（「为」与「：」同时出现，
+ *   extractDeadline 的引导词必须容得下组合）；
+ * - 国家铁路局 `#Zoom`：正文容器里**保留**真实页面的那段内联脚本 ——
+ *   真实页面如此，快照要能锁定「脚本源码不得混进正文」；
+ * - 第三种「未知模板」占位页：锁定模板不认识时的降级（条目仍以列表层的
+ *   标题 / 机关 / 发布日期 / 状态入库，不整条丢弃）。
+ */
+async function captureMotForeign() {
+  const plans = [
+    {
+      path: 'mot/foreign/caac-t20260908.html',
+      url: 'https://www.caac.gov.cn/HDJL/YJZJ/202609/t20260908_231688.html',
+      container: 'div.content',
+      replacements: [['2026年10月7日', '{{CN_DATE+17}}']],
+      note: `民航局站点模板：正文与附件同在一个 div.content 容器里，
+      适配器的正文容器候选列表里第三项即此选择器。`,
+    },
+    {
+      path: 'mot/foreign/nra-t20260702.html',
+      url: 'https://www.nra.gov.cn/xxgk/gkml/ztjg/zqyj/202607/t20260702_351536.shtml',
+      container: '#Zoom',
+      replacements: [['2026年7月30日', '{{CN_DATE+12}}']],
+      keepScripts: true,
+      note: `国家铁路局站点模板：正文容器 #Zoom。**刻意保留**真实页面正文里的
+      一段内联脚本（document.write 相关链接）—— 快照要锁定「脚本不得混进正文」
+      （blockText 先剔除 script/style/noscript 再取文本）。`,
+    },
+  ];
+
+  for (const plan of plans) {
+    console.log(`mot：抓跨域详情 ${plan.url}`);
+    const raw = await get(plan.url);
+    let html = trimDetail(raw, { metas: [], containers: [plan.container], maxBlocks: 12 });
+    html = tokenize(html, plan.replacements);
+    if (!plan.keepScripts) html = stripNoise(html);
+    html = html.replace(
+      '  <body>',
+      `  <body>\n    <!--\n      fixture 快照：**跨域站点模板**（${plan.note.trim()}）\n      真实来源：${plan.url}\n      快照按 fixture 源站内的相对路径引用（E2E 不访问真实站点，ADR-0001）。\n    -->`,
+    );
+    write(plan.path, html);
+  }
+
+  // 未知模板占位页：结构不属于任何已知模板 → 适配器探测不到正文容器
   write(
-    'mot/foreign/caac-t20260908.html',
+    'mot/foreign/unknown-template.html',
     `<!doctype html>
 <html lang="zh-CN">
   <head>
     <meta charset="utf-8" />
-    <title>中国民航局关于《运输机场运营许可规定（征求意见稿）》公开征求意见的通知</title>
+    <title>国家能源局关于《电力辅助服务市场基本规则（征求意见稿）》公开征求意见的通知</title>
   </head>
   <body>
     <!--
-      fixture 快照：**其它站点模板**（民航局站点）的占位详情页。
-      真实列表里这条是跨域绝对地址 https://www.caac.gov.cn/HDJL/YJZJ/202609/t20260908_231688.html；
-      快照把 href 改写为 fixture 源站内的相对路径（E2E 不访问真实站点，ADR-0001），
-      并保留「模板与本部不同」这一关键事实：页面里没有 h1.article-title / #article-content，
-      适配器解析不到标题、正文与截止日期，条目状态应退回列表层的 [进行中] 标注。
+      fixture 快照：**未知模板**占位详情页（场景合成）。
+      用途：锁定「详情页模板不认识时的降级」—— 适配器的正文容器候选
+      （#article-content / #Zoom / div.content）都探测不到，条目仍以列表层的
+      标题 / 机关（标题前缀）/ 发布日期 / 状态入库，不整条丢弃、也不误取侧栏。
+      真实场景对应：栏目里将来出现第四个站点的条目（模板尚未适配）。
     -->
-    <div class="caac-article">
-      <h2>中国民航局关于《运输机场运营许可规定（征求意见稿）》公开征求意见的通知</h2>
-      <div class="caac-body"><p>（其它站点模板，结构与本产品适配的交通运输部本部模板不同。）</p></div>
+    <div class="portal-unknown">
+      <h2>国家能源局关于《电力辅助服务市场基本规则（征求意见稿）》公开征求意见的通知</h2>
+      <div class="portal-unknown-body"><p>（未知站点模板，结构与本产品已适配的模板均不同。）</p></div>
     </div>
   </body>
 </html>
@@ -605,8 +676,16 @@ function daysFromToday(year, month, day) {
 }
 
 // 可用参数只重抓某个源：node scripts/capture-m2-fixtures.mjs moe
+// （mot-foreign：只重抓跨域模板快照，不动列表与本部详情）
 const requested = process.argv.slice(2);
-const captures = { samr: captureSamr, miit: captureMiit, mot: captureMot, moe: captureMoe, ndrc: captureNdrc };
+const captures = {
+  samr: captureSamr,
+  miit: captureMiit,
+  mot: captureMot,
+  'mot-foreign': captureMotForeign,
+  moe: captureMoe,
+  ndrc: captureNdrc,
+};
 const selected = requested.length > 0 ? requested : Object.keys(captures);
 let failed = 0;
 for (const name of selected) {

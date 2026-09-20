@@ -26,8 +26,10 @@ import { createFixtureServer } from './helpers/fixture-server.mjs';
  *
  * 本场景另锁定两条**状态推导次序**（issue #18 引入 NormalizedNotice.status）：
  * ① 截止日期优先于源标注 —— 合成条目标注 [进行中] 但详情截止日期已过 → 已截止；
- * ② 截止日期解析不到时用源标注 —— 跨域条目详情页是别的站点模板，解析不到正文与
- *    截止日期，状态退回 [进行中]（否则会被误判成「已截止」或「无截止日期即进行中」）。
+ * ② 截止日期解析不到时用源标注 —— 详情页模板不认识（未知站点）时解析不到正文与
+ *    截止日期，状态退回 [进行中]（否则会被误判成「已截止」或「无截止日期即进行中」）；
+ * ③ 跨域条目若模板**已适配**（民航局 div.content / 铁路局 #Zoom），正文、截止日期与
+ *    附件都要取到（issue #24：曾 7 条全空，占全站 5%）。
  *
  * fixture 根目录是 fixtures/e2e-sources/（只含这四个源；M1 三源在 fixture 源站上
  * 404，属预期 —— 本场景只断言这四个源）。
@@ -55,6 +57,8 @@ const TITLES = {
   motClosed2:
     '交通运输部关于公开征求《关于修改〈中华人民共和国船舶油污损害民事责任保险实施办法〉的决定（征求意见稿）》 意见的通知',
   motCrossDomain: '中国民航局关于《运输机场运营许可规定（征求意见稿）》公开征求意见的通知',
+  motNra: '国家铁路局关于《铁路交通事故调查处理规则（修订草案征求意见稿）》公开征求意见的通知',
+  motUnknownTemplate: '国家能源局关于《电力辅助服务市场基本规则（征求意见稿）》公开征求意见的通知',
   motConflict: '关于《公路水运工程安全生产监督管理办法（修订征求意见稿）》公开征求意见的通知',
   moeClosed: '教育部关于《校外培训管理条例（征求意见稿）》公开征求意见的公告',
   moeJoint: '人力资源社会保障部办公厅 教育部办公厅关于《关于深化高等学校教师职称制度改革的指导意见（征求意见稿）》公开征求意见的通知',
@@ -68,7 +72,7 @@ const TITLES = {
   ndrcBrokenChain: '关于向社会公开征求《链式跳转断裂降级验证办法（征求意见稿）》意见的公告',
 };
 
-/** 全部入库条目（22 条：samr 5 + miit 4 + mot 5 + moe 3 + ndrc 5）。 */
+/** 全部入库条目（24 条：samr 5 + miit 4 + mot 7 + moe 3 + ndrc 5）。 */
 const ALL_TITLES = Object.values(TITLES);
 
 /** 未入库条目：交通运输部栏目里混入的非征求意见条目（状态位为空，适配器据此过滤）。 */
@@ -181,15 +185,15 @@ describe('issue #18：M2 扩源（交通运输部 / 市场监管总局 / 工业�
     assert.equal(run.code, 0, `worker 应正常退出，输出：${run.output}`);
     assert.match(run.output, /源 samr 抓取完成：列表 5 条，新增 5，更新 0/);
     assert.match(run.output, /源 miit 抓取完成：列表 4 条，新增 4，更新 0/);
-    // mot 列表 6 行 → 过滤掉 1 条非征求意见条目（答记者问 / 反馈情况）后入库 5 条
-    assert.match(run.output, /源 mot 抓取完成：列表 5 条，新增 5，更新 0/);
+    // mot 列表 8 行 → 过滤掉 1 条非征求意见条目（答记者问 / 反馈情况）后入库 7 条
+    assert.match(run.output, /源 mot 抓取完成：列表 7 条，新增 7，更新 0/);
     assert.match(run.output, /源 moe 抓取完成：列表 3 条，新增 3，更新 0/);
     assert.match(run.output, /源 ndrc 抓取完成：列表 5 条，新增 5，更新 0/);
     // 链式跳转断裂的那条：记日志降级、不中断整源（条目仍以列表层数据入库）
     assert.match(run.output, /详情页抓取失败（保留列表层数据）[^\n]*access-url 响应缺少 articleId/);
   });
 
-  it('首页：22 条新源条目全部呈现，非征求意见条目被过滤', async () => {
+  it('首页：24 条新源条目全部呈现，非征求意见条目被过滤', async () => {
     const html = await fetch(`${app.url}/`).then((response) => response.text());
     const blocks = extractItemBlocks(html);
     assert.equal(blocks.length, ALL_TITLES.length, `首页应恰好 ${ALL_TITLES.length} 条`);
@@ -248,19 +252,59 @@ describe('issue #18：M2 扩源（交通运输部 / 市场监管总局 / 工业�
     assert.equal(block.countdown, null);
   });
 
-  it('状态推导②：跨域条目详情不可解析时保留源标注（中国民航局条目）', async () => {
+  it('状态推导②：未知模板详情不可解析时保留源标注（降级不丢条目）', async () => {
     const html = await fetch(`${app.url}/`).then((response) => response.text());
-    const block = blockOf(extractItemBlocks(html), TITLES.motCrossDomain);
-    assert.equal(block.badge, '征求意见中', '跨域详情解析不到截止日期时应退回列表的 [进行中] 标注');
+    const block = blockOf(extractItemBlocks(html), TITLES.motUnknownTemplate);
+    assert.equal(block.badge, '征求意见中', '详情解析不到截止日期时应退回列表的 [进行中] 标注');
     assert.equal(block.countdown, null, '没有截止日期就不展示倒计时');
-    // 机关取自标题前缀（跨域条目的主办机关是民航局，不是交通运输部）；
+    // 条目本身仍以列表层数据入库（标题 / 机关 / 发布日期 / 官方链接），不整条丢弃
+    assert.equal(block.title, TITLES.motUnknownTemplate);
+    assert.equal(
+      stripSsrComments(await fetch(`${app.url}${block.href}`).then((response) => response.text()))
+        .includes('国家能源局'),
+      true,
+      '机关取自标题前缀，未知模板不影响列表层字段',
+    );
+  });
+
+  it('跨域详情模板：民航局（div.content）与铁路局（#Zoom）都能取到正文、截止日期与附件', async () => {
+    const html = await fetch(`${app.url}/`).then((response) => response.text());
+    const blocks = extractItemBlocks(html);
+
+    // 民航局：正文与附件同在一个 div.content 容器里；截止句是「意见反馈截止日期为：X」
+    // （「为」与「：」同时出现 —— 旧版 extractDeadline 只允许一个引导字符，整条抽不到）
+    const caacBlock = blockOf(blocks, TITLES.motCrossDomain);
+    assert.equal(caacBlock.badge, '征求意见中');
+    assert.equal(caacBlock.countdown, '剩 17 天', '截止日期取到了才会出现倒计时');
+    const caacText = stripSsrComments(
+      await fetch(`${app.url}${caacBlock.href}`).then((response) => response.text()),
+    );
+    assert.match(caacText, /为进一步规范运输机场运营许可管理/, '正文取自 div.content');
+    assert.match(caacText, /jcsaqc@caac\.gov\.cn/, '正文含反馈渠道（「如何提意见」的信息源）');
+    assert.match(caacText, /运输机场运营许可规定（征求意见稿）\.pdf/, '附件 1');
+    assert.match(caacText, /意见反馈表\.docx/, '附件 2');
     // 机关名经归一（issue #21）：标题里的「中国民航局」入库为规范名「中国民用航空局」
-    const detail = await fetch(`${app.url}${block.href}`).then((response) => response.text());
     assert.match(
-      stripSsrComments(detail),
+      caacText,
       /发布机关<\/dt><dd>中国民用航空局</,
       '简称「中国民航局」归一为规范名「中国民用航空局」',
     );
+
+    // 国家铁路局：正文容器 #Zoom，页面正文里有一段内联脚本（document.write 相关链接），
+    // 脚本源码不得混进正文
+    const nraBlock = blockOf(blocks, TITLES.motNra);
+    assert.equal(nraBlock.badge, '征求意见中');
+    assert.equal(nraBlock.countdown, '剩 12 天');
+    const nraText = stripSsrComments(
+      await fetch(`${app.url}${nraBlock.href}`).then((response) => response.text()),
+    );
+    assert.match(nraText, /国家铁路局组织修订形成《铁路交通事故调查处理规则/, '正文取自 #Zoom');
+    assert.match(nraText, /ajsgw@nra\.gov\.cn/);
+    assert.ok(
+      !/document\.write|str_appendix|file_appendix/.test(nraText),
+      '正文里不得出现内联脚本源码（blockText 先剔除 script/style/noscript）',
+    );
+    assert.match(nraText, /铁路交通事故调查处理规则（修订草案征求意见稿）修订说明/, '附件');
   });
 
   it('教育部源：历史归档条目全部已截止，联合发布机关取完整标题前缀', async () => {

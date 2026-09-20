@@ -62,10 +62,17 @@ export function rowsOf(data: Record<string, unknown>, key: string): Record<strin
  * 正文 → 纯文本：按「最内层块级元素」逐块取文本（政府页面正文混用 `<p>` 与
  * `<div>` 两种排版，只取 p 会漏掉整段内容），块间以换行连接；
  * 无块级元素时退化为整块文本。containerSelector 省略时作用于整篇文档。
+ *
+ * 先在**克隆体**上剔除 `script / style / noscript`：部分政务站把内联脚本直接写在
+ * 正文容器里（如民航局 `div.content` 末尾的 `appendixfile` 赋值、铁路局 `#Zoom`
+ * 里的 `document.write`），不剔除会混进正文、污染检索与后续 AI 摘要输入。
+ * 用克隆而非就地删除，避免影响调用方后续的附件收集。
  */
 export function blockText($: CheerioAPI, containerSelector?: string): string | undefined {
-  const root = containerSelector ? $(containerSelector).first() : $.root();
-  if (root.length === 0) return undefined;
+  const found = containerSelector ? $(containerSelector).first() : $.root();
+  if (found.length === 0) return undefined;
+  const root = found.clone();
+  root.find('script, style, noscript').remove();
 
   const blocks: string[] = [];
   root.find('p, div, li, td').each((_, element) => {
@@ -125,23 +132,31 @@ export function collectAttachments(
   return attachments;
 }
 
-/** 日期文本（中文 / ISO / 斜杠三种写法，均要求到「日」）。 */
-const DATE_TEXT = String.raw`(\d{4}年\d{1,2}月\d{1,2}日|\d{4}-\d{1,2}-\d{1,2}|\d{4}/\d{1,2}/\d{1,2})`;
+/**
+ * 日期文本（中文 / 横线 / 斜杠 / 点分四种写法，均要求到「日」）。
+ * 与 lib/dates.ts 的 normalizeDateText 支持范围严格一致 —— 正则认了但转不出来的
+ * 写法等于没认（斜杠写法就曾如此，抽到了日期却在归一化那步变成 null）。
+ */
+const DATE_TEXT = String.raw`(\d{4}年\d{1,2}月\d{1,2}日|\d{4}[-/.]\d{1,2}[-/.]\d{1,2})`;
 
 /**
  * 从正文纯文本中抽取「征求意见截止日期」。
  *
- * 官方通知里截止日期的写法并不统一（实测三源各不相同），按优先级依次匹配：
+ * 官方通知里截止日期的写法并不统一（实测各源各不相同），按优先级依次匹配：
  * 1. `征求意见截止时间为2026年10月14日` / `截止日期：2026-10-14`（司法部、生态环境部常见）；
  * 2. `征求意见时间为2026年3月20日至2026年4月19日` —— 取区间结束日（司法部最常见写法）；
  * 3. `请于2026年10月14日前反馈` —— 取「于…前」中的日期。
  * 都匹配不到时返回 null（保持字段为空，绝不用列表页日期或抓取日期顶替）。
+ *
+ * 规则 1 的引导词用 `[为:：]*` 而非「最多一个」：民航局实测写法是
+ * `意见反馈截止日期为：2026年10月7日`（「为」与「：」**同时**出现），
+ * 旧写法只允许一个引导字符，导致该写法整条抽不到截止日期。
  */
 export function extractDeadline(bodyText: string | undefined): string | null {
   if (!bodyText) return null;
   const text = normalizeWhitespace(bodyText);
   const rules = [
-    new RegExp(String.raw`截止(?:日期|时间)?(?:为|：|:)?\s*${DATE_TEXT}`),
+    new RegExp(String.raw`截止(?:日期|时间)?\s*[为:：]*\s*${DATE_TEXT}`),
     new RegExp(String.raw`(?:至|到)\s*${DATE_TEXT}`),
     new RegExp(String.raw`(?:请|应)?于\s*${DATE_TEXT}\s*(?:前|之前)`),
   ];
@@ -153,6 +168,26 @@ export function extractDeadline(bodyText: string | undefined): string | null {
     }
   }
   return null;
+}
+
+/**
+ * 按序返回第一个「有正文」的容器选择器；都为空时返回 undefined。
+ *
+ * 用于详情页模板不唯一的源：交通运输部「意见征集」栏目里混排了民航局
+ * （`div.content`）与国家铁路局（`#Zoom`）的条目 —— 按 host 分派在 E2E fixture
+ * 里会失效（fixture 源站 host 是本地地址，与生产 host 不同，两条代码路径不一致），
+ * 因此改为**按内容探测**：同一份选择器列表在生产与快照上走同一条路径。
+ * 顺序按「主正文容器」的常见程度排列，取到即止，避免误取侧栏或页脚。
+ */
+export function firstContentSelector(
+  $: CheerioAPI,
+  selectors: readonly string[],
+): string | undefined {
+  for (const selector of selectors) {
+    const text = blockText($, selector);
+    if (text !== undefined && text.length > 0) return selector;
+  }
+  return undefined;
 }
 
 /**

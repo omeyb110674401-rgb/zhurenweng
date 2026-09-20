@@ -13,11 +13,18 @@ export function localDateIso(date: Date): string {
   return `${y}-${m}-${d}`;
 }
 
-/** 从 ISO / 中文日期字符串中提取 YYYY-MM-DD；无法解析返回 null。 */
+/**
+ * 从 ISO / 斜杠 / 点分 / 中文日期字符串中提取 YYYY-MM-DD；无法解析返回 null。
+ *
+ * 四种写法都要认：政府站点同一栏目里混用「2026-09-07」「2026/09/07」
+ * 「2026.09.07」「2026年9月7日」是常态。曾只认 ISO 与中文（斜杠只在
+ * extract.ts 的正则里被「认了却转不出来」），斜杠写法的截止日期与发布日期
+ * 会静默丢失 —— 截止日期丢了会连带影响倒计时、列表排序与截止提醒。
+ */
 export function normalizeDateText(text: string | null | undefined): string | null {
   if (!text) return null;
-  const iso = /(\d{4})-(\d{1,2})-(\d{1,2})/.exec(text);
-  if (iso) return toIso(Number(iso[1]), Number(iso[2]), Number(iso[3]));
+  const numeric = /(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})/.exec(text);
+  if (numeric) return toIso(Number(numeric[1]), Number(numeric[2]), Number(numeric[3]));
   const cn = /(\d{4})年(\d{1,2})月(\d{1,2})日/.exec(text);
   if (cn) return toIso(Number(cn[1]), Number(cn[2]), Number(cn[3]));
   return null;
