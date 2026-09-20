@@ -32,8 +32,14 @@ export const notices = pgTable('notices', {
     .notNull()
     .references(() => sources.id),
   title: text('title').notNull(),
-  /** 发布机关 */
+  /** 发布机关（忠实于源站的显示值，联合发文为复合串） */
   agency: text('agency').notNull(),
+  /**
+   * 参与机关集合的竖线包夹串（`|司法部|中国人民银行|`，issue #21）：让「按任一
+   * 参与机关筛选」用一条 LIKE '%|X|%' 精确表达，联合发文因此可被任一参与机关
+   * 检索到。由入库路径从 agency 推导（src/lib/agencies.ts 的 agencyKeysOf）。
+   */
+  agencyKeys: text('agency_keys'),
   /** 官方原文 URL，唯一键防重复入库 */
   url: text('url').notNull().unique(),
   publishedAt: text('published_at'),

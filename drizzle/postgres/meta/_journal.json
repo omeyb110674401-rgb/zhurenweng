@@ -57,6 +57,13 @@
       "when": 1789206921664,
       "tag": "0007_add_source_health_and_alert_sends",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1789911673850,
+      "tag": "0008_add_notice_agency_keys",
+      "breakpoints": true
     }
   ]
 }

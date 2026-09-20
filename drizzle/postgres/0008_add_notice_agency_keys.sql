@@ -1,0 +1,1 @@
+ALTER TABLE "notices" ADD COLUMN "agency_keys" text;

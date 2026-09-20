@@ -7,6 +7,9 @@ import { fileURLToPath } from 'node:url';
 import { after, before, describe, it } from 'node:test';
 import { startAppServer } from './helpers/app-server.mjs';
 import { createFixtureServer } from './helpers/fixture-server.mjs';
+// 期望值计算复用入库 / 统计同一套机关规则（issue #21）：归一 + 按牵头机关归并。
+// 规则本身由 tests/unit/agencies.test.mjs 钉死，这里只保证聚合口径一致。
+import { canonicalAgency, leadAgencyOf } from '../../src/lib/agencies.ts';
 
 /**
  * E2E（issue #11）：数据统计页与出站点击聚合。
@@ -219,7 +222,9 @@ async function expectedStats() {
       // mee：xxgk 模板有「发布机关」字段，hdjl 模板没有 → 未声明时取列表层常量；
       // 截止日期同样只在正文句里（「征求意见截止时间为…」）
       const agencyField = /发布机关[\s\S]{0,80}?<i[^>]*>([^<]+)<\/i>/.exec(detailText);
-      agency = agencyField ? agencyField[1].trim() : '生态环境部';
+      // hdjl 模板无该字段 → 取适配器常量（issue #21 起统一为「生态环境部办公厅」，
+      // 与 xxgk 模板的「发布机关」字段值一致）
+      agency = agencyField ? agencyField[1].trim() : '生态环境部办公厅';
       const listItem = meeListItems.find((candidate) => candidate.title === item.title);
       assert.ok(listItem, `mee 列表应含条目「${item.title}」`);
       published = listItem.published;
@@ -255,13 +260,17 @@ async function expectedStats() {
     );
   }
 
+  // 统计口径（issue #21）：机关名先归一（别名收敛），再按**牵头机关**归并 ——
+  // 联合发文（「司法部、文化和旅游部」）归到第一个机关名下，每条只计一次。
   const agencyTotals = new Map();
   const monthlyByAgency = new Map();
   const buckets = { lte7: 0, b8_15: 0, b16_30: 0, gt30: 0 };
   for (const record of records) {
-    agencyTotals.set(record.agency, (agencyTotals.get(record.agency) ?? 0) + 1);
-    if (!monthlyByAgency.has(record.agency)) monthlyByAgency.set(record.agency, new Map());
-    const byMonth = monthlyByAgency.get(record.agency);
+    record.agency = canonicalAgency(record.agency);
+    record.leadAgency = leadAgencyOf(record.agency);
+    agencyTotals.set(record.leadAgency, (agencyTotals.get(record.leadAgency) ?? 0) + 1);
+    if (!monthlyByAgency.has(record.leadAgency)) monthlyByAgency.set(record.leadAgency, new Map());
+    const byMonth = monthlyByAgency.get(record.leadAgency);
     byMonth.set(record.month, (byMonth.get(record.month) ?? 0) + 1);
     buckets[record.bucket] += 1;
   }
@@ -479,12 +488,20 @@ describe('issue #11：数据统计页与出站点击聚合', () => {
       expected.agencyTotals,
       '机关 → 公示量 聚合应与种子数据一致',
     );
-    // 排序：条目数最多（且唯一最大）的机关排第一
-    const maxCount = Math.max(...expected.agencyTotals.values());
-    const topAgencies = [...expected.agencyTotals.entries()].filter(([, n]) => n === maxCount);
-    assert.equal(topAgencies.length, 1, 'fixture 设计：最大公示量的机关应唯一');
-    assert.equal(rows[0].agency, topAgencies[0][0]);
-    assert.equal(rows[0].count, maxCount);
+    // 排序：条目数降序、机关名升序兜底 —— 断言**整表顺序**而不是「唯一最大者排第一」
+    // （issue #21 起机关按牵头机关归并，fixture 里出现并列最大值，唯一性前提不再成立）
+    assert.deepEqual(
+      rows.map((row) => row.agency),
+      [...expected.agencyTotals.entries()]
+        .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+        .map(([agency]) => agency),
+      '各部门公示量按条目数降序、机关名升序排列',
+    );
+    assert.equal(
+      rows.reduce((sum, row) => sum + row.count, 0),
+      expected.records.length,
+      '各部门合计应等于条目总数（牵头机关归并不重复计数）',
+    );
   });
 
   it('统计页：公示量月度趋势矩阵正确（最近 6 个月 × 机关）', async () => {

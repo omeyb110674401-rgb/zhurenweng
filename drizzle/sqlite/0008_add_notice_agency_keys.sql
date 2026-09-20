@@ -1,0 +1,1 @@
+ALTER TABLE `notices` ADD `agency_keys` text;

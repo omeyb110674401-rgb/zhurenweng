@@ -71,7 +71,8 @@ const NPC = {
  * 第三源 = 生态环境部「意见征集」（issue #14 起替代已下线的中国政府网「意见征集」栏目）。
  * 三条实抓条目覆盖两套真实详情模板：
  * - hdjl（栏目内页 /hdjl/yjzj/zjyj/…shtml）：h2.neiright_Title + .xqLyPc + .neiright_JPZ_GK_CP，
- *   页面无「发布机关」字段 → 机关取列表层常量「生态环境部」；
+ *   页面无「发布机关」字段 → 机关取列表层常量「生态环境部办公厅」（issue #21 起
+ *   与该栏目 xxgk 模板的「发布机关」字段值一致，避免同一栏目出现两种机关名）；
  * - xxgk（政府信息公开页 /xxgk2018/…html）：h1 标题 + .content_top_box「发布机关」+
  *   .content_body_box 正文。
  * 两套模板的截止日期都写在正文句里，附件以相对 .pdf 链接出现在正文内。
@@ -82,7 +83,7 @@ const MEE = {
     title:
       '关于公开征求国家生态环境标准《生态环境影响评价技术导则 核动力厂（征求意见稿）》（修订HJ808-2016）意见的通知',
     detailPath: '/mee/hdjl/yjzj/zjyj/202609/t20260914_1166201.shtml',
-    agency: '生态环境部',
+    agency: '生态环境部办公厅',
     publishedAt: '2026-09-14',
     bodyMarker: 'hediansanchu@mee.gov.cn',
     attachments: ['《生态环境影响评价技术导则 核动力厂（征求意见稿）》（修订HJ808-2016)'],
@@ -290,7 +291,7 @@ describe('issue #5：源注册配置化与多源聚合', () => {
     );
     assert.match(html, /司法部 · 发布：2025-08-04 · 截止：\d{4}-\d{2}-\d{2}/);
     assert.match(html, /司法部 · 发布：2025-06-05 · 截止：\d{4}-\d{2}-\d{2}/);
-    assert.match(html, /生态环境部 · 发布：2026-09-14 · 截止：\d{4}-\d{2}-\d{2}/);
+    assert.match(html, /生态环境部办公厅 · 发布：2026-09-14 · 截止：\d{4}-\d{2}-\d{2}/);
     assert.match(html, /生态环境部办公厅 · 发布：2026-09-11 · 截止：\d{4}-\d{2}-\d{2}/);
     assert.match(html, /全国人大常委会法制工作委员会/);
   });

@@ -1,9 +1,10 @@
-import { and, asc, desc, eq, inArray, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray, or, sql } from 'drizzle-orm';
 import { getDb } from '../client.ts';
 import { notices, outboundClickDaily } from '../schema/sqlite.ts';
 import { syncNoticeVersionLinks } from './versions.ts';
 import { localDateIso } from '../../lib/dates.ts';
 import { deriveCategoryTags } from '../../lib/categories.ts';
+import { agencyKeysOf, canonicalAgency, splitAgencies } from '../../lib/agencies.ts';
 import {
   safeParseJson,
   safeParseJsonArray,
@@ -105,7 +106,15 @@ function filterConditions(options: ListNoticesFilteredOptions) {
     );
   }
   if (options.agency) {
-    conditions.push(eq(notices.agency, options.agency));
+    // 按任一参与机关命中（issue #21）：联合发文（「司法部、中国人民银行…」）在
+    // agency 列是复合串，靠 agency_keys 的竖线包夹串才能被任一参与机关筛到。
+    // 同时保留 agency 精确相等 —— 旧行（迁移前入库、尚未重抓）agency_keys 为空。
+    conditions.push(
+      or(
+        eq(notices.agency, options.agency),
+        sql`${notices.agencyKeys} like ${`%|${options.agency}|%`}`,
+      ),
+    );
   }
   if (options.keyword) {
     const needle = `%${options.keyword.toLowerCase()}%`;
@@ -158,7 +167,14 @@ export async function listNoticeAgencies(): Promise<string[]> {
     .selectDistinct({ agency: notices.agency })
     .from(notices)
     .orderBy(asc(notices.agency));
-  return rows.map((row) => row.agency);
+  // 拆成参与机关集合（issue #21）：下拉里列的是机关而不是「机关组合串」，
+  // 联合发文的每个参与机关都能被单独选中。旧行未重抓时 agency_keys 为空，
+  // 这里直接按 agency 现拆（与入库用的是同一个拆分函数，口径一致）。
+  const names = new Set<string>();
+  for (const row of rows) {
+    for (const name of splitAgencies(row.agency)) names.add(name);
+  }
+  return [...names].sort((a, b) => a.localeCompare(b));
 }
 
 /**
@@ -244,7 +260,8 @@ export async function upsertNotice(input: UpsertNoticeInput): Promise<'inserted'
       .update(notices)
       .set({
         title: input.title,
-        agency: input.agency,
+        agency: canonicalAgency(input.agency),
+        agencyKeys: agencyKeysOf(input.agency),
         publishedAt: input.publishedAt,
         deadlineAt: input.deadlineAt,
         status: input.status,
@@ -258,7 +275,7 @@ export async function upsertNotice(input: UpsertNoticeInput): Promise<'inserted'
     await syncNoticeVersionLinks({
       id: existing[0].id,
       title: input.title,
-      agency: input.agency,
+      agency: canonicalAgency(input.agency),
       previous: { title: existing[0].title, agency: existing[0].agency },
     });
     return 'updated';
@@ -268,7 +285,8 @@ export async function upsertNotice(input: UpsertNoticeInput): Promise<'inserted'
     id: input.id,
     sourceId: input.sourceId,
     title: input.title,
-    agency: input.agency,
+    agency: canonicalAgency(input.agency),
+    agencyKeys: agencyKeysOf(input.agency),
     url: input.url,
     publishedAt: input.publishedAt,
     deadlineAt: input.deadlineAt,
@@ -279,7 +297,11 @@ export async function upsertNotice(input: UpsertNoticeInput): Promise<'inserted'
     fetchedAt: input.fetchedAt,
   });
   // 版本链同步（issue #10）：首版入库时自动尝试与既有条目关联
-  await syncNoticeVersionLinks({ id: input.id, title: input.title, agency: input.agency });
+  await syncNoticeVersionLinks({
+    id: input.id,
+    title: input.title,
+    agency: canonicalAgency(input.agency),
+  });
   return 'inserted';
 }
 

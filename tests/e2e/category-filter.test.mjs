@@ -73,12 +73,18 @@ const EXPECTED_TAGS = {
   [TITLES.chengxu]: ['立法与司法'], // 标题无词，正文「落实立法法要求」命中「立法」
 };
 
-/** 库内去重后的全部发布机关（= 机关下拉选项，按名称排序前的全集） */
+/**
+ * 机关下拉选项的全集（issue #21 起是**参与机关**集合，不是 agency 原值）：
+ * 联合发文「司法部、中国人民银行、金融监管总局、中国证监会、国家外汇局」在下拉里
+ * 拆成 5 个可单独选中的机关，而不是一个复合串选项。
+ */
 const AGENCIES = [
   '全国人大常委会法制工作委员会',
   '司法部',
-  '司法部、中国人民银行、金融监管总局、中国证监会、国家外汇局',
-  '生态环境部',
+  '中国人民银行',
+  '金融监管总局',
+  '中国证监会',
+  '国家外汇局',
   '生态环境部办公厅',
 ];
 
@@ -291,25 +297,39 @@ describe('issue #9：领域标签自动打标与分类浏览筛选', () => {
     assert.match(detail, /工业和信息化部办公厅/);
   });
 
-  it('按发布机关过滤：精确匹配（司法部 ≠ 联合发布前缀；生态环境部 ≠ 办公厅）', async () => {
+  it('按发布机关过滤：任一参与机关都能命中联合发文（issue #21）', async () => {
+    // 司法部自己的两条 + 它牵头的联合发文（金融法）—— 联合发文按参与机关命中
     const html = await fetchHome(`/?agency=${encodeURIComponent('司法部')}`);
     assert.deepEqual(
       listOrder(html),
-      [TITLES.xingzheng, TITLES.chengxu],
-      '机关精确匹配只含「司法部」（不含联合发布的长前缀）',
+      [TITLES.xingzheng, TITLES.jingrong, TITLES.chengxu],
+      '司法部：含其牵头 / 参与的联合发文（金融法）',
     );
-    assert.match(html, /data-testid="filter-result-count"[^>]*>筛选后共 2 条/);
+    assert.match(html, /data-testid="filter-result-count"[^>]*>筛选后共 3 条/);
 
+    // 联合发文的其他参与机关同样能筛到它（改动前下拉里根本没有这些选项）
+    for (const participant of ['中国人民银行', '金融监管总局', '中国证监会', '国家外汇局']) {
+      const hit = await fetchHome(`/?agency=${encodeURIComponent(participant)}`);
+      assert.deepEqual(listOrder(hit), [TITLES.jingrong], `${participant} 应命中其参与的联合发文`);
+    }
+
+    // 复合串原值仍可精确命中（agency 列本身没变，向后兼容）
     const joint = await fetchHome(
       `/?agency=${encodeURIComponent('司法部、中国人民银行、金融监管总局、中国证监会、国家外汇局')}`,
     );
-    assert.deepEqual(listOrder(joint), [TITLES.jingrong], '联合发布机关为完整前缀');
+    assert.deepEqual(listOrder(joint), [TITLES.jingrong], 'agency 原值精确匹配仍可用');
 
+    // 生态环境部栏目：两套详情模板的机关名已统一为办公厅（issue #21）
     const minban = await fetchHome(`/?agency=${encodeURIComponent('生态环境部办公厅')}`);
-    assert.deepEqual(listOrder(minban), [TITLES.shuiyuan, TITLES.haiyu], 'xxgk 模板机关取「发布机关」字段');
+    assert.deepEqual(
+      listOrder(minban),
+      [TITLES.shuiyuan, TITLES.haiyu, TITLES.hedian],
+      '栏目内三套模板统一为「生态环境部办公厅」',
+    );
 
-    const bu = await fetchHome(`/?agency=${encodeURIComponent('生态环境部')}`);
-    assert.deepEqual(listOrder(bu), [TITLES.hedian], 'hdjl 模板机关取列表层常量，与办公厅精确区分');
+    // 旧的拆分写法不再是库内取值（否则筛选与统计仍会被拆成两行）
+    const stale = await fetchHome(`/?agency=${encodeURIComponent('生态环境部')}`);
+    assert.match(stale, /data-testid="notice-empty-state"/, '「生态环境部」不再是库内机关取值');
   });
 
   it('按关键词过滤：标题命中（道路交通安全法）与正文命中（人大正文特征串 / 海洋生态环境）', async () => {
@@ -333,8 +353,8 @@ describe('issue #9：领域标签自动打标与分类浏览筛选', () => {
     );
     assert.deepEqual(
       listOrder(categoryAgency),
-      [TITLES.shuiyuan, TITLES.haiyu],
-      '生态环境 × 生态环境部办公厅应只含两条 xxgk 条目（核动力厂机关的机关是部本级）',
+      [TITLES.shuiyuan, TITLES.haiyu, TITLES.hedian],
+      '生态环境 × 生态环境部办公厅：栏目三套模板机关名统一后都命中',
     );
 
     const categoryKeyword = await fetchHome(

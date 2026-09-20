@@ -253,8 +253,14 @@ describe('issue #18：M2 扩源（交通运输部 / 市场监管总局 / 工业�
     const block = blockOf(extractItemBlocks(html), TITLES.motCrossDomain);
     assert.equal(block.badge, '征求意见中', '跨域详情解析不到截止日期时应退回列表的 [进行中] 标注');
     assert.equal(block.countdown, null, '没有截止日期就不展示倒计时');
-    // 机关取自标题前缀（跨域条目的主办机关是民航局，不是交通运输部）
-    assert.match(stripSsrComments(html), /中国民航局/);
+    // 机关取自标题前缀（跨域条目的主办机关是民航局，不是交通运输部）；
+    // 机关名经归一（issue #21）：标题里的「中国民航局」入库为规范名「中国民用航空局」
+    const detail = await fetch(`${app.url}${block.href}`).then((response) => response.text());
+    assert.match(
+      stripSsrComments(detail),
+      /发布机关<\/dt><dd>中国民用航空局</,
+      '简称「中国民航局」归一为规范名「中国民用航空局」',
+    );
   });
 
   it('教育部源：历史归档条目全部已截止，联合发布机关取完整标题前缀', async () => {
