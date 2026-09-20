@@ -168,6 +168,8 @@ before(async () => {
       FIXTURES_DIR: fixturesDir,
       // 关键注入：全部源适配器的列表页指向本地 fixture 源站（SOURCES_FIXTURE_BASE）
       SOURCES_FIXTURE_BASE: fixtureUrl,
+      // 站点对外地址：canonical / og:url / sitemap 用（生产由 compose 注入）
+      SITE_URL: 'https://zw.test',
     },
   });
 });
@@ -264,6 +266,17 @@ describe('issue #3：全国人大源 → 入库 → 列表/详情 → 出站跳�
     assert.match(goAnchor[1], /go-official-button/, '按钮应带 go-official-button 标识');
     assert.match(html, /分步提意指引/);
     assert.match(html, /本站只引流，不代替官方受理意见/);
+
+    // 页面元数据（可发现性）：标题即公示标题，canonical / og:url 用站点对外地址
+    assert.match(html, new RegExp(`<title>${TITLES.open1} —— 主人翁</title>`), '详情页标题应为公示标题');
+    assert.match(html, /rel="canonical"[^>]*zw\.test\/notices\//, 'canonical 应为绝对地址');
+    assert.match(html, /og:url[^>]*zw\.test\/notices\//, '分享链接 og:url 应为绝对地址');
+    assert.match(html, /og:title[^>]*企业破产法/, '分享标题应为公示标题');
+
+    // sitemap 收录条目详情（可发现性），但不含 302 跳转端点
+    const sitemap = await (await fetch(`${app.url}/sitemap.xml`)).text();
+    assert.match(sitemap, new RegExp(`<loc>https://zw\\.test/notices/${noticeId}</loc>`));
+    assert.ok(!sitemap.includes('/go/'), '跳转端点不该进 sitemap');
 
     // 摘要位（issue #4）：同一 worker 轮次内抓取后即执行摘要任务（stub LLM），
     // 未截止条目详情页渲染五段式摘要 + 显著 AI 标注，不再显示占位。

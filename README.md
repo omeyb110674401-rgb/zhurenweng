@@ -180,10 +180,26 @@ lint 与 e2e 两个 job，同样只依赖 npm。
   （仅摘要就绪时出现，并显著标注「AI 生成，仅供参考，以官方原文为准」；
   特殊字符按 XML 转义）。
 - **站点地址**：feed 内绝对 URL 的基础由 `SITE_URL` 提供（默认
-  `http://localhost:3000`）。它与 `APP_BASE_URL`（订阅邮件内链接的基础地址，
+  `http://localhost:3000`，取值口径见 `src/lib/site-url.ts`，robots / sitemap /
+  canonical 共用）。它与 `APP_BASE_URL`（订阅邮件内链接的基础地址，
   issue #7）**各司其职**：前者面向 RSS 阅读器与站外引用，后者面向邮件接收者，
   两者部署形态不同（如邮件走独立发信域名）时可分别配置；默认值一致，本地
   开发无需设置。
+
+## 可发现性（robots / sitemap / 页面元数据）
+
+- **`GET /robots.txt`**：允许收录全部公示内容；屏蔽 `/admin`（站长看板）、
+  `/go/`（302 跳转端点，收录只会给爬虫制造重定向噪音）、`/api/`（提交端点），
+  并声明 sitemap 绝对地址。
+- **`GET /sitemap.xml`**：首页 + 统计页 + **全部条目详情页**（`lastModified`
+  取抓取时间）；已截止条目同样收录 —— 它们是有效的公示存档页。不含 `/go/`。
+  两者都实时读取库与 `SITE_URL`（`force-dynamic`），收录量级为每月数十条。
+- **页面元数据**：根布局设 `metadataBase`（= `SITE_URL`）与站点级 Open Graph；
+  条目详情页各自生成 `title`（公示标题）、`description`（状态 · 截止日期 ·
+  机关 + 正文首段）、`canonical` 与 `og:url` —— 转发到社交平台或出现在搜索
+  结果里时，展示的是这条公示本身而不是站点通用标题。
+- **自定义 404**（`src/app/not-found.tsx`）：中文说明 + 站内检索 + 回列表入口
+  （Next 默认 404 是英文且没有回站路径）。
 
 ## AI 摘要器（issue #4）
 

@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import type { Metadata } from 'next';
 import { notFound } from 'next/navigation';
 import { getNoticeById } from '@/db/repo/notices';
 import { getNoticeSummary } from '@/db/repo/summaries';
@@ -6,12 +7,52 @@ import { getSourceById } from '@/db/repo/sources';
 import { Countdown, StatusBadge, formatDate } from '@/app/_lib/notice-display';
 import { SummaryPlaceholder, SummaryView } from '@/app/_lib/summary-view';
 import { mailerReady } from '@/lib/mailer-availability';
+import { siteUrl } from '@/lib/site-url';
+import type { NoticeRecord } from '@/db/types';
 
 // 详情数据随抓取管线更新，服务端实时渲染。
 export const dynamic = 'force-dynamic';
 
 interface NoticeDetailPageProps {
   params: Promise<{ id: string }>;
+}
+
+/**
+ * 条目的分享 / 检索摘要（可发现性）：状态 + 截止日期 + 机关 + 正文首段。
+ * 搜索结果的描述片段直接影响点击率，「什么时候截止」放最前。
+ */
+function noticeDescription(notice: NoticeRecord): string {
+  const head: string[] = [];
+  if (notice.status === 'open') head.push('征求意见中');
+  else if (notice.status === 'closed') head.push('已截止');
+  else head.push('已出结果');
+  if (notice.deadlineAt !== null) head.push(`截止 ${notice.deadlineAt}`);
+  if (notice.agency !== '') head.push(`发布机关：${notice.agency}`);
+  const excerpt = (notice.bodyText ?? '').replace(/\s+/g, ' ').trim().slice(0, 120);
+  return `${head.join(' · ')}。${excerpt}`;
+}
+
+/** 条目页元数据：标题即公示标题，分享链接带 canonical 与 og:url（搜索/转发场景）。 */
+export async function generateMetadata({ params }: NoticeDetailPageProps): Promise<Metadata> {
+  const { id } = await params;
+  const notice = await getNoticeById(id);
+  if (!notice) {
+    return { title: '未找到该公示 —— 主人翁' };
+  }
+  const url = `${siteUrl()}/notices/${notice.id}`;
+  const description = noticeDescription(notice);
+  return {
+    title: `${notice.title} —— 主人翁`,
+    description,
+    alternates: { canonical: url },
+    openGraph: {
+      type: 'article',
+      title: notice.title,
+      description,
+      url,
+      publishedTime: notice.publishedAt ?? undefined,
+    },
+  };
 }
 
 export default async function NoticeDetailPage({ params }: NoticeDetailPageProps) {

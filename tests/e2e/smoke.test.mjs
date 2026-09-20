@@ -35,6 +35,8 @@ before(async () => {
       MAILER_PROVIDER: 'stub',
       MAILER_OUTBOX_FILE: path.join(workDir, 'outbox.jsonl'),
       FIXTURES_DIR: fixturesDir,
+      // 站点对外地址：robots / sitemap / canonical / og:url 都基于它（生产由 compose 注入）
+      SITE_URL: 'https://zw.test',
     },
   });
 });
@@ -53,6 +55,24 @@ describe('冒烟：脚手架与端到端骨架', () => {
     assert.match(html, /主人翁/, '页面应包含品牌文案「主人翁」');
     assert.match(html, /暂无公示条目/, '空库时首页应显示公示列表空态');
     assert.match(html, /发现 · 读懂 · 行动/, '页面应包含产品定位文案');
+  });
+
+  it('robots.txt 与 sitemap.xml 可访问且用站点对外地址（可发现性）', async () => {
+    const robotsResponse = await fetch(`${app.url}/robots.txt`);
+    assert.equal(robotsResponse.status, 200);
+    const robots = await robotsResponse.text();
+    assert.match(robots, /Sitemap: https:\/\/zw\.test\/sitemap\.xml/, 'robots 应声明 sitemap 绝对地址');
+    assert.match(robots, /Disallow: \/admin/, '站长看板不该进索引');
+    assert.match(robots, /Disallow: \/go\//, '跳转端点不该进索引');
+    assert.match(robots, /Allow: \//);
+
+    const sitemapResponse = await fetch(`${app.url}/sitemap.xml`);
+    assert.equal(sitemapResponse.status, 200);
+    assert.match(sitemapResponse.headers.get('content-type') ?? '', /xml/);
+    const sitemap = await sitemapResponse.text();
+    assert.match(sitemap, /<loc>https:\/\/zw\.test\/<\/loc>/, '首页应在 sitemap 内（绝对地址）');
+    assert.match(sitemap, /<loc>https:\/\/zw\.test\/stats<\/loc>/, '统计页应在 sitemap 内');
+    assert.ok(!sitemap.includes('/go/'), '302 跳转端点不该进 sitemap');
   });
 
   it('404 页是中文说明并给回站入口（不是 Next 默认英文页）', async () => {

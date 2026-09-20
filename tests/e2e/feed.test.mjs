@@ -182,10 +182,14 @@ describe('issue #6：全量 RSS feed（/feed.xml）', () => {
     const home = await fetch(`${app.url}/`);
     assert.equal(home.status, 200);
     const html = await home.text();
-    assert.match(
+    // 自动发现链接：加了 metadataBase 后 Next 把它解析为绝对地址（SITE_URL 基准）
+    const autodiscovery = /<link[^>]*rel="alternate"[^>]*type="application\/rss\+xml"[^>]*>/.exec(
       html,
-      /<link[^>]*rel="alternate"[^>]*type="application\/rss\+xml"[^>]*href="\/feed\.xml"[^>]*\/>/,
-      'head 应含 RSS 自动发现 <link rel="alternate">',
+    );
+    assert.ok(autodiscovery, 'head 应含 RSS 自动发现 <link rel="alternate">');
+    assert.ok(
+      autodiscovery[0].includes(`href="${app.url}/feed.xml"`),
+      `自动发现链接应为绝对地址（metadataBase），实际：${autodiscovery[0]}`,
     );
     assert.match(html, /href="\/feed\.xml"[^>]*>\s*RSS 订阅/, '页面应含可见的 RSS 订阅入口');
   });
