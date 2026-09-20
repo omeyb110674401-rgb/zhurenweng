@@ -122,6 +122,30 @@ export function SummaryView({
   );
 }
 
+/**
+ * AI 摘要未启用（issue #22）：LLM 端口未配置时替代「生成中」占位。
+ *
+ * 「生成中」是进行时承诺 —— 端口没配置时它永远不会兑现，对外显示等于骗人。
+ * 这里如实说明并把读者引向官方原文（本产品定位是解读与引流，摘要缺失时
+ * 官方原文仍是完整可用的信息源）。
+ */
+export function SummaryUnavailable(): ReactNode {
+  return (
+    <section className="summary-slot" data-testid="summary-unavailable">
+      <div className="summary-head">
+        <span className="summary-tag">AI 摘要</span>
+        <span className="summary-pending" data-testid="summary-unavailable-label">
+          暂未启用
+        </span>
+      </div>
+      <p className="summary-note">
+        本站的 AI 结构化解读尚未启用（未配置大模型端口），本条不提供机器生成摘要。
+        请直接阅读官方原文，或使用下方的分步提意指引。
+      </p>
+    </section>
+  );
+}
+
 /** 摘要占位：pending（生成中）与 failed_review（待人工复核）共用块结构。 */
 export function SummaryPlaceholder({ status }: { status: SummaryStatus }): ReactNode {
   return (

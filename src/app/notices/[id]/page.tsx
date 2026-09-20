@@ -5,7 +5,8 @@ import { getNoticeById } from '@/db/repo/notices';
 import { getNoticeSummary } from '@/db/repo/summaries';
 import { getSourceById } from '@/db/repo/sources';
 import { Countdown, StatusBadge, formatDate } from '@/app/_lib/notice-display';
-import { SummaryPlaceholder, SummaryView } from '@/app/_lib/summary-view';
+import { SummaryPlaceholder, SummaryUnavailable, SummaryView } from '@/app/_lib/summary-view';
+import { llmReady } from '@/lib/llm-availability';
 import { mailerReady } from '@/lib/mailer-availability';
 import { siteUrl } from '@/lib/site-url';
 import type { NoticeRecord } from '@/db/types';
@@ -111,14 +112,18 @@ export default async function NoticeDetailPage({ params }: NoticeDetailPageProps
           </p>
         ) : null}
 
+        {/* 摘要区（issue #4 / #22）：已有摘要照常渲染（绝不隐藏库内内容）；
+            未生成时按 LLM 端口是否可用区分「生成中」占位与「暂未启用」说明 */}
         {summaryInfo?.aiSummaryJson ? (
           <SummaryView
             notice={notice}
             summaryJson={summaryInfo.aiSummaryJson}
             summaryModel={summaryInfo.summaryModel}
           />
-        ) : (
+        ) : llmReady() ? (
           <SummaryPlaceholder status={summaryInfo?.summaryStatus ?? 'pending'} />
+        ) : (
+          <SummaryUnavailable />
         )}
 
         <section className="action-slot">

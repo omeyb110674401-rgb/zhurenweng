@@ -1,4 +1,5 @@
 import { createLlmPort } from '../../src/lib/ports.ts';
+import { llmReady } from '../../src/lib/llm-availability.ts';
 import { sendTaskFailureAlert } from '../../src/lib/alerts.ts';
 import { syncNoticesToSearchIndex } from '../../src/lib/search/sync.ts';
 import {
@@ -76,6 +77,14 @@ export const summarizeNoticesJob: Job = {
   description:
     '对已入库且摘要缺失的未截止条目调用 LLM 生成五段式结构化摘要（重试 3 次后转人工复核）',
   async run(ctx: JobContext): Promise<void> {
+    // LLM 端口未配置时**整轮跳过**（issue #22）：createLlmPort 会抛错，此前表现为
+    // 「任务 summarize-notices 失败」——每轮一条失败日志，配置了 ALERT_EMAIL 时还会
+    // 每天一封任务级告警邮件，而这件事并不会因为重试而好转。跳过并说清原因，
+    // 配置补齐后自动恢复（与 /subscribe 的 mailerReady 门控同一套路数）。
+    if (!llmReady()) {
+      ctx.logger('LLM 端口未配置（LLM_PROVIDER=glm 需要 GLM_API_KEY），本轮跳过摘要任务');
+      return;
+    }
     const llm = createLlmPort();
     const model = llmModelName(llm);
     const targets = await listNoticesForSummary();
