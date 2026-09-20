@@ -11,6 +11,9 @@
  *   KEYWORD_CONTEXT_EXCLUSIONS —— 两种情况都来自真实数据：「数据」在专有名词
  *   「国家法律法规数据库」内；「信息化」在机关名「工业和信息化部」内（词表
  *   刻意避开机关名，但这个词避不开，只能靠排除语境兜底）。
+ * - **名单 / 通讯信息行过滤**：打标前先剔掉正文里的「序号 + 机构名」名单行与
+ *   地址邮编行 —— 机构名是开放集合，无法用排除语境逐词登记，见
+ *   stripListAndContactLines。
  * - **无兜底标签**：没有任何关键词命中的条目 categoryTags 保持空数组
  *   （不强行归入「其他」）——订阅词表因此无需引入一个永远泛匹配的领域，
  *   未打标条目仍出现在未筛选列表与检索结果中，只是不参与领域筛选。
@@ -104,6 +107,52 @@ export function isKnownCategory(value: string): boolean {
 }
 
 /**
+ * 「名单条目」行：序号 + 短名称 + 无句读 / 无括号 / 无书名号 + 含机构名特征词。
+ * 例：「5.国家能源局综合司」「9.中国电力企业联合会」「10.中国产业发展促进会生物质能产业分会」。
+ *
+ * 两个条件缺一不可：只按「无标点短行」判会连带剔掉枚举式正文行（如
+ * 「1.加强源头防控」「2.推进能源结构调整」）；而机构名特征词缺失只会漏剔
+ * （该行保留，最多留下一次误报），不会误删正文 —— 因此特征词表宁可宽，判据
+ * 以「不误删」为先。
+ */
+const LIST_ENTRY_LINE = /^\s*\d+[.．、]\s*[^。，、；：！？《》（）]{2,40}$/;
+/** 机构名特征词（部委 / 院所 / 集团 / 协会 / 地方单位……）：缺失只漏剔，不误删 */
+const ORG_NAME_HINT =
+  /(中国|国家|国际|部|委|局|厅|署|办|司|院|所|中心|站|集团|公司|协会|学会|联合会|大学|学院|基地|银行|委员会|研究所|研究院|编辑部|出版社|学校|医院|实验室|分会|企业)/;
+
+/** 是否为机构名单行（issue #16）。 */
+function isListEntryLine(line: string): boolean {
+  return LIST_ENTRY_LINE.test(line) && ORG_NAME_HINT.test(line);
+}
+
+/**
+ * 「通讯信息」行：地址 / 邮编开头（与词表刻意避开「邮政编码：」同一理由）。
+ * 例：「地址：北京市海淀区永丰产业基地丰德东路4号」「邮编：100012」。
+ */
+const CONTACT_LINE = /^\s*(?:地址|通讯地址|邮寄地址|联系地址|邮编|邮政编码)\s*[：:]/;
+
+/**
+ * 打标前的正文预处理（issue #16）：剔掉机构名单行与通讯信息行。
+ *
+ * 真实 mee 通知末尾会列「征求意见单位」名单（**每行一个机构名**）与联系人通讯地址，
+ * 这些行里的机构名 / 地名会命中领域关键词（能源 / 电力 / 产业 / 石油），把一份
+ * 《铀矿冶流出物和辐射环境监测规定》打进「经济与产业」—— 全库 45 条里 11 条受影响。
+ * 名单是开放的（部委、集团、协会、学会、地方产业园……），无法用「排除语境」逐词登记，
+ * 只能按行剔除。
+ *
+ * 判据来自生产库 45 条全量校验：两条规则共命中 141 行，逐行人工确认**全部**是
+ * 名单条目 / 标签行 / 地址邮编行，无一条是正文。括号与书名号是附件清单条目的特征
+ * （如「9.《固体废物 石油烃（C10-C40）的测定 气相色谱法（征求意见稿）》编制说明」），
+ * 因此附件行不会被误删 —— 附件标题描述的就是公示主题，命中领域关键词是合理的。
+ */
+export function stripListAndContactLines(bodyText: string): string {
+  return bodyText
+    .split('\n')
+    .filter((line) => !isListEntryLine(line) && !CONTACT_LINE.test(line))
+    .join('\n');
+}
+
+/**
  * 关键词是否命中文本（已小写化的 haystack 与 keyword 传入）。
  * 有排除语境的关键词先剔除排除词再判包含（见 KEYWORD_CONTEXT_EXCLUSIONS）。
  */
@@ -121,10 +170,12 @@ function keywordHits(haystack: string, keyword: string): boolean {
  * 按关键词规则为条目打领域标签（入库自动打标，issue #9）。
  * 任一关键词命中标题或正文（不区分大小写）即记入该领域；按领域表顺序输出，
  * 每领域至多一个标签；无命中返回空数组（不打兜底标签，见模块注释）。
+ * 正文先经 stripListAndContactLines 剔掉名单 / 通讯信息行（issue #16）；
+ * 标题不做过滤 —— 标题是权威的主题表述，本身不会是名单行。
  */
 export function deriveCategoryTags(title: string, bodyText?: string | null): string[] {
   const haystackTitle = title.toLowerCase();
-  const haystackBody = (bodyText ?? '').toLowerCase();
+  const haystackBody = stripListAndContactLines(bodyText ?? '').toLowerCase();
   const tags: string[] = [];
   for (const domain of DOMAIN_CATEGORIES) {
     const hit = domain.keywords.some((keyword) => {

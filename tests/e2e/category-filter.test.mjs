@@ -68,7 +68,7 @@ const EXPECTED_TAGS = {
   [TITLES.jingrong]: ['立法与司法'], // 标题「金融法（草案）」命中「草案」（正文已裁剪，无其他命中）
   [TITLES.shuiyuan]: ['生态环境', '数据与网络安全'], // 标题「生态环境标准」+ 正文 6 处裸「数据」
   [TITLES.haiyu]: ['生态环境'], // 标题无领域词，正文「海洋生态环境保护」命中
-  [TITLES.hedian]: ['生态环境'], // 标题「生态环境」；正文机关名「工业和信息化部」不计「信息化」
+  [TITLES.hedian]: ['生态环境'], // 标题「生态环境」；正文名单行「工业和信息化部办公厅」「国家能源局综合司」被名单规则剔除
   [TITLES.xingzheng]: ['立法与司法'], // 标题命中「行政复议」
   [TITLES.chengxu]: ['立法与司法'], // 标题无词，正文「落实立法法要求」命中「立法」
 };
@@ -270,6 +270,25 @@ describe('issue #9：领域标签自动打标与分类浏览筛选', () => {
       '标题含「草案」的 npc 三条与金融法，以及 moj 两条条例（行政复议 / 行政法规制定程序）',
     );
     assert.match(lijisifa, /data-testid="filter-result-count"[^>]*>筛选后共 6 条/);
+  });
+
+  it('名单行只影响打标、不影响展示的正文（issue #16）', async () => {
+    // fixture 的 mee hdjl 条目正文里含真实形态的「征求意见单位名单」：
+    // 「2.国家能源局综合司」含「能源」、「1.工业和信息化部办公厅」含「信息化」
+    const html = await fetchHome('/');
+    const item = extractNoticeItems(html).find((block) => itemTitle(block) === TITLES.hedian);
+    assert.ok(item, '列表页应有核动力厂导则条目');
+    assert.deepEqual(
+      itemTags(item),
+      ['生态环境'],
+      '名单行里的「能源」「信息化」都不该产生领域标签（名单行过滤 + 排除语境）',
+    );
+
+    // 但正文本身完整保留名单行 —— 过滤只作用于打标，不改动入库数据与展示
+    const href = /href="(\/notices\/[0-9a-f]+)"/.exec(item)[1];
+    const detail = await (await fetch(`${app.url}${href}`)).text();
+    assert.match(detail, /国家能源局综合司/, '详情页正文应仍含名单行原文');
+    assert.match(detail, /工业和信息化部办公厅/);
   });
 
   it('按发布机关过滤：精确匹配（司法部 ≠ 联合发布前缀；生态环境部 ≠ 办公厅）', async () => {
