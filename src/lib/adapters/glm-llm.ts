@@ -141,11 +141,15 @@ export class GlmLlm implements LlmPort {
   private readonly fetchImpl: typeof fetch;
 
   constructor(options: GlmLlmOptions = {}) {
-    this.apiKey = options.apiKey ?? process.env.GLM_API_KEY ?? '';
+    // 配置值一律 trim：.env 里手滑多一个空格不该变成运行期 401，而应等同于未配置
+    // —— 与 lib/llm-availability.ts 的门控判定（同样 trim 后看是否为空）严格同口径。
+    this.apiKey = (options.apiKey ?? process.env.GLM_API_KEY ?? '').trim();
     this.apiBase = (
       options.apiBase ?? process.env.GLM_API_BASE ?? DEFAULT_API_BASE
-    ).replace(/\/+$/, '');
-    this.model = options.model ?? process.env.GLM_MODEL ?? DEFAULT_MODEL;
+    )
+      .trim()
+      .replace(/\/+$/, '');
+    this.model = (options.model ?? process.env.GLM_MODEL ?? DEFAULT_MODEL).trim();
     this.timeoutMs = options.timeoutMs ?? Number(process.env.GLM_TIMEOUT_MS ?? DEFAULT_TIMEOUT_MS);
     this.fetchImpl = options.fetchImpl ?? fetch;
     if (this.apiKey.length === 0) {

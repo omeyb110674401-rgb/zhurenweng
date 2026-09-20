@@ -36,9 +36,12 @@ services:
       NODE_ENV: production
       DB_DRIVER: postgres
       DATABASE_URL: postgres://zhurenweng:${POSTGRES_PASSWORD:-zhurenweng}@db:5432/zhurenweng
-      # LLM 与邮件在生产通过环境变量接入真实服务商（ADR-0001 第 5 条）
+      # LLM 与邮件在生产通过环境变量接入真实服务商（ADR-0001 第 5 条）。
+      # 变量名必须与代码读取的一致：glm 端口读 GLM_API_KEY（adapters/glm-llm.ts），
+      # 摘要区可用性门控也读同一个名字（lib/llm-availability.ts）—— 曾误传 LLM_API_KEY，
+      # 结果 .env 里填了 Key 也到不了容器。tests/unit/deploy-env-contract.test.mjs 钉死。
       LLM_PROVIDER: glm
-      LLM_API_KEY: ${LLM_API_KEY:-}
+      GLM_API_KEY: ${GLM_API_KEY:-}
       GLM_API_BASE: ${GLM_API_BASE:-}
       GLM_MODEL: ${GLM_MODEL:-}
       MAILER_PROVIDER: smtp
@@ -77,7 +80,7 @@ services:
       DB_DRIVER: postgres
       DATABASE_URL: postgres://zhurenweng:${POSTGRES_PASSWORD:-zhurenweng}@db:5432/zhurenweng
       LLM_PROVIDER: glm
-      LLM_API_KEY: ${LLM_API_KEY:-}
+      GLM_API_KEY: ${GLM_API_KEY:-}
       GLM_API_BASE: ${GLM_API_BASE:-}
       GLM_MODEL: ${GLM_MODEL:-}
       MAILER_PROVIDER: smtp

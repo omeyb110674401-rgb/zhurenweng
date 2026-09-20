@@ -54,27 +54,63 @@ export class SmtpMailer implements MailerPort {
   }
 }
 
-/** 从环境变量读取 SMTP 配置并创建适配器；缺关键配置时抛出明确错误。 */
-export function createSmtpMailerFromEnv(): SmtpMailer {
-  const host = process.env.SMTP_HOST;
-  const from = process.env.MAIL_FROM;
+/** 默认 SMTP 端口（465 = 隐式 TLS 直连）。 */
+const DEFAULT_SMTP_PORT = 465;
+
+/** 解析后的 SMTP 配置（端口与 TLS 已按默认规则补齐，可直接断言）。 */
+export interface SmtpEnvOptions {
+  host: string;
+  port: number;
+  secure: boolean;
+  user?: string;
+  pass?: string;
+  from: string;
+}
+
+/**
+ * 解析 SMTP 环境变量为最终配置（纯函数 —— 配置契约因此可以在测试里钉死，
+ * 不必真的连一次 SMTP 才知道端口被解析成了什么）。
+ *
+ * 判空一律「trim 后看空串」，不用 `!== undefined`：compose 以 `${SMTP_PORT:-}`
+ * 这类写法把「未设置」传成**空串**，按 undefined 判空会把空串当有效配置 ——
+ * 端口变成 0、TLS 推断（465 → 直连）被空串覆盖成 STARTTLS，两者都只在真正
+ * 发信时才炸。口径与 lib/mailer-availability.ts 的门控保持一致。
+ */
+export function resolveSmtpOptions(env: NodeJS.ProcessEnv = process.env): SmtpEnvOptions {
+  const host = env.SMTP_HOST?.trim();
+  const from = env.MAIL_FROM?.trim();
   if (!host) {
     throw new Error('MAILER_PROVIDER=smtp 需要设置 SMTP_HOST（SMTP 服务器地址）');
   }
   if (!from) {
     throw new Error('MAILER_PROVIDER=smtp 需要设置 MAIL_FROM（发件人地址）');
   }
-  const port = process.env.SMTP_PORT !== undefined ? Number(process.env.SMTP_PORT) : undefined;
-  const secure =
-    process.env.SMTP_SECURE !== undefined
-      ? process.env.SMTP_SECURE === '1'
-      : (port ?? 465) === 465;
-  return new SmtpMailer({
-    host,
-    port,
-    secure,
-    user: process.env.SMTP_USER,
-    pass: process.env.SMTP_PASS,
-    from,
-  });
+  const parsedPort = parseSmtpPort(env.SMTP_PORT);
+  const port = parsedPort ?? DEFAULT_SMTP_PORT;
+  const secureFlag = env.SMTP_SECURE?.trim();
+  const secure = secureFlag ? secureFlag === '1' : port === DEFAULT_SMTP_PORT;
+  const user = env.SMTP_USER?.trim() || undefined;
+  const pass = env.SMTP_PASS?.trim() || undefined;
+  // 认证凭据要么都给要么都不给：只给一半会让 SMTP 在发信时报 535，
+  // 错误现场离配置现场太远，这里直接说清楚。
+  if ((user === undefined) !== (pass === undefined)) {
+    throw new Error('SMTP_USER 与 SMTP_PASS 必须同时配置（只填一半会在发信时报认证失败）');
+  }
+  return { host, port, secure, user, pass, from };
+}
+
+/** 从环境变量创建 SMTP 适配器；缺关键配置时抛出明确错误。 */
+export function createSmtpMailerFromEnv(): SmtpMailer {
+  return new SmtpMailer(resolveSmtpOptions());
+}
+
+/** SMTP_PORT：空白 / 未设置 → 用默认端口；填了但不是合法端口 → 立刻报错。 */
+function parseSmtpPort(raw: string | undefined): number | undefined {
+  const value = raw?.trim();
+  if (!value) return undefined;
+  const port = Number(value);
+  if (!Number.isInteger(port) || port <= 0 || port > 65535) {
+    throw new Error(`SMTP_PORT 不是合法端口：「${value}」（应填 1-65535 的整数，如 465）`);
+  }
+  return port;
 }
