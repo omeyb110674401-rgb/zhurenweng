@@ -189,7 +189,8 @@ export const crawlNoticesJob: Job = {
           healthy: true,
         });
 
-        const listHtml = await fetchText(listUrl);
+        // 列表同样要走源级处置（司法部站点的 WAF cookie 挑战对列表请求也生效）
+        const listHtml = await fetchText(listUrl, adapter.fetch);
         const listItems = await adapter.parseList(listHtml, listUrl);
 
         let inserted = 0;

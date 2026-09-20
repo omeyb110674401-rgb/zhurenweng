@@ -54,6 +54,10 @@ fixtures/
   fixture 源站映射到该目录下的 `index.json` / `index.html`。
 - **扩展名**：`.html` / `.shtml` / `.json` / `.txt` 都会在服务时做日期令牌替换
   （`.shtml` 是政府 CMS 常用扩展名，如生态环境部栏目内页）。
+- **WAF cookie 挑战（可选）**：源目录里放一个名为 `waf-cookie-challenge` 的空标记
+  文件，fixture 源站即对该源的**列表请求**模拟司法部站点的行为：未带 cookie 时返回
+  302 + `Set-Cookie` 且 Location 指回同一地址，带 cookie 重放才返回内容。
+  `fixtures/moj/` 已启用（真实站点确实如此，抓取层 `fetch.cookieChallenge` 负责重放）。
 
 ## 快照来源与裁剪标注
 

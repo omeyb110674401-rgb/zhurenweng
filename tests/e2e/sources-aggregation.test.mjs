@@ -233,6 +233,22 @@ after(async () => {
 });
 
 describe('issue #5：源注册配置化与多源聚合', () => {
+  it('moj 列表页的 WAF cookie 挑战：不带 cookie 被 302 挡回，抓取层带 cookie 重放后才拿到列表', async () => {
+    // fixture 源站按真实司法部站点的行为，对 moj 列表请求模拟挑战
+    // （源目录里的 waf-cookie-challenge 标记文件启用，见 fixture-server）
+    const challenge = await fetch(`${fixtureUrl}/moj/list.html`, { redirect: 'manual' });
+    assert.equal(challenge.status, 302, '未带 cookie 的列表请求应被挑战挡回');
+    assert.ok(challenge.headers.get('set-cookie'), '挑战响应应下发 Set-Cookie');
+
+    // 抓取层声明的 fetch.cookieChallenge 负责带 cookie 重放；
+    // 该路径生效的直接证据：下面 worker 单轮里 moj 源成功入库（否则整源抓取失败）
+    const withCookie = await fetch(`${fixtureUrl}/moj/list.html`, {
+      headers: { cookie: challenge.headers.get('set-cookie').split(';')[0] },
+    });
+    assert.equal(withCookie.status, 200, '带挑战 cookie 重放应返回列表');
+    assert.match(await withCookie.text(), /newsMsgList_zzy/, '返回的应是真实列表结构');
+  });
+
   it('worker 单轮抓取：三源逐源入库，跨源重复 URL 命中更新而非重复插入', async () => {
     const first = await runWorkerOnce();
     assert.equal(first.code, 0, `worker 应正常退出，输出：${first.output}`);
