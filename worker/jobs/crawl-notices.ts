@@ -38,6 +38,8 @@ import type { Job, JobContext } from '../registry.ts';
  */
 
 const FETCH_TIMEOUT_MS = 15_000;
+/** 普通重定向的最大跟随跳数（只用于 cookieChallenge 源；防异常站点造成无限跟随）。 */
+const MAX_REDIRECT_HOPS = 5;
 /**
  * 详情抓取之间的礼貌间隔（issue #14）：三源都是政府站点，串行连发上百个详情
  * 请求容易被 WAF 判定为爬虫而封 IP，整条数据管线会直接断掉。
@@ -97,31 +99,42 @@ function mergeDetail(notice: NormalizedNotice, detail: ParsedDetail): Normalized
  * - cookieChallenge（司法部站点实测）：首个响应是 3xx + Set-Cookie 且 Location 指回
  *   同一地址的 WAF 挑战，必须带 cookie 重放一次；用 redirect: 'manual' 接住挑战，
  *   避免 fetch 自动跟随重定向时陷入自我循环。
+ *
+ * 注意两种 3xx 必须区分（issue #14 上线后实测踩到）：**带 Set-Cookie 的才是 WAF 挑战**；
+ * 不带 Set-Cookie 的是普通重定向（司法部列表里的详情链接写成 http://，服务端 302 到
+ * https 且无 cookie），必须跟着走 —— 否则整源详情静默退化为列表层数据（截断标题、
+ * 无正文、无截止日期），且日志只留下一条「WAF 未下发 cookie」。
  */
-async function fetchText(url: string, options?: SourceFetchOptions): Promise<string> {
+async function fetchText(url: string, options?: SourceFetchOptions, hops = 0): Promise<string> {
   const headers = { 'user-agent': USER_AGENT };
+  const timeout = (): AbortSignal => AbortSignal.timeout(FETCH_TIMEOUT_MS);
 
   if (!options?.cookieChallenge) {
-    const response = await fetch(url, {
-      headers,
-      signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
-    });
+    const response = await fetch(url, { headers, signal: timeout() });
     if (!response.ok) {
       throw new Error(`HTTP ${response.status}`);
     }
     return response.text();
   }
 
-  const challenge = await fetch(url, {
-    headers,
-    redirect: 'manual',
-    signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
-  });
+  const challenge = await fetch(url, { headers, redirect: 'manual', signal: timeout() });
   const cookies = challenge.headers
     .getSetCookie()
     .map((value) => value.split(';')[0] ?? '')
     .filter((value) => value.length > 0)
     .join('; ');
+
+  if (cookies.length === 0 && challenge.status >= 300 && challenge.status < 400) {
+    const location = challenge.headers.get('location');
+    if (!location) {
+      throw new Error(`HTTP ${challenge.status}（重定向缺少 Location）`);
+    }
+    if (hops >= MAX_REDIRECT_HOPS) {
+      throw new Error(`重定向次数超过 ${MAX_REDIRECT_HOPS} 次：${url}`);
+    }
+    return fetchText(new URL(location, url).toString(), options, hops + 1);
+  }
+
   if (cookies.length === 0) {
     if (!challenge.ok) {
       throw new Error(`HTTP ${challenge.status}（WAF 未下发 cookie）`);
@@ -131,7 +144,7 @@ async function fetchText(url: string, options?: SourceFetchOptions): Promise<str
 
   const response = await fetch(url, {
     headers: { ...headers, cookie: cookies },
-    signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+    signal: timeout(),
   });
   if (!response.ok) {
     throw new Error(`HTTP ${response.status}（携带 WAF cookie 重放后仍失败）`);

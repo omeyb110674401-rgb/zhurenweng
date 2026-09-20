@@ -30,6 +30,17 @@ const WAF_MARKER = 'waf-cookie-challenge';
 const WAF_COOKIE = 'waf-cookie-challenge=ok';
 
 /**
+ * 可选「普通重定向」标记（司法部站点真实行为）：源目录内放该标记文件即启用。
+ * 详情请求首包返回 302 + Location（同一路径加 ?redirected=1）且**不带** Set-Cookie
+ * —— 与真实站点 http→https 的协议升级一致（实测：moj 列表里的详情链接是 http://，
+ * 服务端 302 到 https 且无 cookie；带 CT6T/CT6TS 的是 https 首包）。
+ * 抓取层必须区分「无 cookie 的普通重定向（要跟随）」与「带 cookie 的 WAF 挑战（要重放）」：
+ * 把前者当成后者，该源全部详情会静默退化为列表层数据（截断标题、无正文、无截止日期）。
+ */
+const PLAIN_REDIRECT_MARKER = 'plain-redirect';
+const REDIRECT_PARAM = 'redirected';
+
+/**
  * 日期令牌：快照文件里的 {{DATE±N}} / {{CN_DATE±N}} 在服务时按「服务器启动时刻」
  * 替换为具体日期（N 天偏移）。锚定在启动时刻保证同一次测试运行内多次响应内容
  * 一致，使「征求意见中 / 已截止」状态与倒计时断言不随运行日期衰减。
@@ -96,6 +107,19 @@ export function createFixtureServer({ fixturesDir, host = '127.0.0.1', port = 0 
           location: url.toString(),
           'set-cookie': `${WAF_COOKIE}; Path=/`,
         });
+        res.end();
+        return;
+      }
+      // 可选：模拟「普通重定向」（源目录内放 plain-redirect 标记文件）。非列表请求
+      // 首包返回 302 + Location（同路径加 ?redirected=1）且**不带** Set-Cookie ——
+      // 对应真实站点 http→https 的协议升级（见 PLAIN_REDIRECT_MARKER 注释）。
+      // 跟随一次后带 ?redirected=1 回到同一路径，返回正常内容。
+      if (
+        existsSync(path.join(root, segments[0] ?? '', PLAIN_REDIRECT_MARKER)) &&
+        !/\/list\.(html|json)$/.test(url.pathname) &&
+        !url.searchParams.has(REDIRECT_PARAM)
+      ) {
+        res.writeHead(302, { location: `${url.pathname}?${REDIRECT_PARAM}=1` });
         res.end();
         return;
       }
