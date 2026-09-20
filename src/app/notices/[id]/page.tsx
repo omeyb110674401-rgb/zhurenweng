@@ -5,7 +5,9 @@ import { getNoticeById } from '@/db/repo/notices';
 import { getNoticeSummary } from '@/db/repo/summaries';
 import { getSourceById } from '@/db/repo/sources';
 import { Countdown, StatusBadge, formatDate } from '@/app/_lib/notice-display';
+import { NoticeBriefView, SubmissionChannels } from '@/app/_lib/notice-brief-view';
 import { SummaryPlaceholder, SummaryUnavailable, SummaryView } from '@/app/_lib/summary-view';
+import { buildNoticeBrief } from '@/lib/notice-brief';
 import { llmReady } from '@/lib/llm-availability';
 import { mailerReady } from '@/lib/mailer-availability';
 import { siteUrl } from '@/lib/site-url';
@@ -65,6 +67,13 @@ export default async function NoticeDetailPage({ params }: NoticeDetailPageProps
   const source = await getSourceById(notice.sourceId);
   // 摘要列（issue #4）：done → 渲染五段式摘要；pending / failed_review → 占位
   const summaryInfo = await getNoticeSummary(notice.id);
+  // 结构化速读（issue #26/#27）：纯函数、请求期算一次，对存量条目立即生效。
+  // 提交方式块与速读卡共用这一份结果，避免同一段正文解析两遍。
+  const brief = buildNoticeBrief({
+    title: notice.title,
+    bodyText: notice.bodyText,
+    url: notice.url,
+  });
 
   return (
     <main>
@@ -112,18 +121,24 @@ export default async function NoticeDetailPage({ params }: NoticeDetailPageProps
           </p>
         ) : null}
 
-        {/* 摘要区（issue #4 / #22）：已有摘要照常渲染（绝不隐藏库内内容）；
-            未生成时按 LLM 端口是否可用区分「生成中」占位与「暂未启用」说明 */}
+        {/* 摘要区（issue #4 / #22 / #27）：已有摘要照常渲染（绝不隐藏库内内容）；
+            未生成时先给「结构化速读」（确定性抽取，不依赖大模型），再按 LLM 端口
+            是否可用区分「生成中」占位与「暂未启用」说明 */}
         {summaryInfo?.aiSummaryJson ? (
           <SummaryView
             notice={notice}
             summaryJson={summaryInfo.aiSummaryJson}
             summaryModel={summaryInfo.summaryModel}
           />
-        ) : llmReady() ? (
-          <SummaryPlaceholder status={summaryInfo?.summaryStatus ?? 'pending'} />
         ) : (
-          <SummaryUnavailable />
+          <>
+            <NoticeBriefView brief={brief} url={notice.url} />
+            {llmReady() ? (
+              <SummaryPlaceholder status={summaryInfo?.summaryStatus ?? 'pending'} />
+            ) : (
+              <SummaryUnavailable />
+            )}
+          </>
         )}
 
         <section className="action-slot">
@@ -134,6 +149,9 @@ export default async function NoticeDetailPage({ params }: NoticeDetailPageProps
           >
             去官方渠道提意见
           </a>
+          {/* 提交方式（issue #27）：原文里写着的具体渠道。放在按钮旁——读者点了
+              按钮要跳走，此处先给「跳过去之后往哪儿提」。取不到时整块不渲染。 */}
+          <SubmissionChannels channels={brief.channels} />
           <div className="how-to" data-testid="how-to-comment">
             <p className="how-to-title">分步提意指引</p>
             <ol>
@@ -143,7 +161,11 @@ export default async function NoticeDetailPage({ params }: NoticeDetailPageProps
                 （本站只引流，不代替官方受理意见）。
               </li>
               <li>在官方页面阅读公告全文，确认征求意见的截止日期与受理范围。</li>
-              <li>按官方页面指引提交意见：通常可通过在线表单、电子邮件或信函提出，建议附上具体条款与修改建议。</li>
+              <li>
+                {brief.channels.length > 0
+                  ? '本公示已在原文中注明具体提交方式（见上方「意见提交方式」），按其办理；建议附上具体条款与修改建议。'
+                  : '按官方页面指引提交意见：通常可通过在线表单、电子邮件或信函提出，建议附上具体条款与修改建议。'}
+              </li>
               <li>截止日期前提交的意见才会被纳入汇总，请留意页面上的截止时间。</li>
             </ol>
           </div>
