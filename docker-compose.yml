@@ -1,17 +1,37 @@
 # 生产对齐工件（docs/adr/0001-local-dev-without-docker.md）：
-# web / worker / PostgreSQL / Meilisearch 四服务，与 PRD「部署」一致。
+# caddy / web / worker / PostgreSQL / Meilisearch 五服务，与 PRD「部署」一致。
 #
 # 注意：开发机没有 Docker，本文件**在开发机上不可运行**，仅供生产部署对齐。
 # 本地开发与测试使用 SQLite + stub（npm run dev / npm run e2e），见 README。
 #
 # 说明：web 与 worker 启动前都执行 scripts/db-migrate.mjs（drizzle 迁移按
-# 迁移表幂等；首次并发启动的竞态为已知简化，生产可用单次 init 任务消除）。
+# 迁移表幂等；并发启动由 src/db/client.ts 的 pg_advisory_lock 串行化）。
+#
+# 说明：对外流量一律经 caddy 终结 TLS（Let's Encrypt 自动签发/续期），web 只在
+# 回环地址暴露 3000 供服务器本地排障；db / meilisearch 不对宿主暴露端口。
 
 services:
+  caddy:
+    image: caddy:2.11.4-alpine
+    restart: unless-stopped
+    environment:
+      # 站点主域名（DNS A 记录须已指向本机，否则 ACME 校验失败）
+      DOMAIN: ${DOMAIN:-localhost}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      - web
+
   web:
     build:
       context: .
       dockerfile: Dockerfile.web
+    restart: unless-stopped
     environment:
       NODE_ENV: production
       DB_DRIVER: postgres
@@ -37,7 +57,7 @@ services:
       ADMIN_TOKEN: ${ADMIN_TOKEN:-}
       ALERT_EMAIL: ${ALERT_EMAIL:-}
     ports:
-      - "${WEB_PORT:-3000}:3000"
+      - "127.0.0.1:3000:3000"
     depends_on:
       db:
         condition: service_healthy
@@ -49,6 +69,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.worker
+    restart: unless-stopped
     environment:
       NODE_ENV: production
       DB_DRIVER: postgres
@@ -77,6 +98,7 @@ services:
 
   db:
     image: postgres:17
+    restart: unless-stopped
     environment:
       POSTGRES_USER: zhurenweng
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-zhurenweng}
@@ -91,14 +113,15 @@ services:
 
   meilisearch:
     image: getmeili/meilisearch:v1.13
+    restart: unless-stopped
     environment:
       MEILI_MASTER_KEY: ${MEILI_MASTER_KEY:-zhurenweng-change-me}
       MEILI_NO_ANALYTICS: "true"
     volumes:
       - meili-data:/meili_data
-    ports:
-      - "7700:7700"
 
 volumes:
   db-data:
   meili-data:
+  caddy-data:
+  caddy-config:

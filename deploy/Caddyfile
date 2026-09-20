@@ -1,0 +1,20 @@
+# 生产反向代理（docker-compose.yml 的 caddy 服务）。
+#
+# TLS：Caddy 自动向 Let's Encrypt 申请并续期证书，HTTP-01 校验走 80 端口。
+# 前置条件：DOMAIN 的 DNS A 记录已指向本机公网 IP，且安全组放行 80 / 443。
+#
+# 建议：在下方第一个花括号全局块中加一行邮箱以接收证书到期通知，例如
+#   {
+#       email you@example.com
+#   }
+# 留空也可正常签发，只是收不到到期提醒。
+
+{$DOMAIN} {
+	encode zstd gzip
+	reverse_proxy web:3000
+}
+
+# www 统一 301 到主域名，避免同内容双域名稀释权重
+www.{$DOMAIN} {
+	redir https://{$DOMAIN}{uri} permanent
+}

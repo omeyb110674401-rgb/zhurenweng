@@ -1,13 +1,15 @@
 # 部署手册（issue #13：国内云 + ICP 备案后上线）
 
-适用：阿里云 ECS（Ubuntu 22.04/24.04），单机 Docker Compose 编排（web / worker / PostgreSQL / Meilisearch）。
+适用：阿里云 ECS（Alibaba Cloud Linux 3 / Ubuntu 22.04+），单机 Docker Compose 编排
+（caddy / web / worker / PostgreSQL / Meilisearch）。
 开发机无 Docker，本地验收以 `npm run e2e` 为准（见 docs/adr/0001-local-dev-without-docker.md）。
 
 ## 0. 前置条件
 
-- ECS：2 核 4G 起步、系统盘 ≥40G、**购买时长 ≥3 个月**（备案要求）、有公网 IP、Ubuntu 22.04/24.04
+- ECS：2 核 4G 起步、系统盘 ≥40G、**购买时长 ≥3 个月**（备案要求）、有公网 IP
 - 安全组：放行 `22`（建议限本人 IP）、`80`、`443`
-- 域名已完成 **ICP 备案**并解析到该公网 IP（未备案域名不可解析到大陆服务器）
+- 域名已完成 **ICP 备案**并在云解析添加两条 A 记录（`@` 与 `www`）指向该公网 IP
+  （未备案域名不可解析到大陆服务器）
 
 ## 1. 服务器装 Docker
 
@@ -18,7 +20,11 @@ systemctl enable --now docker
 docker version && docker compose version
 ```
 
-镜像加速（可选，控制台获取专属地址后写入 `/etc/docker/daemon.json` 并 `systemctl restart docker`）。
+镜像加速（国内拉取 Docker Hub 官方镜像必备；写入 `/etc/docker/daemon.json` 后 `systemctl restart docker`）：
+
+```json
+{ "registry-mirrors": ["https://docker.m.daocloud.io", "https://docker.1panel.live", "https://hub.rat.dev"] }
+```
 
 ## 2. 获取代码（二选一）
 
@@ -43,23 +49,48 @@ cp .env.example .env
 vim .env   # 按模板逐项填写；POSTGRES_PASSWORD/MEILI_MASTER_KEY/ADMIN_TOKEN 换成强随机值
 ```
 
-必填清单：`POSTGRES_PASSWORD`、`SITE_URL`、`APP_BASE_URL`、`GLM_API_KEY`、
+必填清单：`POSTGRES_PASSWORD`、`DOMAIN`、`SITE_URL`、`APP_BASE_URL`、`GLM_API_KEY`、
 `SMTP_HOST/PORT/USER/PASS/SECURE`、`MAIL_FROM`、`MEILI_MASTER_KEY`、`ADMIN_TOKEN`、`ALERT_EMAIL`。
+
+其中 `DOMAIN` 供 Caddy 签发证书使用；`SITE_URL` / `APP_BASE_URL` 必须与其一致且为 `https://`。
 
 ## 4. 启动
 
 ```bash
 docker compose up -d --build
-docker compose ps          # 四服务应为 running / healthy
-docker compose logs -f web worker --tail=50
+docker compose ps          # 五服务应为 running / healthy
+docker compose logs -f caddy web worker --tail=50
 ```
 
-## 5. 冒烟检查（备案通过、域名解析生效后）
+## 5. HTTPS（Caddy 自动签发）
+
+`deploy/Caddyfile` 已配置：主域名反代到 `web:3000`，`www` 301 跳主域名，证书由
+Caddy 向 Let's Encrypt 自动申请并续期（HTTP-01 校验走 80 端口）。
+
+前置条件：DNS A 记录已生效、安全组放行 80/443。首次启动约 10~30 秒完成签发，
+证书与账户密钥持久化在 `caddy-data` 卷，重启不重签。
+
+```bash
+docker compose logs caddy | grep -i -E "certificate|obtain|error"
+```
+
+如需证书到期通知邮件，在 `deploy/Caddyfile` 顶部加全局块：
+
+```
+{
+	email you@example.com
+}
+```
+
+改后 `docker compose restart caddy`。
+
+## 6. 冒烟检查（备案通过、域名解析生效后）
 
 ```bash
 curl -s -o /dev/null -w "home %{http_code}\n" https://<域名>/
 curl -s -o /dev/null -w "feed %{http_code}\n" https://<域名>/feed.xml
 curl -s -o /dev/null -w "admin %{http_code}\n" https://<域名>/admin        # 未带 token 应为 401
+curl -sI http://<域名>/ | head -3                                          # 应 301 到 https
 curl -s "https://<域名>/feed.xml" | head -20
 ```
 
@@ -69,22 +100,24 @@ curl -s "https://<域名>/feed.xml" | head -20
 docker compose run --rm -e WORKER_ONCE=1 worker npm run worker
 ```
 
-## 6. 上线后核查
+## 7. 上线后核查
 
 - 页脚备案号展示正确；订阅页隐私说明可见（仅存邮箱、可一键退订）
 - AI 摘要显著标注「AI 生成，仅供参考，以官方原文为准」
 - 管理后台看板：各源最近成功时间非空；配置 `ALERT_EMAIL` 后人为触发一次失败应收到告警
 - 出站按钮 `/go/<id>` 正常 302 到官方原文（北极星指标埋点）
 
-## 7. 日常运维
+## 8. 日常运维
 
-- **更新**：`git pull`（或重传 tar 包）→ `docker compose up -d --build`
-- **备份**：卷 `db-data`、`meili-data`；`docker compose exec db pg_dump -U zhurenweng zhurenweng > backup.sql`
-- **日志**：`docker compose logs -f worker`
-- **HTTPS**：可用阿里云免费证书或 certbot 挂载到反代；如需 Nginx 反代另行添加
+- **更新**：重新获取代码（`git pull` 或重传 tar 包）→ `docker compose up -d --build`
+- **备份**：卷 `db-data`、`meili-data`（`caddy-data` 建议一并备份，含证书私钥）；
+  `docker compose exec db pg_dump -U zhurenweng zhurenweng > backup.sql`
+- **日志**：`docker compose logs -f caddy worker`
+- **排障**：容器健康但域名不通时，先 `curl -I http://127.0.0.1:3000/`（绕过 Caddy 直连 web），
+  再 `docker compose logs caddy`（证书失败多为 DNS 未生效或安全组未放行 80）
 
 ## 已知简化（可接受，未来按需加固）
 
-- 迁移在 web/worker 启动时各自执行（首次并发启动有理论竞态）
 - 数据库密码经内网连接，未启用 TLS
-- `docker-compose.yml` 未含反向代理与证书自动续期
+- Caddy 与 web 同机，未做双机高可用
+- 证书签发未配置邮箱，故无到期提醒邮件（见第 5 节自行补）
