@@ -86,12 +86,16 @@ export interface ListNoticesFilteredOptions {
   /** 标题 / 正文包含匹配的关键词 */
   keyword?: string;
   limit?: number;
+  /** 分页偏移（首页分页用；默认 0）。排序是确定性的（见 AGGREGATION_ORDER），
+   *  故同一查询条件下 offset 分页不会重复或漏行。 */
+  offset?: number;
 }
 
-export async function listNoticesFiltered(
-  options: ListNoticesFilteredOptions = {},
-): Promise<NoticeRecord[]> {
-  const db = await getDb();
+/**
+ * 筛选条件（listNoticesFiltered 与 countNoticesFiltered 共用）：
+ * 两处的 WHERE 必须完全一致，否则「共 N 条」与实际能翻到的行数会打架。
+ */
+function filterConditions(options: ListNoticesFilteredOptions) {
   const conditions = [];
   if (options.category) {
     // JSON 数组文本形如 ["医疗卫生","市场监管"]：用 %“带引号整词”% 包含匹配，
@@ -109,13 +113,40 @@ export async function listNoticesFiltered(
       sql`(lower(${notices.title}) like ${needle} or lower(${notices.bodyText}) like ${needle})`,
     );
   }
+  return conditions;
+}
+
+export async function listNoticesFiltered(
+  options: ListNoticesFilteredOptions = {},
+): Promise<NoticeRecord[]> {
+  const db = await getDb();
+  const conditions = filterConditions(options);
   const rows = await db
     .select()
     .from(notices)
     .where(conditions.length > 0 ? and(...conditions) : undefined)
     .orderBy(...AGGREGATION_ORDER)
-    .limit(options.limit ?? 50);
+    .limit(options.limit ?? 50)
+    .offset(options.offset ?? 0);
   return rows.map(toNoticeRecord);
+}
+
+/**
+ * 同筛选条件下的**总条数**（首页分页的「共 N 条」与总页数）。
+ *
+ * 与 listNoticesFiltered 共用 filterConditions，保证计数与列表口径一致。
+ * count(*) 在双方言下返回类型不同（PostgreSQL 的 bigint 走字符串），统一 Number()。
+ */
+export async function countNoticesFiltered(
+  options: ListNoticesFilteredOptions = {},
+): Promise<number> {
+  const db = await getDb();
+  const conditions = filterConditions(options);
+  const rows = await db
+    .select({ value: sql<number>`count(*)` })
+    .from(notices)
+    .where(conditions.length > 0 ? and(...conditions) : undefined);
+  return Number(rows[0]?.value ?? 0);
 }
 
 /**

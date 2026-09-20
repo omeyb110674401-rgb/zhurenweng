@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import { listNoticesFiltered, listNoticeAgencies } from '@/db/repo/notices';
+import { countNoticesFiltered, listNoticesFiltered, listNoticeAgencies } from '@/db/repo/notices';
 import { NoticeItem } from '@/app/_lib/notice-item';
 import { SearchForm } from '@/app/_lib/search-form';
 import { IcpFiling } from '@/app/_lib/icp-filing';
@@ -9,11 +9,24 @@ import { mailerReady } from '@/lib/mailer-availability';
 // 数据随抓取管线持续更新，首页始终服务端实时渲染，不做静态预渲染。
 export const dynamic = 'force-dynamic';
 
+/**
+ * 每页条数：默认 50，可用 LIST_PAGE_SIZE 覆盖（运维调参，无需重新构建）。
+ *
+ * 引入分页的原因（issue #19）：列表此前硬编码 50 条上限且无翻页 —— 源扩到 7 个后
+ * 库内 125 条，首页只渲染前 50 条、其余 75 条从首页不可达，而「共 N 条」显示的还是
+ * 本页条数（假的合计数）。现在合计取 count 查询的真实值，翻页链接保留全部筛选条件。
+ */
+function pageSize(): number {
+  const raw = Number(process.env.LIST_PAGE_SIZE ?? '');
+  return Number.isInteger(raw) && raw > 0 ? raw : 50;
+}
+
 interface HomePageProps {
   searchParams: Promise<{
     category?: string | string[];
     agency?: string | string[];
     q?: string | string[];
+    page?: string | string[];
   }>;
 }
 
@@ -24,16 +37,25 @@ function firstParam(value: string | string[] | undefined): string | undefined {
   return trimmed ? trimmed : undefined;
 }
 
-/** 当前生效的筛选状态（全部可分享于 querystring：/?category=…&agency=…&q=…）。 */
+/** 取 querystring 里的页码：非正整数一律当作第 1 页（不报错、不空页）。 */
+function pageParam(value: string | string[] | undefined): number {
+  const parsed = Number(firstParam(value) ?? '1');
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : 1;
+}
+
+/** 当前生效的筛选状态（全部可分享于 querystring：/?category=…&agency=…&q=…&page=N）。 */
 interface FilterState {
   category?: string;
   agency?: string;
   keyword?: string;
+  /** 页码；1 为默认，不写入链接（保持首页地址干净） */
+  page?: number;
 }
 
 /**
- * 构造筛选链接（issue #9）：标签云是普通链接 —— 点击即切换领域并保留其余
+ * 构造筛选 / 翻页链接（issue #9、#19）：普通链接 —— 点击即切换维度并保留其余
  * 筛选维度；目标维度传空串表示清除。纯 URL 驱动、零客户端 JS。
+ * 切换筛选时页码归 1（换了条件还停在原页码会落到空页）。
  */
 function buildFilterHref(current: FilterState, next: Partial<FilterState>): string {
   const merged = { ...current, ...next };
@@ -41,6 +63,7 @@ function buildFilterHref(current: FilterState, next: Partial<FilterState>): stri
   if (merged.category) search.set('category', merged.category);
   if (merged.agency) search.set('agency', merged.agency);
   if (merged.keyword) search.set('q', merged.keyword);
+  if (merged.page !== undefined && merged.page > 1) search.set('page', String(merged.page));
   const qs = search.toString();
   return qs.length > 0 ? `/?${qs}` : '/';
 }
@@ -57,12 +80,26 @@ export default async function HomePage({ searchParams }: HomePageProps) {
   const { category, agency, keyword } = current;
   const hasFilter = category !== undefined || agency !== undefined || keyword !== undefined;
 
+  const size = pageSize();
+  // 页码先按请求值算偏移；总数拿到后再夹到有效范围（?page=999 落到末页而不是空页）
+  const requestedPage = pageParam(params.page);
+  const filter = { category, agency, keyword };
+
   // 仓库层排序：征求意见中在前、截止日期升序（即将截止在前）、无截止日期靠后；
-  // 筛选（issue #9）只过滤行、不改变该顺序。
-  const [notices, agencies] = await Promise.all([
-    listNoticesFiltered({ category, agency, keyword, limit: 50 }),
+  // 筛选（issue #9）只过滤行、不改变该顺序。合计与列表共用同一组筛选条件。
+  const [total, agencies] = await Promise.all([
+    countNoticesFiltered(filter),
     listNoticeAgencies(),
   ]);
+  const totalPages = Math.max(1, Math.ceil(total / size));
+  const page = Math.min(requestedPage, totalPages);
+  const notices = await listNoticesFiltered({
+    ...filter,
+    limit: size,
+    offset: (page - 1) * size,
+  });
+  const rangeStart = total === 0 ? 0 : (page - 1) * size + 1;
+  const rangeEnd = (page - 1) * size + notices.length;
 
   const filterSummary = [
     category,
@@ -98,8 +135,13 @@ export default async function HomePage({ searchParams }: HomePageProps) {
         <h2 id="notice-list-title">最新公示</h2>
         <p className="section-hint">
           <span data-testid="filter-result-count">
-            {hasFilter ? `筛选后共 ${notices.length} 条（${filterSummary}）。` : `共 ${notices.length} 条。`}
+            {hasFilter ? `筛选后共 ${total} 条（${filterSummary}）。` : `共 ${total} 条。`}
           </span>
+          {totalPages > 1 && (
+            <span data-testid="notice-range">
+              {`当前第 ${page} / ${totalPages} 页（第 ${rangeStart}–${rangeEnd} 条）。`}
+            </span>
+          )}
           按征求意见截止日期排序，即将截止的排在最前。
           {/* RSS 订阅入口（issue #6）：页面可见入口，配合 head 内的自动发现链接 */}
           <a className="rss-link" href="/feed.xml" data-testid="rss-feed-link">
@@ -198,6 +240,43 @@ export default async function HomePage({ searchParams }: HomePageProps) {
               <NoticeItem key={notice.id} notice={notice} />
             ))}
           </ul>
+        )}
+
+        {/* 分页（issue #19）：纯链接翻页，保留全部筛选条件；单页时不渲染 */}
+        {totalPages > 1 && (
+          <nav className="pagination" data-testid="notice-pagination" aria-label="公示翻页">
+            {page > 1 ? (
+              <Link
+                className="pagination-link"
+                href={buildFilterHref(current, { page: page - 1 })}
+                data-testid="pagination-prev"
+                rel="prev"
+              >
+                上一页
+              </Link>
+            ) : (
+              <span className="pagination-disabled" data-testid="pagination-prev-disabled">
+                上一页
+              </span>
+            )}
+            <span className="pagination-status" data-testid="pagination-status">
+              {`第 ${page} / ${totalPages} 页`}
+            </span>
+            {page < totalPages ? (
+              <Link
+                className="pagination-link"
+                href={buildFilterHref(current, { page: page + 1 })}
+                data-testid="pagination-next"
+                rel="next"
+              >
+                下一页
+              </Link>
+            ) : (
+              <span className="pagination-disabled" data-testid="pagination-next-disabled">
+                下一页
+              </span>
+            )}
+          </nav>
         )}
       </section>
 

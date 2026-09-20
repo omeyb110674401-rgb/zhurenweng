@@ -1084,3 +1084,34 @@ body {
   padding: 2px 8px;
   line-height: 1.4;
 }
+
+.pagination {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-top: 18px;
+  font-size: 14px;
+}
+
+.pagination-link {
+  color: var(--accent);
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
+  padding: 4px 12px;
+}
+
+.pagination-link:hover {
+  background: #fef3c7;
+  text-decoration: none;
+}
+
+.pagination-disabled {
+  color: #9ca3af;
+  border: 1px solid #f3f4f6;
+  border-radius: 6px;
+  padding: 4px 12px;
+}
+
+.pagination-status {
+  color: #4b5563;
+}

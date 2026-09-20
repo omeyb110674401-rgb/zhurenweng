@@ -60,6 +60,7 @@ npm run dev            # http://localhost:3000
 | `APP_BASE_URL` | `http://localhost:3000` | 邮件内确认 / 退订 / 详情链接的站点基础地址 |
 | `SITE_URL` | `http://localhost:3000` | RSS feed 内站点链接 / 条目链接的对外绝对地址（issue #6，与 `APP_BASE_URL` 各司其职，见「RSS Feed」） |
 | `FIXTURES_DIR` / `FIXTURE_SERVER_PORT` | `fixtures/` / `4170` | fixture 源站目录与端口 |
+| `LIST_PAGE_SIZE` | `50` | 首页每页条数（issue #19）。列表按倒计时排序分页，合计与总页数取真实总数；改后 `docker compose up -d web` 即生效（无需重建） |
 | `WORKER_INTERVAL_MS` / `WORKER_ONCE` | `60000` / （空） | worker 调度间隔（生产 compose 设为每日） / 单轮模式 |
 | `SOURCES_FIXTURE_BASE` | （空） | 设置后所有源适配器的列表页 URL 重写为 `<base>/<源ID>/<listFixturePath ?? list.html>`（列表为接口的源用 list.json；测试注入 fixture 源站，不设则抓取真实源站） |
 | `ADMIN_TOKEN` | （空） | 管理后台 `/admin` 共享密钥（issue #12）。未配置时恒 401；配置后凭会话 Cookie 或 `?token=` 访问，详见「管理后台与健康告警」 |
@@ -294,6 +295,24 @@ worker 注册表中的 `summarize-notices` 任务（`worker/jobs/summarize-notic
 - **E2E**：`tests/e2e/category-filter.test.mjs` —— 三源 fixture 入库后逐条
   断言标签（覆盖关键词命中标题与命中正文两类、排除语境两条），领域 / 机关 /
   关键词 / 组合过滤、无结果空态与排序子序列断言。
+
+## 首页分页与真实合计（issue #19）
+
+源扩到 7 个后库内超过 50 条，暴露了列表页的两个缺陷：**硬编码 50 条上限且无翻页**
+（其余条目从首页不可达），以及「共 N 条」显示的是**本页条数**而非全量（假合计）。
+
+- **合计取真实总数**：仓库层新增 `countNoticesFiltered`（`src/db/repo/notices.ts`），
+  与 `listNoticesFiltered` 共用同一组 `filterConditions` —— 两处 WHERE 必须一致，
+  否则合计与实际能翻到的行数会打架。`count(*)` 在双方言下返回类型不同
+  （PostgreSQL 的 bigint 走字符串），统一 `Number()`。
+- **分页**：`limit` + `offset`（排序由 `AGGREGATION_ORDER` 决定，是确定性的，
+  故 offset 分页不重复不漏行）；每页条数由 `LIST_PAGE_SIZE` 控制（默认 50）。
+  页码参数非法 / 越界一律夹到有效范围（`?page=999` 落到末页而不是空页）。
+- **链接**：翻页与筛选都是普通链接，保留全部筛选条件；**切换筛选时页码归 1**
+  （筛选链接不写 `page`）；单页结果不渲染分页控件。
+- **E2E**：`tests/e2e/pagination.test.mjs` —— 用 `LIST_PAGE_SIZE=3` 把三源 fixture
+  的 9 条切成 3 页：合计是真实总数、逐页翻完等于全量且无重复、顺序与未筛选的
+  倒计时顺序一致、筛选后合计与总页数按筛选结果算、越界与非法页码夹到有效范围。
 
 ## 版本历史与条款对比（issue #10）
 
