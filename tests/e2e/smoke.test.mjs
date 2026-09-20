@@ -55,6 +55,25 @@ describe('冒烟：脚手架与端到端骨架', () => {
     assert.match(html, /发现 · 读懂 · 行动/, '页面应包含产品定位文案');
   });
 
+  it('404 页是中文说明并给回站入口（不是 Next 默认英文页）', async () => {
+    const response = await fetch(`${app.url}/no-such-page`);
+    assert.equal(response.status, 404);
+
+    const html = await response.text();
+    assert.match(html, /没找到这个页面/, '应为中文 404 文案');
+    assert.ok(
+      !html.includes('This page could not be found'),
+      '不应回落到 Next 默认英文 404',
+    );
+    assert.match(html, /data-testid="search-form"/, '404 页应给站内检索入口');
+    assert.match(html, /href="\/"/, '404 页应有回列表入口');
+
+    // 未收录的公示详情同样走这个 404
+    const detail = await fetch(`${app.url}/notices/0000000000000000`);
+    assert.equal(detail.status, 404);
+    assert.match(await detail.text(), /没找到这个页面/);
+  });
+
   it('fixture 源站按目录提供快照页面，并对缺失与穿越请求返回错误', async () => {
     const ok = await fetch(`${fixtureUrl}/npc-law-drafts/list.html`);
     assert.equal(ok.status, 200);
