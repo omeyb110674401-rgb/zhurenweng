@@ -12,7 +12,7 @@ import { createFixtureServer } from './helpers/fixture-server.mjs';
  * E2E（issue #9）：领域标签自动打标 + 列表页分类/机关/关键词筛选。
  *
  * 场景（三源 fixture 入库 → 打标 → 浏览筛选）：
- *   worker 单轮抓取三源（npc / moj / govcn，跨源去重后 9 条）
+ *   worker 单轮抓取三源（npc / moj / mee，跨源去重后 9 条）
  *   → 每条目的领域标签由关键词规则自动推导且与期望一致
  *     （关键词命中标题：医疗保障法「医疗」、铁路条例「铁路」、仲裁法「仲裁」等；
  *       关键词命中正文：国家公园法标题无领域词、正文「生态」命中生态环境；
@@ -40,19 +40,21 @@ const TITLES = {
     '司法部、中国人民银行、金融监管总局、中国证监会、国家外汇局关于《中华人民共和国金融法（草案）》公开征求意见的通知',
   xingzheng: '司法部关于《中华人民共和国行政复议法实施条例（修订征求意见稿）》公开征求意见的通知',
   chengxu: '司法部关于《行政法规制定程序条例（修订征求意见稿）》公开征求意见的通知',
-  zhongcai: '司法部关于《中华人民共和国仲裁法（修订草案）》公开征求意见的通知',
-  xinyong:
-    '国家发展改革委关于《中华人民共和国社会信用体系建设法（草案征求意见稿）》公开征求意见的通知',
-  tielu:
-    '国家铁路局关于《铁路交通事故应急救援和调查处理条例（修订草案征求意见稿）》公开征求意见的通知',
+  shuiyuan:
+    '关于公开征求《饮用水水源地基础信息数据元技术规范（征求意见稿）》等2项国家生态环境标准意见的通知',
+  haiyu: '关于公开征求《沿海省（区、市）近岸海域重要物种名录》意见的函',
+  hedian:
+    '关于公开征求国家生态环境标准《生态环境影响评价技术导则 核动力厂（征求意见稿）》（修订HJ808-2016）意见的通知',
 };
 
 /**
  * 每条 fixture 条目的期望领域标签（src/lib/categories.ts 关键词规则的预期结果）。
- * 标题命中：tielu（铁路/交通）、zhongcai（仲裁）、xingzheng（行政复议）、
- * xinyong（社会信用）、npc2（交通 / 道路）；
- * 仅正文命中：npc1 / npc3（人大真实正文含「国家法律法规数据库」→ 命中「数据」）、
- * chengxu（moj 正文「落实立法法要求」→ 命中「立法」）；
+ * 标题命中：xingzheng（行政复议）、shuiyuan（生态环境标准）、hedian（生态环境）、
+ * npc2（交通 / 道路）；
+ * 仅正文命中：npc1 / npc3（人大真实正文含「国家法律法规数据库」→「数据」）、
+ * chengxu（moj 正文「落实立法法要求」→「立法」）、
+ * haiyu（正文「海洋生态环境保护」→「生态环境」）、
+ * shuiyuan（正文「数据元」→「数据与网络安全」）；
  * jingrong = 标题与正文均无关键词命中 → 不打标签。
  */
 const EXPECTED_TAGS = {
@@ -60,11 +62,11 @@ const EXPECTED_TAGS = {
   [TITLES.npc2]: ['交通运输', '数据与网络安全'], // 标题命中「交通/道路」，正文命中「数据」
   [TITLES.npc3]: ['数据与网络安全'], // 标题无领域词，正文命中「数据」
   [TITLES.jingrong]: [], // 标题与正文（已裁剪）均无关键词命中 → 不打兜底标签
+  [TITLES.shuiyuan]: ['生态环境', '数据与网络安全'], // 标题「生态环境标准」+ 正文「数据元」
+  [TITLES.haiyu]: ['生态环境'], // 标题无领域词，正文「海洋生态环境保护」命中
+  [TITLES.hedian]: ['生态环境'], // 标题命中「生态环境」
   [TITLES.xingzheng]: ['立法与司法'], // 标题命中「行政复议」
   [TITLES.chengxu]: ['立法与司法'], // 标题无词，正文「落实立法法要求」命中「立法」
-  [TITLES.zhongcai]: ['立法与司法'],
-  [TITLES.xinyong]: ['市场监管'],
-  [TITLES.tielu]: ['交通运输'],
 };
 
 /** 库内去重后的全部发布机关（= 机关下拉选项，按名称排序前的全集） */
@@ -72,17 +74,17 @@ const AGENCIES = [
   '全国人大常委会法制工作委员会',
   '司法部',
   '司法部、中国人民银行、金融监管总局、中国证监会、国家外汇局',
-  '国家发展改革委',
-  '国家铁路局',
+  '生态环境部',
+  '生态环境部办公厅',
 ];
 
 /** 未筛选列表的期望倒计时顺序：征求意见中按截止日期升序，已截止沉底。 */
 const EXPECTED_FULL_ORDER = [
-  TITLES.tielu, // +12
-  TITLES.zhongcai, // +18
+  TITLES.shuiyuan, // +12（跨源去重条目）
+  TITLES.haiyu, // +18
   TITLES.npc1, // +21（企业破产法）
   TITLES.xingzheng, // +22（行政复议法实施条例）
-  TITLES.xinyong, // +26
+  TITLES.hedian, // +26
   TITLES.jingrong, // +30（金融法）
   TITLES.chengxu, // +44（行政法规制定程序条例）
   TITLES.npc2, // +45（道路交通安全法）
@@ -186,7 +188,7 @@ describe('issue #9：领域标签自动打标与分类浏览筛选', () => {
     assert.equal(run.code, 0, `worker 应正常退出，输出：${run.output}`);
     assert.match(run.output, /源 npc 抓取完成：列表 3 条，新增 3，更新 0/);
     assert.match(run.output, /源 moj 抓取完成/);
-    assert.match(run.output, /源 govcn 抓取完成/);
+    assert.match(run.output, /源 mee 抓取完成/);
 
     const html = await fetchHome();
     assert.match(html, /data-testid="filter-result-count"[^>]*>共 9 条/, '跨源去重后应恰为 9 条');
@@ -228,48 +230,54 @@ describe('issue #9：领域标签自动打标与分类浏览筛选', () => {
     assert.match(html, /data-testid="filter-form"[^>]*method="get"/, '筛选表单应为 GET（URL 驱动）');
   });
 
-  it('按领域过滤：标题命中打标的「交通运输」含铁路条例与道路交通安全法，激活态正确', async () => {
-    const html = await fetchHome(`/?category=${encodeURIComponent('交通运输')}`);
-    assert.deepEqual(listOrder(html), [TITLES.tielu, TITLES.npc2]);
-    assert.match(html, /data-testid="filter-result-count"[^>]*>筛选后共 2 条/);
+  it('按领域过滤：标题命中打标的「生态环境」含 3 条 mee 条目，激活态正确', async () => {
+    const html = await fetchHome(`/?category=${encodeURIComponent('生态环境')}`);
+    assert.deepEqual(listOrder(html), [TITLES.shuiyuan, TITLES.haiyu, TITLES.hedian]);
+    assert.match(html, /data-testid="filter-result-count"[^>]*>筛选后共 3 条/);
     assert.match(
       html,
-      /data-testid="category-filter-link" aria-current="true"[^>]*>交通运输/,
-      '激活态应落在交通运输标签上',
+      /data-testid="category-filter-link" aria-current="true"[^>]*>生态环境/,
+      '激活态应落在生态环境标签上',
     );
     // 切换领域保留机关 / 关键词的入口仍在；标签云其余链接保持未激活
-    assert.ok(!/aria-current="true"[^>]*>生态环境/.test(html));
+    assert.ok(!/aria-current="true"[^>]*>交通运输/.test(html));
   });
 
-  it('按领域过滤：正文命中打标的「数据与网络安全」含 3 条 npc；「立法与司法」含 3 条且保持倒计时顺序', async () => {
+  it('按领域过滤：正文命中打标的「数据与网络安全」含 4 条；「立法与司法」含 2 条且保持倒计时顺序', async () => {
     const dataDomain = await fetchHome(`/?category=${encodeURIComponent('数据与网络安全')}`);
     assert.deepEqual(
       listOrder(dataDomain),
-      [TITLES.npc1, TITLES.npc2, TITLES.npc3],
-      '三条 npc 条目都由正文「国家法律法规数据库」命中「数据」（标题无该领域词）',
+      [TITLES.shuiyuan, TITLES.npc1, TITLES.npc2, TITLES.npc3],
+      'npc 三条由正文「国家法律法规数据库」命中；mee 的饮用水条目正文含「数据元」',
     );
 
     const lijisifa = await fetchHome(`/?category=${encodeURIComponent('立法与司法')}`);
-    assert.deepEqual(listOrder(lijisifa), [TITLES.zhongcai, TITLES.xingzheng, TITLES.chengxu]);
-    assert.match(lijisifa, /data-testid="filter-result-count"[^>]*>筛选后共 3 条/);
+    assert.deepEqual(listOrder(lijisifa), [TITLES.xingzheng, TITLES.chengxu]);
+    assert.match(lijisifa, /data-testid="filter-result-count"[^>]*>筛选后共 2 条/);
   });
 
-  it('按发布机关过滤：精确匹配（司法部 ≠ 联合发布前缀），顺序保持', async () => {
+  it('按发布机关过滤：精确匹配（司法部 ≠ 联合发布前缀；生态环境部 ≠ 办公厅）', async () => {
     const html = await fetchHome(`/?agency=${encodeURIComponent('司法部')}`);
     assert.deepEqual(
       listOrder(html),
-      [TITLES.zhongcai, TITLES.xingzheng, TITLES.chengxu],
+      [TITLES.xingzheng, TITLES.chengxu],
       '机关精确匹配只含「司法部」（不含联合发布的长前缀）',
     );
-    assert.match(html, /data-testid="filter-result-count"[^>]*>筛选后共 3 条/);
+    assert.match(html, /data-testid="filter-result-count"[^>]*>筛选后共 2 条/);
 
     const joint = await fetchHome(
       `/?agency=${encodeURIComponent('司法部、中国人民银行、金融监管总局、中国证监会、国家外汇局')}`,
     );
     assert.deepEqual(listOrder(joint), [TITLES.jingrong], '联合发布机关为完整前缀');
+
+    const minban = await fetchHome(`/?agency=${encodeURIComponent('生态环境部办公厅')}`);
+    assert.deepEqual(listOrder(minban), [TITLES.shuiyuan, TITLES.haiyu], 'xxgk 模板机关取「发布机关」字段');
+
+    const bu = await fetchHome(`/?agency=${encodeURIComponent('生态环境部')}`);
+    assert.deepEqual(listOrder(bu), [TITLES.hedian], 'hdjl 模板机关取列表层常量，与办公厅精确区分');
   });
 
-  it('按关键词过滤：标题命中（道路交通安全法）与正文命中（人大正文特征串 / 失信惩戒）', async () => {
+  it('按关键词过滤：标题命中（道路交通安全法）与正文命中（人大正文特征串 / 海洋生态环境）', async () => {
     const titleHit = await fetchHome(`/?q=${encodeURIComponent('道路交通安全法')}`);
     assert.deepEqual(listOrder(titleHit), [TITLES.npc2], '标题包含匹配应命道路交通安全法');
 
@@ -280,29 +288,29 @@ describe('issue #9：领域标签自动打标与分类浏览筛选', () => {
       '该特征串只出现在 npc 正文（标题不含）',
     );
 
-    const bodyHit2 = await fetchHome(`/?q=${encodeURIComponent('失信惩戒')}`);
-    assert.deepEqual(listOrder(bodyHit2), [TITLES.xinyong], '「失信惩戒」只出现在社会信用体系建设法正文');
+    const bodyHit2 = await fetchHome(`/?q=${encodeURIComponent('海洋生态环境保护')}`);
+    assert.deepEqual(listOrder(bodyHit2), [TITLES.haiyu], '该串只出现在 mee 近岸海域条目正文');
   });
 
   it('组合过滤：领域 + 机关、领域 + 关键词叠加生效', async () => {
     const categoryAgency = await fetchHome(
-      `/?category=${encodeURIComponent('交通运输')}&agency=${encodeURIComponent('国家铁路局')}`,
+      `/?category=${encodeURIComponent('生态环境')}&agency=${encodeURIComponent('生态环境部办公厅')}`,
     );
     assert.deepEqual(
       listOrder(categoryAgency),
-      [TITLES.tielu],
-      '交通运输 × 国家铁路局应只含铁路条例（npc 道路交通安全法机关是人大法工委）',
+      [TITLES.shuiyuan, TITLES.haiyu],
+      '生态环境 × 生态环境部办公厅应只含两条 xxgk 条目（核动力厂机关的机关是部本级）',
     );
 
     const categoryKeyword = await fetchHome(
-      `/?category=${encodeURIComponent('交通运输')}&q=${encodeURIComponent('铁路')}`,
+      `/?category=${encodeURIComponent('生态环境')}&q=${encodeURIComponent('核动力厂')}`,
     );
-    assert.deepEqual(listOrder(categoryKeyword), [TITLES.tielu]);
+    assert.deepEqual(listOrder(categoryKeyword), [TITLES.hedian]);
     // 领域经隐藏字段保留在表单内
-    assert.match(categoryKeyword, /<input type="hidden" name="category" value="交通运输"/);
+    assert.match(categoryKeyword, /<input type="hidden" name="category" value="生态环境"/);
 
     const combinedNone = await fetchHome(
-      `/?category=${encodeURIComponent('交通运输')}&q=${encodeURIComponent('仲裁')}`,
+      `/?category=${encodeURIComponent('生态环境')}&q=${encodeURIComponent('金融法')}`,
     );
     assert.match(combinedNone, /data-testid="notice-empty-state"/, '组合无结果应展示空态');
     assert.match(combinedNone, /没有符合筛选条件的公示/);

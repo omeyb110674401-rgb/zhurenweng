@@ -12,6 +12,9 @@ import path from 'node:path';
 
 const CONTENT_TYPES = {
   '.html': 'text/html; charset=utf-8',
+  // 政府 CMS 常用扩展名（如生态环境部栏目内页 …/t20260914_1166201.shtml）：
+  // 与 .html 同样按文本提供并做日期令牌替换
+  '.shtml': 'text/html; charset=utf-8',
   '.json': 'application/json; charset=utf-8',
   '.txt': 'text/plain; charset=utf-8',
 };

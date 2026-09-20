@@ -1,5 +1,5 @@
 import type { NoticeAttachment } from '../db/types.ts';
-import { govcnAdapter } from './adapters/govcn.ts';
+import { meeAdapter } from './adapters/mee.ts';
 import { mojAdapter } from './adapters/moj.ts';
 import { npcLawDraftsAdapter } from './adapters/npc.ts';
 
@@ -93,5 +93,5 @@ export interface SourceAdapter {
 export const sourceAdapters: SourceAdapter[] = [
   npcLawDraftsAdapter,
   mojAdapter,
-  govcnAdapter,
+  meeAdapter,
 ];

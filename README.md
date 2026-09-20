@@ -23,7 +23,7 @@ src/db/         数据层：schema（sqlite / postgres 镜像）、client、repo
 src/lib/        端口接口（ports.ts）、日期工具（dates.ts）与适配器（stubs）
 src/sources/    源适配器注册表 + adapters/（数据接入唯一扩展点）
 worker/         worker 进程：registry.ts（任务注册表）+ index.ts（主循环）+ jobs/（抓取等任务）
-fixtures/       各源页面快照，fixtures/<source>/*.html
+fixtures/       各源页面快照，fixtures/<source>/list.{html,json} 与详情快照
 tests/e2e/      端到端测试（node:test）与 fixture 源站 helper
 scripts/        fixture 源站 CLI、迁移 CLI
 drizzle/        按方言生成的迁移（sqlite/、pg/）
@@ -59,7 +59,7 @@ npm run dev            # http://localhost:3000
 | `SITE_URL` | `http://localhost:3000` | RSS feed 内站点链接 / 条目链接的对外绝对地址（issue #6，与 `APP_BASE_URL` 各司其职，见「RSS Feed」） |
 | `FIXTURES_DIR` / `FIXTURE_SERVER_PORT` | `fixtures/` / `4170` | fixture 源站目录与端口 |
 | `WORKER_INTERVAL_MS` / `WORKER_ONCE` | `60000` / （空） | worker 调度间隔（生产 compose 设为每日） / 单轮模式 |
-| `SOURCES_FIXTURE_BASE` | （空） | 设置后所有源适配器的列表页 URL 重写为 `<base>/<源ID>/list.html`（测试注入 fixture 源站；不设则抓取真实源站） |
+| `SOURCES_FIXTURE_BASE` | （空） | 设置后所有源适配器的列表页 URL 重写为 `<base>/<源ID>/<listFixturePath ?? list.html>`（列表为接口的源用 list.json；测试注入 fixture 源站，不设则抓取真实源站） |
 | `ADMIN_TOKEN` | （空） | 管理后台 `/admin` 共享密钥（issue #12）。未配置时恒 401；配置后凭会话 Cookie 或 `?token=` 访问，详见「管理后台与健康告警」 |
 | `ALERT_EMAIL` | （空） | worker 任务失败告警收件邮箱（issue #12）。未配置则不发送告警 |
 
@@ -91,11 +91,12 @@ npm run e2e            # 等价命令：npm test
   复核占位，且不再自动重试；追加新条目 → 成功路径 → 详情页五段式摘要 + 显著
   AI 标注 + 各段原文引用（一键跳官方原文）+ 占位消失。
 - **issue #5 多源聚合场景**（`tests/e2e/sources-aggregation.test.mjs`）：在 npc
-  之上新增司法部（`moj`）与中国政府网（`govcn`）两个源适配器（各自卡片+表格、
-  纯表格等不同版式，证明适配器模式只需适配器文件 + 注册数组条目 + fixture 目录，
-  核心代码零改动）：三源条目并存于聚合列表且按截止日期全局排序互不串扰、
-  各源详情字段独立解析，同一原文 URL 出现在两个源列表时按原文 URL 唯一键
-  去重只入库一条，重复抓取幂等。
+  之上新增司法部（`moj`）与生态环境部（`mee`，issue #14 起替代已下线的中国政府网
+  「意见征集」栏目）两个源适配器（列表时间轴 / 正文句截止日期 / 两套详情模板等
+  不同版式，证明适配器模式只需适配器文件 + 注册数组条目 + fixture 目录，核心代码
+  零改动）：三源条目并存于聚合列表且按截止日期全局排序互不串扰、各源详情字段
+  独立解析，同一原文 URL 出现在两个源列表时按原文 URL 唯一键去重只入库一条，
+  重复抓取幂等。
 - **issue #7 邮件订阅与截止提醒场景**（`tests/e2e/deadline-reminders.test.mjs`）：
   `/subscribe` 表单校验 → double opt-in 确认邮件（outbox 断言）→ 未确认时
   触发提醒任务不发送 → 确认后触发：截止前 7 天 / 3 天各一封，内容含标题、
@@ -126,7 +127,7 @@ npm run e2e            # 等价命令：npm test
   长度分布四桶 / 点击 Top 榜回链详情页 / 按日期聚合逐项断言 → 重复抓取
   幂等不重算。
 - **issue #12 管理后台与健康告警场景**（`tests/e2e/admin.test.mjs`）：仅复制
-  npc fixture（moj / govcn 404 天然构造部分源失败）→ 未带 token 401 引导页、
+  npc fixture（moj / mee 404 天然构造部分源失败）→ 未带 token 401 引导页、
   错误 token 恒 401、登录 303 下发 HttpOnly Cookie 后可访问 → 看板展示各源
   最近成功时间与最近错误（HTTP 404）→ 失败源与摘要失败各触发一封告警邮件
   （stub outbox 断言收件人与错误摘要）→ 摘要失败条目进复核队列 → 重置重试
@@ -338,6 +339,22 @@ worker 注册表中的 `summarize-notices` 任务（`worker/jobs/summarize-notic
 - **去重落表**：`alert_sends` 按（本地日历日 × 任务名 × 源）复合主键 ——
   同一天同一源同一任务类型只发一封，worker 重启后依然有效；邮件发送失败不落
   去重标记，下一轮任务再失败时重试发送。
+
+## 接入的源（issue #14：三个源均对着活站校准）
+
+| 源 ID | 栏目与真实列表地址 | 传输处置 | 列表 / 详情结构要点 |
+| --- | --- | --- | --- |
+| `npc` | 全国人大网「法律草案征求意见」<br>`http://www.npc.gov.cn/flcaw/flca-list?flag=0&type=0&page=1&per_page=100` | **只能用 http**：`www.npc.gov.cn` 的 HTTPS 在 TLS 握手阶段即被拒（`sslv3 alert handshake failure`；换 TLS1.2 / 降 SECLEVEL / `--insecure` 均无效，**不是证书链问题**）。风险：明文传输；缓解：只读官方公开信息、不带凭据、不下载附件 | 列表与正文都是 JSON 接口（页面为前端渲染）；正文取自 `/flcaw/flca/<id>/info/`，用户可见链接仍是 `userIndex.html?lid=<id>`；接口不提供发布机关与附件 |
+| `moj` | 司法部「立法意见征集」<br>`https://www.moj.gov.cn/pub/sfbgw/lfyjzj/lflfyjzj/` | **WAF cookie 挑战**：首包 302 + `Set-Cookie`（CT6T/CT6TS）且 Location 指回同一地址，需带 cookie 重放一次才 200（抓取层 `fetch.cookieChallenge`，仅本源生效） | 列表 `ul.newsMsgList_zzy > li`（标题被截断，完整标题取自详情 `h1`）；发布日期在 `.sT`；截止日期只在正文句「征求意见时间为 X 至 Y」；机关取自标题前缀（详情页无发布机关行） |
+| `mee` | 生态环境部「意见征集」<br>`https://www.mee.gov.cn/hdjl/yjzj/` | 无特殊要求（爬虫 UA 直接 200） | 列表 `li > a + span.date`，链接混用栏目内相对路径与 `../../xxgk2018/…` 跨目录相对路径；详情两套模板（栏目内页 `h2.neiright_Title`，政府信息公开页 `h1` + 「发布机关」字段）；截止日期在正文句；附件是正文内的相对 `.pdf` 链接 |
+
+第三源为何不是中国政府网：原 `govcn`（中国政府网「政策 → 意见征集」）实测**已下线**
+（`/zhengce/yjzj/**` 全 404；政策频道仅剩最新政策 / 国务院公报 / 政策解读 / 图解政策，
+政策文件库路径对爬虫一律 403）。本产品承诺「聚合征求意见稿 + 截止提醒」，故换用真实
+在运营、可抓取且含截止日期的部委征求意见栏目（issue #14）。
+
+抓取礼貌性：详情请求之间固定间隔 400ms（`worker/jobs/crawl-notices.ts` 的
+`DETAIL_FETCH_INTERVAL_MS`），避免政府站点 WAF 限流封 IP。
 
 ## 如何添加 fixture 源
 

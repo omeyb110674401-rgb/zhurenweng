@@ -33,7 +33,7 @@ const dbFile = path.join(workDir, 'app.db');
 /**
  * 种子条目清单：
  * - title = 列表页标题；
- * - detailPath = 详情内容快照地址（npc 为详情接口 …/flca/<lid>/info/，moj/govcn 为详情页）；
+ * - detailPath = 详情内容快照地址（npc 为详情接口 …/flca/<lid>/info/，moj/mee 为详情页）；
  * - officialPath = 官方原文（人工可读页面）地址，即入库唯一键与 /go 跳转目标
  *   （npc 正文来自接口，但用户可见链接是 userIndex.html?lid=…）。
  */
@@ -63,16 +63,16 @@ const ITEMS = {
     source: 'moj',
   },
   E: {
-    title: '国家发展改革委关于《中华人民共和国能源法（草案征求意见稿）》公开征求意见的通知',
-    detailPath: '/govcn/zhengce/yjzj/202609/content_930001.html',
-    officialPath: '/govcn/zhengce/yjzj/202609/content_930001.html',
-    source: 'govcn',
+    title: '关于公开征求国家生态环境标准《排污单位自行监测技术指南（征求意见稿）》意见的通知',
+    detailPath: '/mee/xxgk2018/xxgk/xxgk06/202609/t20260912_930001.html',
+    officialPath: '/mee/xxgk2018/xxgk/xxgk06/202609/t20260912_930001.html',
+    source: 'mee',
   },
   F: {
-    title: '国家铁路局关于《地方铁路安全管理条例（修订草案征求意见稿）》公开征求意见的通知',
-    detailPath: '/govcn/zhengce/yjzj/202609/content_930002.html',
-    officialPath: '/govcn/zhengce/yjzj/202609/content_930002.html',
-    source: 'govcn',
+    title: '关于公开征求《生态环境分区管控管理暂行规定（征求意见稿）》意见的函',
+    detailPath: '/mee/hdjl/yjzj/zjyj/202609/t20260912_930002.shtml',
+    officialPath: '/mee/hdjl/yjzj/zjyj/202609/t20260912_930002.shtml',
+    source: 'mee',
   },
 };
 
@@ -168,7 +168,7 @@ async function fetchFixtureText(fPath) {
 
 /**
  * 从「已替换日期令牌的 fixture 快照」推导统计期望值（种子数据的真值来源）。
- * 机关 / 日期解析方式与各源适配器同字段同口径（moj / govcn 机关取详情页，
+ * 机关 / 日期解析方式与各源适配器同字段同口径（moj / mee 机关取详情页，
  * npc 机关为适配器列表层兜底值 —— 快照特意不带「发布机关：」行）。
  */
 let expectedCache = null;
@@ -180,6 +180,12 @@ async function expectedStats() {
     title: row.flxxmc,
     published: normalizeDateText(row.ksrq),
   }));
+
+  // mee（生态环境部）：发布日期取列表页 span.date（与适配器同口径）
+  const meeListHtml = await fetchFixtureText('/mee/list.html');
+  const meeListItems = [
+    ...meeListHtml.matchAll(/<a href="[^"]+"[^>]*>([^<]+)<\/a><span class="date">([^<]+)<\/span>/g),
+  ].map((match) => ({ title: match[1], published: normalizeDateText(match[2]) }));
 
   const records = [];
   for (const [key, item] of Object.entries(ITEMS)) {
@@ -203,11 +209,17 @@ async function expectedStats() {
       const bodyText = detailText.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ');
       deadlineText = /(?:至|到)\s*(\d{4}年\d{1,2}月\d{1,2}日|\d{4}-\d{1,2}-\d{1,2})/.exec(bodyText)[1];
     } else {
-      agency = /<a class="dept-item"[^>]*>([^<]+)<\/a>/.exec(detailText)[1];
-      published = normalizeDateText(
-        /<span class="pub-date">发布日期：([^<]+)<\/span>/.exec(detailText)[1],
-      );
-      deadlineText = /<div class="deadline-value">([^<]+)<\/div>/.exec(detailText)[1];
+      // mee：xxgk 模板有「发布机关」字段，hdjl 模板没有 → 未声明时取列表层常量；
+      // 截止日期同样只在正文句里（「征求意见截止时间为…」）
+      const agencyField = /发布机关[\s\S]{0,80}?<i[^>]*>([^<]+)<\/i>/.exec(detailText);
+      agency = agencyField ? agencyField[1].trim() : '生态环境部';
+      const listItem = meeListItems.find((candidate) => candidate.title === item.title);
+      assert.ok(listItem, `mee 列表应含条目「${item.title}」`);
+      published = listItem.published;
+      const bodyText = detailText.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ');
+      deadlineText = /截止(?:日期|时间)?(?:为|：|:)?\s*(\d{4}年\d{1,2}月\d{1,2}日|\d{4}-\d{1,2}-\d{1,2})/.exec(
+        bodyText,
+      )[1];
     }
 
     const deadline = normalizeDateText(deadlineText);
@@ -381,7 +393,7 @@ describe('issue #11：数据统计页与出站点击聚合', () => {
     assert.equal(first.code, 0, `worker 应正常退出，输出：${first.output}`);
     assert.match(first.output, /源 npc 抓取完成：列表 2 条，新增 2，更新 0/);
     assert.match(first.output, /源 moj 抓取完成：列表 2 条，新增 2，更新 0/);
-    assert.match(first.output, /源 govcn 抓取完成：列表 2 条，新增 2，更新 0/);
+    assert.match(first.output, /源 mee 抓取完成：列表 2 条，新增 2，更新 0/);
   });
 
   it('列表页头部含「数据统计」入口链接', async () => {
@@ -569,7 +581,7 @@ describe('issue #11：数据统计页与出站点击聚合', () => {
     assert.equal(second.code, 0, `worker 应正常退出，输出：${second.output}`);
     assert.match(second.output, /源 npc 抓取完成：列表 2 条，新增 0，更新 2/);
     assert.match(second.output, /源 moj 抓取完成：列表 2 条，新增 0，更新 2/);
-    assert.match(second.output, /源 govcn 抓取完成：列表 2 条，新增 0，更新 2/);
+    assert.match(second.output, /源 mee 抓取完成：列表 2 条，新增 0，更新 2/);
 
     const expected = await expectedStats();
     const html = stripSsrComments(await (await fetch(`${app.url}/stats`)).text());

@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <title>关于公开征求国家生态环境标准《生态环境影响评价技术导则 核动力厂（征求意见稿）》（修订HJ808-2016）意见的通知_中华人民共和国生态环境部</title>
+  </head>
+  <body>
+    <!--
+      fixture 快照：生态环境部「意见征集」栏目内页（hdjl 模板，2026-09-20 服务器实抓后裁剪）。
+      真实来源：https://www.mee.gov.cn/hdjl/yjzj/zjyj/202609/t20260914_1166201.shtml
+      结构要点：h2.neiright_Title 标题、.xqLyPc 日期、正文 .neiright_JPZ_GK_CP 内的
+      TRS_Editor（正文用 <div> 段落）、附件以相对 .pdf 链接出现在正文里。
+      截止日期在正文句「征求意见截止时间为…」，此处换成日期令牌。
+    -->
+    <div class="wzsmCenter">
+      <div class="innerBzCenter">
+        <div class="stbzXq">
+          <div class="neiright_Box">
+            <h2 class="neiright_Title">关于公开征求国家生态环境标准《生态环境影响评价技术导则 核动力厂（征求意见稿）》（修订HJ808-2016）意见的通知</h2>
+            <div class="neiright_Content">
+              <div class="neiright_JPZ_GK">
+                <p class="ydLyZzBox"><span style="float: none;">2026-09-14</span></p>
+                <span class="xqLyPc time">2026-09-14</span>
+                <span class="zzjgLdPrint"><a href="javascript:void(1)" onclick="window.print()">[打印]</a></span>
+              </div>
+              <div class="neiright_JPZ_GK_CP clearHtml">
+                <div class=TRS_Editor><div class="Custom_UnionStyle">
+                  <div>为了贯彻《中华人民共和国生态环境法典》《中华人民共和国核安全法》，结合核电发展的具体情况，规范核电厂建设项目环境影响评价工作，我部组织修订了《生态环境影响评价技术导则 核动力厂（征求意见稿）》（修订HJ808-2016)，以代替《环境影响评价技术导则 核电厂环境影响报告书的格式和内容》（HJ 808-2016），现公开征求意见。征求意见稿及其编制说明可登录我部网站（http://www.mee.gov.cn）“意见征集”栏目检索查阅。</div>
+                  <div>各机关团体、行业协会、企事业单位和个人均可提出意见和建议。有关意见和建议请发至联系人邮箱。征求意见截止时间为{{CN_DATE+26}}。</div>
+                  <div>联系人：生态环境部核电安全监管司 吴灿杰</div>
+                  <div>邮箱：hediansanchu@mee.gov.cn</div>
+                  <div>附件：1.<a href="./W020260914597734431368.pdf" oldsrc="W020260914597734431368.pdf">《生态环境影响评价技术导则 核动力厂（征求意见稿）》（修订HJ808-2016)</a></div>
+                </div></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </body>
+</html>
