@@ -22,6 +22,14 @@ fixtures/
   npc-law-drafts/            # issue #2 的占位快照，仅供 fixture 源站冒烟场景使用
     list.html
     detail-fl-001.html
+  e2e-mohurd/                # issue #28 住建部扩源场景专用（独立成 fixture 根目录，
+    mohurd/                  #   不动 e2e-sources 那套精确计数断言）
+      list.json              #   住房城乡建设部「征求意见」：list.json = TRS jpaas 接口响应，
+                             #   列表行 li.long-deta 自带截止日期（span.date-info），
+                             #   href 改成相对路径；保留 3 行（2 进行中 + 1 已截止）
+      gongkai/zc/wjk/art/2026/*.html   # 详情：.editor-content 正文 + .editorContent-download
+                             #   附件（下载接口链接无扩展名）；meta PubDate 提供发布日期，
+                             #   ArticleTitle 带源站换行（适配器刻意不用它覆盖标题）
   e2e-reminders/             # issue #7 截止提醒场景专用（截止日期 = 今天 +7 / +3 天，
     npc/                     #   条目按订阅关键词 / 领域规则设计命中与不命中对照；
       list.json              #   结构与 fixtures/npc/ 同构，内容为场景合成数据）

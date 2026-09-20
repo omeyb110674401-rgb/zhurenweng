@@ -1,6 +1,7 @@
 import type { NoticeAttachment, NoticeStatus } from '../db/types.ts';
 import { meeAdapter } from './adapters/mee.ts';
 import { miitAdapter } from './adapters/miit.ts';
+import { mohurdAdapter } from './adapters/mohurd.ts';
 import { moeAdapter } from './adapters/moe.ts';
 import { mojAdapter } from './adapters/moj.ts';
 import { motAdapter } from './adapters/mot.ts';
@@ -124,9 +125,9 @@ export interface SourceAdapter {
 /**
  * 注册表：所有源适配器在此登记，调度器按此数组驱动。
  *
- * 当前 8 个源（PRD M2 要求的「部委直爬源扩至 8 个」已达成）：
+ * 当前 9 个源（PRD M2 要求的「部委直爬源扩至 8 个」已达成，issue #28 补上 PRD M1 源清单里点名却一直缺失的住房城乡建设部）：
  * 全国人大 / 司法部 / 生态环境部（M1 三源）+ 交通运输部 / 市场监管总局 /
- * 工业和信息化部 / 教育部 / 国家发展改革委（M2 扩源）。
+ * 工业和信息化部 / 教育部 / 国家发展改革委（M2 扩源）+ 住房城乡建设部（issue #28）。
  *
  * ## 已评估但未接入的源（附实测依据，避免后人重复踩）
  *
@@ -146,4 +147,5 @@ export const sourceAdapters: SourceAdapter[] = [
   miitAdapter,
   moeAdapter,
   ndrcAdapter,
+  mohurdAdapter,
 ];
