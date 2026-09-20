@@ -19,7 +19,8 @@
     "db:generate:pg": "drizzle-kit generate --config drizzle.config.pg.ts",
     "db:migrate": "node scripts/db-migrate.mjs",
     "e2e": "next build && node --test \"tests/e2e/**/*.test.mjs\"",
-    "test": "npm run e2e"
+    "test:unit": "node --test \"tests/unit/**/*.test.mjs\"",
+    "test": "npm run test:unit && npm run e2e"
   },
   "dependencies": {
     "better-sqlite3": "^13.0.3",

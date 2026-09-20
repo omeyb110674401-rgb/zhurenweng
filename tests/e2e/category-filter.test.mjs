@@ -14,11 +14,12 @@ import { createFixtureServer } from './helpers/fixture-server.mjs';
  * 场景（三源 fixture 入库 → 打标 → 浏览筛选）：
  *   worker 单轮抓取三源（npc / moj / mee，跨源去重后 9 条）
  *   → 每条目的领域标签由关键词规则自动推导且与期望一致
- *     （关键词命中标题：道路交通安全法「交通/道路」、饮用水水源地标准「生态环境」、
- *       行政复议法实施条例「行政复议」等；
+ *     （关键词命中标题：npc 三条法案「草案」→ 立法与司法、道路交通安全法「交通/道路」、
+ *       饮用水水源地标准「生态环境」、行政复议法实施条例「行政复议」等；
  *       关键词命中正文：沿海物种名录「海洋生态环境保护」、行政法规制定程序条例「立法」；
- *       排除语境：npc 三条正文的「国家法律法规数据库」不算「数据」领域（issue #15）；
- *       无关键词命中：金融法、npc 三条不打标签）
+ *       排除语境：npc 正文的「国家法律法规数据库」不算「数据」、mee 正文的
+ *       「工业和信息化部办公厅」不算「信息化」（issue #15）；
+ *       无关键词命中不打兜底标签的行为由单元层覆盖，见 tests/unit/categories.test.mjs）
  *   → 按领域过滤列表只含对应条目，且激活态落在对应标签云链接上
  *   → 按发布机关过滤（下拉选项 = 库内去重机关，精确匹配）
  *   → 关键词过滤（标题 / 正文包含匹配）
@@ -51,23 +52,23 @@ const TITLES = {
 
 /**
  * 每条 fixture 条目的期望领域标签（src/lib/categories.ts 关键词规则的预期结果）。
- * 标题命中：xingzheng（行政复议）、shuiyuan（生态环境标准）、hedian（生态环境）、
- * npc2（交通 / 道路）；
+ * 标题命中：npc 三条（标题「草案 / 修订草案」→「立法与司法」）、npc2（交通 / 道路）、
+ * shuiyuan（生态环境标准）、hedian（生态环境）、xingzheng（行政复议）；
  * 仅正文命中：chengxu（moj 正文「落实立法法要求」→「立法」）、
  * haiyu（正文「海洋生态环境保护」→「生态环境」）、
  * shuiyuan（正文「数据元」→「数据与网络安全」，裸「数据」仍应命中）；
- * npc 三条 = 不打标签：正文唯一的「数据」出现在「国家法律法规数据库」内，
- * 属「数据」关键词的排除语境（issue #15 缺陷 2）；
+ * 排除语境：npc 正文的「国家法律法规数据库」不算「数据」（issue #15 缺陷 2）、
+ * hedian 正文的「工业和信息化部办公厅」不算「信息化」（同 issue 的机关名误伤）；
  * jingrong = 标题与正文均无关键词命中 → 不打标签。
  */
 const EXPECTED_TAGS = {
-  [TITLES.npc1]: [], // 正文「数据」全部在「数据库」内 → 不计命中
-  [TITLES.npc2]: ['交通运输'], // 标题命中「交通/道路」
-  [TITLES.npc3]: [], // 同 npc1
-  [TITLES.jingrong]: [], // 标题与正文（已裁剪）均无关键词命中 → 不打兜底标签
+  [TITLES.npc1]: ['立法与司法'], // 标题「修订草案二次审议稿」命中「草案」
+  [TITLES.npc2]: ['立法与司法', '交通运输'], // 标题「修订草案」+「交通/道路」
+  [TITLES.npc3]: ['立法与司法'], // 标题「草案二次审议稿」
+  [TITLES.jingrong]: ['立法与司法'], // 标题「金融法（草案）」命中「草案」（正文已裁剪，无其他命中）
   [TITLES.shuiyuan]: ['生态环境', '数据与网络安全'], // 标题「生态环境标准」+ 正文 6 处裸「数据」
   [TITLES.haiyu]: ['生态环境'], // 标题无领域词，正文「海洋生态环境保护」命中
-  [TITLES.hedian]: ['生态环境'], // 标题命中「生态环境」
+  [TITLES.hedian]: ['生态环境'], // 标题「生态环境」；正文机关名「工业和信息化部」不计「信息化」
   [TITLES.xingzheng]: ['立法与司法'], // 标题命中「行政复议」
   [TITLES.chengxu]: ['立法与司法'], // 标题无词，正文「落实立法法要求」命中「立法」
 };
@@ -261,10 +262,14 @@ describe('issue #9：领域标签自动打标与分类浏览筛选', () => {
     }
   });
 
-  it('按领域过滤：「立法与司法」含 2 条且保持倒计时顺序', async () => {
+  it('按领域过滤：「立法与司法」含 6 条（npc 法案草案 + moj 条例 / 金融法草案）且保持倒计时顺序', async () => {
     const lijisifa = await fetchHome(`/?category=${encodeURIComponent('立法与司法')}`);
-    assert.deepEqual(listOrder(lijisifa), [TITLES.xingzheng, TITLES.chengxu]);
-    assert.match(lijisifa, /data-testid="filter-result-count"[^>]*>筛选后共 2 条/);
+    assert.deepEqual(
+      listOrder(lijisifa),
+      [TITLES.npc1, TITLES.xingzheng, TITLES.jingrong, TITLES.chengxu, TITLES.npc2, TITLES.npc3],
+      '标题含「草案」的 npc 三条与金融法，以及 moj 两条条例（行政复议 / 行政法规制定程序）',
+    );
+    assert.match(lijisifa, /data-testid="filter-result-count"[^>]*>筛选后共 6 条/);
   });
 
   it('按发布机关过滤：精确匹配（司法部 ≠ 联合发布前缀；生态环境部 ≠ 办公厅）', async () => {
