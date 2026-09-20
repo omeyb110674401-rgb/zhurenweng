@@ -22,9 +22,16 @@
 /** 渠道类型：在线入口 / 电子邮箱 / 通信地址 / 电话 / 传真 */
 export type NoticeChannelKind = 'online' | 'email' | 'address' | 'phone' | 'fax';
 
-/** 渠道类型的中文标签（详情页渲染用；顺序即展示顺序） */
+/**
+ * 渠道类型的中文标签（详情页渲染用；顺序即展示顺序）。
+ *
+ * `online` 刻意叫「在线渠道」而不是「在线提交」：多数部委的原文确实写着「登录…
+ * 网站…提出意见」，但生态环境部写的是「可登录我部网站…"意见征集"栏目**检索查阅**」
+ * ——那只是查阅草案的入口，标成「在线提交」就夸大了原文。中性标签 + 原文上下文
+ * 片段一起呈现，读者自己判断；本站不替原文加码。
+ */
 export const CHANNEL_LABELS: Record<NoticeChannelKind, string> = {
-  online: '在线提交',
+  online: '在线渠道',
   email: '电子邮箱',
   address: '通信地址',
   phone: '联系电话',
