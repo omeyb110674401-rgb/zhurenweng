@@ -52,14 +52,14 @@ const ITEMS = {
   },
   C: {
     title: '司法部关于《中华人民共和国律师法（修订草案）》征求意见的通知',
-    detailPath: '/moj/pub/sfbgw/zqyj/t20260912_920001.html',
-    officialPath: '/moj/pub/sfbgw/zqyj/t20260912_920001.html',
+    detailPath: '/moj/pub/sfbgw/lfyjzj/lflfyjzj/202609/t20260912_920001.html',
+    officialPath: '/moj/pub/sfbgw/lfyjzj/lflfyjzj/202609/t20260912_920001.html',
     source: 'moj',
   },
   D: {
-    title: '司法部关于《中华人民共和国非物质文化遗产法（修订草案）》公开征求意见的通知',
-    detailPath: '/moj/pub/sfbgw/zqyj/t20260912_920002.html',
-    officialPath: '/moj/pub/sfbgw/zqyj/t20260912_920002.html',
+    title: '司法部、文化和旅游部关于《中华人民共和国非物质文化遗产法（修订草案）》公开征求意见的通知',
+    detailPath: '/moj/pub/sfbgw/lfyjzj/lflfyjzj/202609/t20260912_920002.html',
+    officialPath: '/moj/pub/sfbgw/lfyjzj/lflfyjzj/202609/t20260912_920002.html',
     source: 'moj',
   },
   E: {
@@ -166,15 +166,6 @@ async function fetchFixtureText(fPath) {
   return response.text();
 }
 
-/** moj 详情页面包屑最后一级（过滤「首页」，与适配器同口径）。 */
-function lastCrumb(html) {
-  const crumbs = /<div class="crumbs">([\s\S]*?)<\/div>/.exec(html)[1];
-  const texts = [...crumbs.matchAll(/<a[^>]*>([^<]+)<\/a>/g)]
-    .map((match) => match[1].trim())
-    .filter((text) => text.length > 0 && text !== '首页');
-  return texts[texts.length - 1];
-}
-
 /**
  * 从「已替换日期令牌的 fixture 快照」推导统计期望值（种子数据的真值来源）。
  * 机关 / 日期解析方式与各源适配器同字段同口径（moj / govcn 机关取详情页，
@@ -205,9 +196,12 @@ async function expectedStats() {
       published = listItem.published;
       deadlineText = String(JSON.parse(detailText).jsrq ?? '');
     } else if (item.source === 'moj') {
-      agency = lastCrumb(detailText);
+      // 真实结构：详情页没有「发布机关：」行、面包屑是栏目名 → 机关取标题前缀
+      agency = /^(.{2,60}?)关于[《〔（]/.exec(item.title)[1];
       published = normalizeDateText(/发布时间[:：]\s*([^\s<]+)/.exec(detailText)[1]);
-      deadlineText = /征求意见截止时间：<b>([^<]+)<\/b>/.exec(detailText)[1];
+      // 截止日期只在正文句里：「征求意见时间为…至…」（区间结束日）
+      const bodyText = detailText.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ');
+      deadlineText = /(?:至|到)\s*(\d{4}年\d{1,2}月\d{1,2}日|\d{4}-\d{1,2}-\d{1,2})/.exec(bodyText)[1];
     } else {
       agency = /<a class="dept-item"[^>]*>([^<]+)<\/a>/.exec(detailText)[1];
       published = normalizeDateText(

@@ -36,9 +36,10 @@ const TITLES = {
   npc1: '企业破产法（修订草案二次审议稿）征求意见',
   npc2: '道路交通安全法（修订草案）征求意见',
   npc3: '检察公益诉讼法（草案二次审议稿）征求意见',
-  tiaojie: '司法部关于《中华人民共和国人民调解法（修订草案）》征求意见的通知',
-  gongzheng: '司法部关于《中华人民共和国公证法（修订草案）》公开征求意见的通知',
-  wenhua: '司法部关于《中华人民共和国历史文化遗产保护法（草案征求意见稿）》公开征求意见的通知',
+  jingrong:
+    '司法部、中国人民银行、金融监管总局、中国证监会、国家外汇局关于《中华人民共和国金融法（草案）》公开征求意见的通知',
+  xingzheng: '司法部关于《中华人民共和国行政复议法实施条例（修订征求意见稿）》公开征求意见的通知',
+  chengxu: '司法部关于《行政法规制定程序条例（修订征求意见稿）》公开征求意见的通知',
   zhongcai: '司法部关于《中华人民共和国仲裁法（修订草案）》公开征求意见的通知',
   xinyong:
     '国家发展改革委关于《中华人民共和国社会信用体系建设法（草案征求意见稿）》公开征求意见的通知',
@@ -48,18 +49,19 @@ const TITLES = {
 
 /**
  * 每条 fixture 条目的期望领域标签（src/lib/categories.ts 关键词规则的预期结果）。
- * 标题命中：tielu（铁路/交通）、zhongcai（仲裁）、gongzheng（公证）、tiaojie（调解）、
+ * 标题命中：tielu（铁路/交通）、zhongcai（仲裁）、xingzheng（行政复议）、
  * xinyong（社会信用）、npc2（交通 / 道路）；
- * 仅正文命中：npc1 / npc3（人大真实正文含「国家法律法规数据库」→ 命中「数据」）；
- * wenhua = 标题与正文均无关键词命中 → 不打标签。
+ * 仅正文命中：npc1 / npc3（人大真实正文含「国家法律法规数据库」→ 命中「数据」）、
+ * chengxu（moj 正文「落实立法法要求」→ 命中「立法」）；
+ * jingrong = 标题与正文均无关键词命中 → 不打标签。
  */
 const EXPECTED_TAGS = {
   [TITLES.npc1]: ['数据与网络安全'], // 标题无领域词，正文「国家法律法规数据库」命中「数据」
   [TITLES.npc2]: ['交通运输', '数据与网络安全'], // 标题命中「交通/道路」，正文命中「数据」
   [TITLES.npc3]: ['数据与网络安全'], // 标题无领域词，正文命中「数据」
-  [TITLES.tiaojie]: ['立法与司法'],
-  [TITLES.gongzheng]: ['立法与司法'],
-  [TITLES.wenhua]: [],
+  [TITLES.jingrong]: [], // 标题与正文（已裁剪）均无关键词命中 → 不打兜底标签
+  [TITLES.xingzheng]: ['立法与司法'], // 标题命中「行政复议」
+  [TITLES.chengxu]: ['立法与司法'], // 标题无词，正文「落实立法法要求」命中「立法」
   [TITLES.zhongcai]: ['立法与司法'],
   [TITLES.xinyong]: ['市场监管'],
   [TITLES.tielu]: ['交通运输'],
@@ -69,8 +71,7 @@ const EXPECTED_TAGS = {
 const AGENCIES = [
   '全国人大常委会法制工作委员会',
   '司法部',
-  '司法部立法一局',
-  '司法部立法三局',
+  '司法部、中国人民银行、金融监管总局、中国证监会、国家外汇局',
   '国家发展改革委',
   '国家铁路局',
 ];
@@ -80,10 +81,10 @@ const EXPECTED_FULL_ORDER = [
   TITLES.tielu, // +12
   TITLES.zhongcai, // +18
   TITLES.npc1, // +21（企业破产法）
-  TITLES.gongzheng, // +22
+  TITLES.xingzheng, // +22（行政复议法实施条例）
   TITLES.xinyong, // +26
-  TITLES.tiaojie, // +30
-  TITLES.wenhua, // +44
+  TITLES.jingrong, // +30（金融法）
+  TITLES.chengxu, // +44（行政法规制定程序条例）
   TITLES.npc2, // +45（道路交通安全法）
   TITLES.npc3, // 已截止（真实历史截止日 2026-07-25），沉底
 ];
@@ -249,17 +250,23 @@ describe('issue #9：领域标签自动打标与分类浏览筛选', () => {
     );
 
     const lijisifa = await fetchHome(`/?category=${encodeURIComponent('立法与司法')}`);
-    assert.deepEqual(listOrder(lijisifa), [TITLES.zhongcai, TITLES.gongzheng, TITLES.tiaojie]);
+    assert.deepEqual(listOrder(lijisifa), [TITLES.zhongcai, TITLES.xingzheng, TITLES.chengxu]);
     assert.match(lijisifa, /data-testid="filter-result-count"[^>]*>筛选后共 3 条/);
   });
 
-  it('按发布机关过滤：精确匹配（司法部 ≠ 司法部立法一局/三局），顺序保持', async () => {
+  it('按发布机关过滤：精确匹配（司法部 ≠ 联合发布前缀），顺序保持', async () => {
     const html = await fetchHome(`/?agency=${encodeURIComponent('司法部')}`);
-    assert.deepEqual(listOrder(html), [TITLES.zhongcai, TITLES.wenhua]);
-    assert.match(html, /data-testid="filter-result-count"[^>]*>筛选后共 2 条/);
+    assert.deepEqual(
+      listOrder(html),
+      [TITLES.zhongcai, TITLES.xingzheng, TITLES.chengxu],
+      '机关精确匹配只含「司法部」（不含联合发布的长前缀）',
+    );
+    assert.match(html, /data-testid="filter-result-count"[^>]*>筛选后共 3 条/);
 
-    const yijv = await fetchHome(`/?agency=${encodeURIComponent('司法部立法一局')}`);
-    assert.deepEqual(listOrder(yijv), [TITLES.tiaojie], '机关精确匹配不误伤「司法部」前缀机关');
+    const joint = await fetchHome(
+      `/?agency=${encodeURIComponent('司法部、中国人民银行、金融监管总局、中国证监会、国家外汇局')}`,
+    );
+    assert.deepEqual(listOrder(joint), [TITLES.jingrong], '联合发布机关为完整前缀');
   });
 
   it('按关键词过滤：标题命中（道路交通安全法）与正文命中（人大正文特征串 / 失信惩戒）', async () => {
@@ -279,12 +286,12 @@ describe('issue #9：领域标签自动打标与分类浏览筛选', () => {
 
   it('组合过滤：领域 + 机关、领域 + 关键词叠加生效', async () => {
     const categoryAgency = await fetchHome(
-      `/?category=${encodeURIComponent('立法与司法')}&agency=${encodeURIComponent('司法部')}`,
+      `/?category=${encodeURIComponent('交通运输')}&agency=${encodeURIComponent('国家铁路局')}`,
     );
     assert.deepEqual(
       listOrder(categoryAgency),
-      [TITLES.zhongcai],
-      '立法与司法 × 司法部应只含仲裁法（公证/调解机关为司局级）',
+      [TITLES.tielu],
+      '交通运输 × 国家铁路局应只含铁路条例（npc 道路交通安全法机关是人大法工委）',
     );
 
     const categoryKeyword = await fetchHome(

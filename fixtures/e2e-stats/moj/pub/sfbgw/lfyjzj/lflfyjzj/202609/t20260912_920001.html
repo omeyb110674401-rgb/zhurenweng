@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <title>中华人民共和国司法部</title>
+  </head>
+  <body>
+    <!--
+      fixture 快照（issue #11 统计页场景）：司法部条目详情页（真实结构，内容合成）。
+      统计口径：发布 {{CN_DATE-3}} / 截止 {{DATE+4}} → 公示期恰 7 天（≤7 桶）；
+      机关 = 标题前缀「司法部」（真实详情页无「发布机关：」行、面包屑是栏目名）。
+    -->
+    <div class="w1200">
+      <div class="crumb crumbNew">
+        <a href="/" title="首页">首页</a> &gt;
+        <span><a href="../../" title="立法意见征集" class="CurrChnlCls">立法意见征集</a></span>
+      </div>
+    </div>
+    <div class="newDeta w1200">
+      <div class="newsTop">
+        <h1 class="phone_size1" style="font-weight: bold;">司法部关于《中华人民共和国律师法（修订草案）》征求意见的通知</h1>
+        <div class="sT">
+          <div class="sT_left">
+            <span>来源：司法部官网</span>
+            <span>发布时间：{{CN_DATE-3}}</span>
+          </div>
+        </div>
+      </div>
+      <div class="newM">
+        <div class="news_content_style">
+          <div class=TRS_Editor><p>　　为进一步完善律师制度，司法部起草了《中华人民共和国律师法（修订草案）》，现向社会公开征求意见。</p>
+<p>　　一、登录中国政府法制信息网（www.moj.gov.cn），进入「立法意见征集」栏目提出意见。</p>
+<p>　　二、通过电子邮件方式将意见发送至：lssf@moj.gov.cn。</p>
+<p>　　征求意见时间为{{CN_DATE-3}}至{{DATE+4}}。</p></div>
+          <div id="isShowFile" class="appendix_file close_artDiv" style="padding-left: 28px;">
+            <div style="font-weight: bold;">附件：</div>
+            <br />
+          </div>
+        </div>
+      </div>
+    </div>
+  </body>
+</html>

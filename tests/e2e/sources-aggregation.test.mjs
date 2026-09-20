@@ -28,31 +28,36 @@ const fixturesDir = path.join(repoRoot, 'fixtures');
 const workDir = fs.mkdtempSync(path.join(os.tmpdir(), 'zhurenweng-e2e-issue5-'));
 const dbFile = path.join(workDir, 'app.db');
 
+/**
+ * moj（司法部·立法意见征集）真实结构下的三条实抓条目 + 一条场景转发条目：
+ * - 列表标题在真实页面里被截断，完整标题来自详情页 h1（断言用完整标题）；
+ * - 机关来自标题前缀（真实详情页没有「发布机关：」行、面包屑是栏目名）；
+ * - 截止日期只在正文句里（「征求意见时间为…至…」），列表层为空；
+ * - 三条实抓条目的附件区都是空的（真实页面即如此，草案以正文链接形式给出）。
+ */
 const MOJ = {
   card: {
-    title: '司法部关于《中华人民共和国人民调解法（修订草案）》征求意见的通知',
-    detailPath: '/moj/pub/sfbgw/zqyj/t20260908_523110.html',
-    agency: '司法部立法一局',
-    publishedAt: '2026-09-08',
-    bodyMarker: 'rmtjf@moj.gov.cn',
-    attachments: [
-      '中华人民共和国人民调解法（修订草案）.docx',
-      '关于《中华人民共和国人民调解法（修订草案）》的说明.pdf',
-    ],
+    title:
+      '司法部、中国人民银行、金融监管总局、中国证监会、国家外汇局关于《中华人民共和国金融法（草案）》公开征求意见的通知',
+    detailPath: '/moj/pub/sfbgw/lfyjzj/lflfyjzj/202603/t20260320_532981.html',
+    agency: '司法部、中国人民银行、金融监管总局、中国证监会、国家外汇局',
+    publishedAt: '2026-03-20',
+    bodyMarker: 'jrfzqyj@moj.gov.cn',
   },
   gongzheng: {
-    title: '司法部关于《中华人民共和国公证法（修订草案）》公开征求意见的通知',
-    detailPath: '/moj/pub/sfbgw/zqyj/t20260903_523105.html',
-    agency: '司法部立法三局',
-    publishedAt: '2026-09-03',
-    bodyMarker: 'gzf@moj.gov.cn',
+    title:
+      '司法部关于《中华人民共和国行政复议法实施条例（修订征求意见稿）》公开征求意见的通知',
+    detailPath: '/moj/pub/sfbgw/lfyjzj/lflfyjzj/202508/t20250804_523412.html',
+    agency: '司法部',
+    publishedAt: '2025-08-04',
+    bodyMarker: 'fyysjzhc',
   },
   noAttachment: {
-    title: '司法部关于《中华人民共和国历史文化遗产保护法（草案征求意见稿）》公开征求意见的通知',
-    detailPath: '/moj/pub/sfbgw/zqyj/t20260901_523101.html',
+    title: '司法部关于《行政法规制定程序条例（修订征求意见稿）》公开征求意见的通知',
+    detailPath: '/moj/pub/sfbgw/lfyjzj/lflfyjzj/202506/t20250605_520514.html',
     agency: '司法部',
-    publishedAt: '2026-09-01',
-    bodyMarker: 'lswhyc@moj.gov.cn',
+    publishedAt: '2025-06-05',
+    bodyMarker: 'yjzqyj',
   },
 };
 
@@ -150,13 +155,16 @@ async function fetchDetailIdByTitle(title) {
 
 /**
  * 从 fixture 源站取已替换日期令牌的 moj 详情页，返回 { iso, days }：
- * 截止日期的 ISO 文本与距今天的日历天数。
+ * 截止日期在正文句「征求意见时间为…至…」里（区间结束日）。
  */
 async function fixtureMojDeadline(detailPath) {
   const html = await (await fetch(`${fixtureUrl}${detailPath}`)).text();
-  const match = /征求意见截止时间：<b>(\d{4}-\d{2}-\d{2})<\/b>/.exec(html);
-  assert.ok(match, 'fixture moj 详情页应含已替换的 ISO 截止日期');
-  return deadlineFromIso(match[1]);
+  const bodyText = html.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ');
+  const match = /(?:至|到)\s*(\d{4})年(\d{1,2})月(\d{1,2})日/.exec(bodyText);
+  assert.ok(match, 'fixture moj 详情页正文应含已替换的截止日期');
+  const [, y, m, d] = match;
+  const pad = (value) => String(value).padStart(2, '0');
+  return deadlineFromIso(`${y}-${pad(m)}-${pad(d)}`);
 }
 
 /**
@@ -238,10 +246,13 @@ describe('issue #5：源注册配置化与多源聚合', () => {
       );
     }
 
-    // 各源机关文本并存且不串扰
-    assert.match(html, /司法部立法一局 · 发布：2026-09-08 · 截止：\d{4}-\d{2}-\d{2}/);
-    assert.match(html, /司法部立法三局 · 发布：2026-09-03 · 截止：\d{4}-\d{2}-\d{2}/);
-    assert.match(html, /司法部 · 发布：2026-09-01 · 截止：\d{4}-\d{2}-\d{2}/);
+    // 各源机关文本并存且不串扰（moj 机关来自标题前缀，真实详情页无「发布机关：」行）
+    assert.match(
+      html,
+      /司法部、中国人民银行、金融监管总局、中国证监会、国家外汇局 · 发布：2026-03-20 · 截止：\d{4}-\d{2}-\d{2}/,
+    );
+    assert.match(html, /司法部 · 发布：2025-08-04 · 截止：\d{4}-\d{2}-\d{2}/);
+    assert.match(html, /司法部 · 发布：2025-06-05 · 截止：\d{4}-\d{2}-\d{2}/);
     assert.match(html, /国家发展改革委 · 发布：2026-09-05 · 截止：\d{4}-\d{2}-\d{2}/);
     assert.match(html, /国家铁路局 · 发布：2026-09-10 · 截止：\d{4}-\d{2}-\d{2}/);
     assert.match(html, /全国人大常委会法制工作委员会/);
@@ -258,10 +269,10 @@ describe('issue #5：源注册配置化与多源聚合', () => {
         GOVCN.native.title, // {{CN_DATE+12}}
         GOVCN.shared.title, // {{CN_DATE+18}}（跨源去重条目）
         NPC.first.title, // {{DATE+21}}（企业破产法）
-        MOJ.gongzheng.title, // {{CN_DATE+22}}
+        MOJ.gongzheng.title, // {{CN_DATE+22}}（行政复议法实施条例）
         GOVCN.multiDept.title, // {{CN_DATE+26}}
-        MOJ.card.title, // {{DATE+30}}
-        MOJ.noAttachment.title, // {{DATE+44}}
+        MOJ.card.title, // {{DATE+30}}（金融法）
+        MOJ.noAttachment.title, // {{DATE+44}}（行政法规制定程序条例）
         NPC.park.title, // {{DATE+45}}（道路交通安全法）
         NPC.fishery.title, // 已截止（真实历史截止日 2026-07-25），沉底
       ],
@@ -314,23 +325,26 @@ describe('issue #5：源注册配置化与多源聚合', () => {
     assert.equal(go.headers.get('location'), officialUrl);
   });
 
-  it('moj 卡片置顶条目详情页：面包屑机关、截止提示条日期、正文与文末附件区', async () => {
+  it('moj 联合发布条目详情页：标题前缀机关、正文句中的截止日期与正文（无附件区）', async () => {
     const noticeId = await fetchDetailIdByTitle(MOJ.card.title);
     const html = await (await fetch(`${app.url}/notices/${noticeId}`)).text();
 
     assert.match(html, new RegExp(MOJ.card.title));
-    assert.match(html, /发布机关[\s\S]{0,40}司法部立法一局/, '机关 = 面包屑最后一级');
+    assert.match(
+      html,
+      /发布机关[\s\S]{0,60}司法部、中国人民银行、金融监管总局、中国证监会、国家外汇局/,
+      '机关 = 标题前缀（真实详情页无「发布机关：」行）',
+    );
     assert.match(html, new RegExp(SOURCE_NAME.moj), '应展示来源（源适配器名称）');
-    assert.match(html, /2026-09-08/, '发布日期');
+    assert.match(html, /2026-03-20/, '发布日期');
 
     const { iso, days } = await fixtureMojDeadline(MOJ.card.detailPath);
     assert.match(html, new RegExp(`截止日期[\\s\\S]{0,40}${iso}`), `截止日期应为 fixture 令牌值 ${iso}`);
     assert.match(html, new RegExp(`剩 ${days} 天`), '倒计时按日历日一致');
 
     assert.match(html, new RegExp(MOJ.card.bodyMarker), '正文纯文本');
-    for (const name of MOJ.card.attachments) {
-      assert.match(html, new RegExp(name.replace(/[().]/g, '\\$&')), `附件：${name}`);
-    }
+    // 真实 moj 通知的附件区为空（草案以正文链接形式给出），不渲染附件清单
+    assert.ok(!html.includes('附件清单'), '无附件条目不应渲染附件清单区');
 
     const officialUrl = `${fixtureUrl}${MOJ.card.detailPath}`;
     assert.ok(html.includes(`href="${officialUrl}"`), '官方原文链接 = fixture 快照地址');
@@ -341,7 +355,7 @@ describe('issue #5：源注册配置化与多源聚合', () => {
     assert.equal(go.headers.get('location'), officialUrl);
   });
 
-  it('moj 无附件条目详情页：附件区不渲染，其余字段完整', async () => {
+  it('moj 单机关条目详情页：机关取标题前缀「司法部」，无附件区，其余字段完整', async () => {
     const noticeId = await fetchDetailIdByTitle(MOJ.noAttachment.title);
     const html = await (await fetch(`${app.url}/notices/${noticeId}`)).text();
 
