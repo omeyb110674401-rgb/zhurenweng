@@ -147,15 +147,22 @@ async function followGet(url) {
   return { response, html: await response.text() };
 }
 
-/** 从 fixture 源站取已替换日期令牌的截止日期，归一化为 ISO（YYYY-MM-DD）。 */
-async function servedDeadline(detailPath) {
-  const response = await fetch(`${fixtureUrl}${detailPath}`);
-  const html = await response.text();
-  const iso = /征求意见截止日期：(\d{4}-\d{1,2}-\d{1,2})/.exec(html);
-  const cn = /征求意见截止日期：(\d{4})年(\d{1,2})月(\d{1,2})日/.exec(html);
-  assert.ok(iso || cn, `fixture 详情页应含已替换的截止日期：${detailPath}`);
-  if (iso) return iso[1];
-  const [, y, m, d] = cn;
+/**
+ * 官方原文（人工可读页面）URL：由列表接口的 flxxId 拼出条目页地址
+ * （本源列表与正文都是接口数据，但入库唯一键与用户可见链接是人工页）。
+ */
+function officialUrlOf(lid) {
+  return `${fixtureUrl}/npc/userIndex.html?lid=${lid}`;
+}
+
+/** 从 fixture 源站取已替换日期令牌的详情接口 JSON，读出截止日期（ISO，YYYY-MM-DD）。 */
+async function servedDeadline(lid) {
+  const response = await fetch(`${fixtureUrl}/npc/flca/${lid}/info/`);
+  assert.equal(response.status, 200, `fixture 应提供详情接口快照：${lid}`);
+  const payload = await response.json();
+  const iso = /^(\d{4})-(\d{1,2})-(\d{1,2})/.exec(String(payload.jsrq ?? ''));
+  assert.ok(iso, `fixture 详情接口应含已替换的截止日期（jsrq）：${lid}`);
+  const [, y, m, d] = iso;
   return `${y}-${String(Number(m)).padStart(2, '0')}-${String(Number(d)).padStart(2, '0')}`;
 }
 
@@ -297,10 +304,10 @@ describe('issue #7：订阅 double opt-in → 截止提醒 → 一键退订', ()
     assert.equal(run.code, 0, `worker 应正常退出，输出：${run.output}`);
     assert.match(run.output, /截止提醒任务完成：候选条目 3，订阅 2，发送 3 封/);
 
-    const deadlineD7 = await servedDeadline('/npc/c2/c30834/t20260910_210001.html');
-    const deadlineD3 = await servedDeadline('/npc/c2/c30834/t20260910_210002.html');
-    const noiseId = noticeIdFor(`${fixtureUrl}/npc/c2/c30834/t20260910_210001.html`);
-    const idCardId = noticeIdFor(`${fixtureUrl}/npc/c2/c30834/t20260910_210002.html`);
+    const deadlineD7 = await servedDeadline('t20260910_210001');
+    const deadlineD3 = await servedDeadline('t20260910_210002');
+    const noiseId = noticeIdFor(officialUrlOf('t20260910_210001'));
+    const idCardId = noticeIdFor(officialUrlOf('t20260910_210002'));
 
     // alice：+7（标题命中）+ +3（正文命中「医疗保障」）
     const aliceD7 = assertOneMail(ALICE, TITLES.noiseD7);
@@ -311,7 +318,7 @@ describe('issue #7：订阅 double opt-in → 截止提醒 → 一键退订', ()
       `提醒应含站内详情链接 ${app.url}/notices/${noiseId}：${aliceD7.text}`,
     );
     assert.ok(
-      aliceD7.text.includes(`${fixtureUrl}/npc/c2/c30834/t20260910_210001.html`),
+      aliceD7.text.includes(officialUrlOf('t20260910_210001')),
       '提醒应含官方原文（提意）链接',
     );
     assert.match(aliceD7.text, /unsubscribe\?token=/);
@@ -321,8 +328,8 @@ describe('issue #7：订阅 double opt-in → 截止提醒 → 一键退订', ()
     assert.match(aliceD3.text, new RegExp(`截止日期：${deadlineD3}（还剩 3 天`));
     assert.ok(aliceD3.text.includes(`${app.url}/notices/${idCardId}`));
     assert.ok(
-      aliceD3.text.includes(`${fixtureUrl}/npc/c2/c30834/t20260910_210002.html`),
-      '官方原文链接应指向该条目的详情快照',
+      aliceD3.text.includes(officialUrlOf('t20260910_210002')),
+      '官方原文链接应指向该条目的详情页地址',
     );
 
     // bob：仅 +7 一封（其规则不含「医疗保障」，正文命中的条目不触发）

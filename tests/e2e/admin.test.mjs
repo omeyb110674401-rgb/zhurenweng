@@ -264,10 +264,10 @@ describe('issue #12：管理后台与健康告警', () => {
     let html = await (await getAdmin()).text();
     const items = extractReviewItems(html);
     assert.equal(items.length, 2, '两个失败摘要条目进入复核队列');
-    assert.ok(items.some((item) => item.title.includes('医疗保障法')), '队列含失败条目标题');
+    assert.ok(items.some((item) => item.title.includes('企业破产法')), '队列含失败条目标题');
     assert.match(html, /data-testid="review-queue"/, '队列区块渲染');
 
-    const target = items.find((item) => item.title.includes('医疗保障法'));
+    const target = items.find((item) => item.title.includes('企业破产法'));
     const reset = await postAdmin('/admin/review', { noticeId: target.id, action: 'reset' });
     assert.equal(reset.status, 303);
     assert.equal(reset.headers.get('location'), '/admin?ok=review_reset');
@@ -304,8 +304,8 @@ describe('issue #12：管理后台与健康告警', () => {
     const save = await postAdmin('/admin/review', {
       noticeId: target.id,
       action: 'save',
-      what: '【人工】这是医疗保障法草案的征求意见公告。',
-      who: '【人工】受草案影响的医疗保障参保人与定点医药机构。',
+      what: '【人工】这是企业破产法草案的征求意见公告。',
+      who: '【人工】受草案影响的破产企业与债权人。',
       keyPoints: '【人工】第一条 规范医疗保障关系\n【人工】第二条 健全多层次保障体系',
       deadline: isoDatePlus(20),
       howToComment: '【人工】请前往中国人大网征求意见页面提交意见。',
@@ -321,7 +321,7 @@ describe('issue #12：管理后台与健康告警', () => {
     const detail = await (await fetch(`${app.url}/notices/${target.id}`)).text();
     const readable = stripSsrComments(detail);
     assert.match(detail, /data-testid="ai-summary"/, '详情页渲染人工摘要');
-    assert.match(readable, /【人工】这是医疗保障法草案的征求意见公告。/, '人工摘要内容（这是什么）');
+    assert.match(readable, /【人工】这是企业破产法草案的征求意见公告。/, '人工摘要内容（这是什么）');
     assert.match(readable, /【人工】第二条 健全多层次保障体系/, '人工摘要关键条款');
     assert.match(readable, /摘要模型：manual/, '人工摘要与自动摘要可区分');
     assert.ok(!readable.includes('摘要生成中'), '占位消失');

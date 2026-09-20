@@ -57,9 +57,9 @@ const MOJ = {
 };
 
 const NPC = {
-  first: { title: '中华人民共和国医疗保障法（草案征求意见稿）征求意见' },
-  park: { title: '中华人民共和国国家公园法（草案二次审议稿）征求意见' },
-  fishery: { title: '中华人民共和国渔业法（修订草案）征求意见' },
+  first: { title: '企业破产法（修订草案二次审议稿）征求意见' },
+  park: { title: '道路交通安全法（修订草案）征求意见' },
+  fishery: { title: '检察公益诉讼法（草案二次审议稿）征求意见' },
 };
 
 const GOVCN = {
@@ -244,7 +244,7 @@ describe('issue #5：源注册配置化与多源聚合', () => {
     assert.match(html, /司法部 · 发布：2026-09-01 · 截止：\d{4}-\d{2}-\d{2}/);
     assert.match(html, /国家发展改革委 · 发布：2026-09-05 · 截止：\d{4}-\d{2}-\d{2}/);
     assert.match(html, /国家铁路局 · 发布：2026-09-10 · 截止：\d{4}-\d{2}-\d{2}/);
-    assert.match(html, /全国人民代表大会常务委员会法制工作委员会/);
+    assert.match(html, /全国人大常委会法制工作委员会/);
   });
 
   it('三源条目全局排序：征求意见中按截止日期升序，跨源不串扰排序', async () => {
@@ -257,13 +257,13 @@ describe('issue #5：源注册配置化与多源聚合', () => {
       [
         GOVCN.native.title, // {{CN_DATE+12}}
         GOVCN.shared.title, // {{CN_DATE+18}}（跨源去重条目）
-        NPC.first.title, // {{CN_DATE+21}}
+        NPC.first.title, // {{DATE+21}}（企业破产法）
         MOJ.gongzheng.title, // {{CN_DATE+22}}
         GOVCN.multiDept.title, // {{CN_DATE+26}}
         MOJ.card.title, // {{DATE+30}}
         MOJ.noAttachment.title, // {{DATE+44}}
-        NPC.park.title, // {{CN_DATE+45}}
-        NPC.fishery.title, // {{CN_DATE-10}} 已截止，沉底
+        NPC.park.title, // {{DATE+45}}（道路交通安全法）
+        NPC.fishery.title, // 已截止（真实历史截止日 2026-07-25），沉底
       ],
     );
 

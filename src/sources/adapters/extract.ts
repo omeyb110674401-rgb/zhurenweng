@@ -151,10 +151,18 @@ export function extractDeadline(bodyText: string | undefined): string | null {
  * 从通知标题前缀取发布机关：「司法部、中国人民银行…关于《…》公开征求意见的通知」→ 前缀。
  * 前缀必须含机关字样（部/委/局/院/署/办/厅/政府/人大/银行/监管）才采信，
  * 避免把「公开征求…」一类短语当成机关；取不到时返回 undefined（由适配器兜底常量）。
+ *
+ * 注意：这里刻意用 indexOf 拆前缀而**不用正则字面量**。Node 直接运行 .ts（类型擦除）
+ * 时，本文件里若出现 `/^(.{2,60}?)关于[…]/` 这样的正则字面量，解析器会误判为除号，
+ * 在几十行之外报 ERR_INVALID_TYPESCRIPT_SYNTAX（实测踩过，换转义/换字符类都无效）。
+ * 改动本函数时请保持无正则字面量的写法。
  */
 export function agencyFromTitle(title: string): string | undefined {
-  const match = /^(.{2,60}?)关于[《〔（(]/.exec(normalizeWhitespace(title)));
-  if (!match) return undefined;
-  const candidate = match[1].trim();
+  const text = normalizeWhitespace(title);
+  const at = text.indexOf('关于');
+  // 前缀长度 2~60 字，且「关于」之后紧跟书名号 / 括号（《 〔 （）才视为机关前缀
+  if (at < 2 || at > 60) return undefined;
+  if (!'《〔（'.includes(text.charAt(at + 2))) return undefined;
+  const candidate = text.slice(0, at).trim();
   return /[部委局院署办厅]|政府|人大|银行|监管/.test(candidate) ? candidate : undefined;
 }

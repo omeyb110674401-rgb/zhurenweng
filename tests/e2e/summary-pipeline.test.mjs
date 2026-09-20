@@ -29,18 +29,30 @@ const dbFile = path.join(workDir, 'app.db');
 const callsFile = path.join(workDir, 'llm-calls.jsonl');
 const tempFixturesDir = path.join(workDir, 'fixtures');
 
+/** 条目 ID（列表接口的 flxxId）：详情接口路径与官方原文链接都由它拼出。 */
+const LIDS = {
+  open1: 'ff8081819ff541ea01a03d7b3d7e4871',
+  open2: 'ff8081819ff54ab801a03d624f823cc3',
+  closed: 'ff8081819e48b44c019efe4840675d16',
+};
+
 const TITLES = {
-  open1: '中华人民共和国医疗保障法（草案征求意见稿）征求意见',
-  open2: '中华人民共和国国家公园法（草案二次审议稿）征求意见',
-  closed: '中华人民共和国渔业法（修订草案）征求意见',
+  open1: '企业破产法（修订草案二次审议稿）征求意见',
+  open2: '道路交通安全法（修订草案）征求意见',
+  closed: '检察公益诉讼法（草案二次审议稿）征求意见',
 };
 /** 成功路径追加的临时 fixture 条目（同法草案重新公开征求意见的合成场景，URL 不同 → 新条目） */
-const NEW_TITLE = '中华人民共和国医疗保障法（草案征求意见稿）二次征求意见';
-const NEW_DETAIL_FILENAME = 't20260901_150004.html';
+const NEW_TITLE = '企业破产法（修订草案）征求意见';
+const NEW_LID = 't20260901_150004';
 
 let app;
 let fixtures;
 let fixtureUrl;
+
+/** 官方原文（人工可读页面）URL。 */
+function officialUrlOf(lid) {
+  return `${fixtureUrl}/npc/userIndex.html?lid=${lid}`;
+}
 
 /** 单轮运行真实 worker 子进程，extraEnv 仅注入本次运行。返回 { code, output }。 */
 function runWorkerOnce(extraEnv = {}) {
@@ -167,25 +179,31 @@ describe('issue #4：AI 摘要器 → 五段式摘要展示（失败重试与成
   });
 
   it('成功路径：新入库条目生成五段式摘要，AI 标注 + 原文引用可点击，占位消失', async () => {
-    // 向临时 fixture 列表追加第 4 条（未截止，截止日期 +30 天）：同法重新公开征求意见，URL 不同
-    const detailDir = path.join(tempFixturesDir, 'npc', 'c2', 'c30834');
-    const baseDetail = fs.readFileSync(path.join(detailDir, 't20260830_150001.html'), 'utf8');
-    fs.writeFileSync(
-      path.join(detailDir, NEW_DETAIL_FILENAME),
-      baseDetail
-        .replaceAll('{{CN_DATE+21}}', '{{CN_DATE+30}}')
-        .replaceAll(TITLES.open1, NEW_TITLE),
-    );
-    const listPath = path.join(tempFixturesDir, 'npc', 'list.html');
-    const listHtml = fs.readFileSync(listPath, 'utf8');
-    const newItem = [
-      '        <li>',
-      `          <a href="/npc/c2/c30834/${NEW_DETAIL_FILENAME}" target="_blank">${NEW_TITLE}</a>`,
-      '          <span class="time">2026年9月1日</span>',
-      '        </li>',
-      '',
-    ].join('\n');
-    fs.writeFileSync(listPath, listHtml.replace('</ul>', `${newItem}</ul>`));
+    // 向临时 fixture 列表追加第 4 条（未截止，截止日期 +30 天）：同法重新公开征求意见，
+    // flxxId 不同 → 条目 URL 不同 → 新条目。真实结构下列表与详情都是 JSON 快照。
+    const baseInfoPath = path.join(tempFixturesDir, 'npc', 'flca', LIDS.open1, 'info', 'index.json');
+    const baseInfo = JSON.parse(fs.readFileSync(baseInfoPath, 'utf8'));
+    const newInfo = {
+      ...baseInfo,
+      flxxId: NEW_LID,
+      flxxmc: NEW_TITLE,
+      jsrq: '{{DATE+30}} 23:59:59',
+      tsy: String(baseInfo.tsy).replaceAll(TITLES.open1, NEW_TITLE),
+    };
+    const newInfoDir = path.join(tempFixturesDir, 'npc', 'flca', NEW_LID, 'info');
+    fs.mkdirSync(newInfoDir, { recursive: true });
+    fs.writeFileSync(path.join(newInfoDir, 'index.json'), `${JSON.stringify(newInfo, null, 2)}\n`);
+
+    const listPath = path.join(tempFixturesDir, 'npc', 'list.json');
+    const listPayload = JSON.parse(fs.readFileSync(listPath, 'utf8'));
+    listPayload.total += 1;
+    listPayload.rows.push({
+      flxxmc: NEW_TITLE,
+      ksrq: '2026-09-01 00:00:00',
+      flxxId: NEW_LID,
+      jsrq: '{{DATE+30}} 23:59:59',
+    });
+    fs.writeFileSync(listPath, `${JSON.stringify(listPayload, null, 2)}\n`);
 
     const third = await runWorkerOnce();
     assert.equal(third.code, 0, `worker 应正常退出，输出：${third.output}`);
@@ -201,7 +219,7 @@ describe('issue #4：AI 摘要器 → 五段式摘要展示（失败重试与成
     const appended = items.find((item) => item.title === NEW_TITLE);
     assert.ok(appended, '列表应包含新追加条目');
     const newId = extractNoticeId(appended.href);
-    const officialUrl = `${fixtureUrl}/npc/c2/c30834/${NEW_DETAIL_FILENAME}`;
+    const officialUrl = officialUrlOf(NEW_LID);
 
     const rawHtml = await (await fetch(`${app.url}/notices/${newId}`)).text();
     const html = stripSsrComments(rawHtml);

@@ -38,9 +38,23 @@ import type { Job, JobContext } from '../registry.ts';
  */
 
 const FETCH_TIMEOUT_MS = 15_000;
+/**
+ * 详情抓取之间的礼貌间隔（issue #14）：三源都是政府站点，串行连发上百个详情
+ * 请求容易被 WAF 判定为爬虫而封 IP，整条数据管线会直接断掉。
+ * 取值依据：单轮最大约 100 条 × 400ms ≈ 40s 额外耗时（可接受，不需要并发），
+ * 400ms 明显高于连续机器请求的间隔、又远低于人工浏览节奏。
+ */
+const DETAIL_FETCH_INTERVAL_MS = 400;
 // HTTP 头只能是 ByteString，UA 必须保持 ASCII
 const USER_AGENT =
   'zhurenweng-crawler/0.1 (+https://github.com/omeyb110674401-rgb/zhurenweng; gov-notice aggregator)';
+
+/** 两行小工具：等待若干毫秒（礼貌间隔，见 DETAIL_FETCH_INTERVAL_MS）。 */
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
+}
 
 /** 解析某适配器本次运行使用的列表页 URL（环境变量可重写为 fixture 源站）。 */
 export function resolveListUrl(adapter: SourceAdapter): string {
@@ -184,6 +198,11 @@ export const crawlNoticesJob: Job = {
         const changedNoticeIds: string[] = [];
         for (const notice of listItems) {
           const normalized = await enrichWithDetail(adapter, notice, ctx);
+          // 对源站礼貌、避免触发限流（issue #14）：三源都是政府站点，串行连发
+          // 上百个详情请求容易被 WAF 判定为爬虫而封 IP，整条数据管线会直接断掉。
+          // 取值依据：单轮最大约 100 条 × 400ms ≈ 40s 额外耗时（可接受），
+          // 400ms 低于任何人工浏览节奏、又明显高于连续机器请求的间隔。
+          await sleep(DETAIL_FETCH_INTERVAL_MS);
           const id = noticeIdForUrl(normalized.url);
           const result = await upsertNotice({
             id,

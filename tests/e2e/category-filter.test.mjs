@@ -33,9 +33,9 @@ const workDir = fs.mkdtempSync(path.join(os.tmpdir(), 'zhurenweng-e2e-issue9-'))
 const dbFile = path.join(workDir, 'app.db');
 
 const TITLES = {
-  yibao: '中华人民共和国医疗保障法（草案征求意见稿）征求意见',
-  park: '中华人民共和国国家公园法（草案二次审议稿）征求意见',
-  fishery: '中华人民共和国渔业法（修订草案）征求意见',
+  npc1: '企业破产法（修订草案二次审议稿）征求意见',
+  npc2: '道路交通安全法（修订草案）征求意见',
+  npc3: '检察公益诉讼法（草案二次审议稿）征求意见',
   tiaojie: '司法部关于《中华人民共和国人民调解法（修订草案）》征求意见的通知',
   gongzheng: '司法部关于《中华人民共和国公证法（修订草案）》公开征求意见的通知',
   wenhua: '司法部关于《中华人民共和国历史文化遗产保护法（草案征求意见稿）》公开征求意见的通知',
@@ -48,14 +48,15 @@ const TITLES = {
 
 /**
  * 每条 fixture 条目的期望领域标签（src/lib/categories.ts 关键词规则的预期结果）。
- * yibao / zhongcai / tielu / gongzheng / tiaojie / xinyong = 标题（及正文）命中；
- * park = 仅正文命中（标题无任何领域词，正文「生态」「自然保护地」命中生态环境）；
- * fishery / wenhua = 标题与正文均无关键词命中 → 不打标签。
+ * 标题命中：tielu（铁路/交通）、zhongcai（仲裁）、gongzheng（公证）、tiaojie（调解）、
+ * xinyong（社会信用）、npc2（交通 / 道路）；
+ * 仅正文命中：npc1 / npc3（人大真实正文含「国家法律法规数据库」→ 命中「数据」）；
+ * wenhua = 标题与正文均无关键词命中 → 不打标签。
  */
 const EXPECTED_TAGS = {
-  [TITLES.yibao]: ['医疗卫生'],
-  [TITLES.park]: ['生态环境'],
-  [TITLES.fishery]: [],
+  [TITLES.npc1]: ['数据与网络安全'], // 标题无领域词，正文「国家法律法规数据库」命中「数据」
+  [TITLES.npc2]: ['交通运输', '数据与网络安全'], // 标题命中「交通/道路」，正文命中「数据」
+  [TITLES.npc3]: ['数据与网络安全'], // 标题无领域词，正文命中「数据」
   [TITLES.tiaojie]: ['立法与司法'],
   [TITLES.gongzheng]: ['立法与司法'],
   [TITLES.wenhua]: [],
@@ -66,7 +67,7 @@ const EXPECTED_TAGS = {
 
 /** 库内去重后的全部发布机关（= 机关下拉选项，按名称排序前的全集） */
 const AGENCIES = [
-  '全国人民代表大会常务委员会法制工作委员会',
+  '全国人大常委会法制工作委员会',
   '司法部',
   '司法部立法一局',
   '司法部立法三局',
@@ -78,13 +79,13 @@ const AGENCIES = [
 const EXPECTED_FULL_ORDER = [
   TITLES.tielu, // +12
   TITLES.zhongcai, // +18
-  TITLES.yibao, // +21
+  TITLES.npc1, // +21（企业破产法）
   TITLES.gongzheng, // +22
   TITLES.xinyong, // +26
   TITLES.tiaojie, // +30
   TITLES.wenhua, // +44
-  TITLES.park, // +45
-  TITLES.fishery, // 已截止（{{CN_DATE-10}}），沉底
+  TITLES.npc2, // +45（道路交通安全法）
+  TITLES.npc3, // 已截止（真实历史截止日 2026-07-25），沉底
 ];
 
 let app;
@@ -226,22 +227,26 @@ describe('issue #9：领域标签自动打标与分类浏览筛选', () => {
     assert.match(html, /data-testid="filter-form"[^>]*method="get"/, '筛选表单应为 GET（URL 驱动）');
   });
 
-  it('按领域过滤：标题命中打标的「医疗卫生」只含医疗保障法，激活态正确', async () => {
-    const html = await fetchHome(`/?category=${encodeURIComponent('医疗卫生')}`);
-    assert.deepEqual(listOrder(html), [TITLES.yibao]);
-    assert.match(html, /data-testid="filter-result-count"[^>]*>筛选后共 1 条/);
+  it('按领域过滤：标题命中打标的「交通运输」含铁路条例与道路交通安全法，激活态正确', async () => {
+    const html = await fetchHome(`/?category=${encodeURIComponent('交通运输')}`);
+    assert.deepEqual(listOrder(html), [TITLES.tielu, TITLES.npc2]);
+    assert.match(html, /data-testid="filter-result-count"[^>]*>筛选后共 2 条/);
     assert.match(
       html,
-      /data-testid="category-filter-link" aria-current="true"[^>]*>医疗卫生/,
-      '激活态应落在医疗卫生标签上',
+      /data-testid="category-filter-link" aria-current="true"[^>]*>交通运输/,
+      '激活态应落在交通运输标签上',
     );
     // 切换领域保留机关 / 关键词的入口仍在；标签云其余链接保持未激活
     assert.ok(!/aria-current="true"[^>]*>生态环境/.test(html));
   });
 
-  it('按领域过滤：正文命中打标的「生态环境」含国家公园法；「立法与司法」含 3 条且保持倒计时顺序', async () => {
-    const park = await fetchHome(`/?category=${encodeURIComponent('生态环境')}`);
-    assert.deepEqual(listOrder(park), [TITLES.park], '国家公园法应由正文关键词命中打标为生态环境');
+  it('按领域过滤：正文命中打标的「数据与网络安全」含 3 条 npc；「立法与司法」含 3 条且保持倒计时顺序', async () => {
+    const dataDomain = await fetchHome(`/?category=${encodeURIComponent('数据与网络安全')}`);
+    assert.deepEqual(
+      listOrder(dataDomain),
+      [TITLES.npc1, TITLES.npc2, TITLES.npc3],
+      '三条 npc 条目都由正文「国家法律法规数据库」命中「数据」（标题无该领域词）',
+    );
 
     const lijisifa = await fetchHome(`/?category=${encodeURIComponent('立法与司法')}`);
     assert.deepEqual(listOrder(lijisifa), [TITLES.zhongcai, TITLES.gongzheng, TITLES.tiaojie]);
@@ -257,12 +262,16 @@ describe('issue #9：领域标签自动打标与分类浏览筛选', () => {
     assert.deepEqual(listOrder(yijv), [TITLES.tiaojie], '机关精确匹配不误伤「司法部」前缀机关');
   });
 
-  it('按关键词过滤：标题命中（国家公园法）与正文命中（监督检查 / 失信惩戒）', async () => {
-    const titleHit = await fetchHome(`/?q=${encodeURIComponent('国家公园法')}`);
-    assert.deepEqual(listOrder(titleHit), [TITLES.park], '标题包含匹配应命中国家公园法');
+  it('按关键词过滤：标题命中（道路交通安全法）与正文命中（人大正文特征串 / 失信惩戒）', async () => {
+    const titleHit = await fetchHome(`/?q=${encodeURIComponent('道路交通安全法')}`);
+    assert.deepEqual(listOrder(titleHit), [TITLES.npc2], '标题包含匹配应命道路交通安全法');
 
-    const bodyHit1 = await fetchHome(`/?q=${encodeURIComponent('监督检查')}`);
-    assert.deepEqual(listOrder(bodyHit1), [TITLES.yibao], '「监督检查」只出现在医疗保障法正文');
+    const bodyHit1 = await fetchHome(`/?q=${encodeURIComponent('社会公众可以直接登录中国人大网')}`);
+    assert.deepEqual(
+      listOrder(bodyHit1),
+      [TITLES.npc1, TITLES.npc2, TITLES.npc3],
+      '该特征串只出现在 npc 正文（标题不含）',
+    );
 
     const bodyHit2 = await fetchHome(`/?q=${encodeURIComponent('失信惩戒')}`);
     assert.deepEqual(listOrder(bodyHit2), [TITLES.xinyong], '「失信惩戒」只出现在社会信用体系建设法正文');
@@ -279,14 +288,14 @@ describe('issue #9：领域标签自动打标与分类浏览筛选', () => {
     );
 
     const categoryKeyword = await fetchHome(
-      `/?category=${encodeURIComponent('医疗卫生')}&q=${encodeURIComponent('医疗保障')}`,
+      `/?category=${encodeURIComponent('交通运输')}&q=${encodeURIComponent('铁路')}`,
     );
-    assert.deepEqual(listOrder(categoryKeyword), [TITLES.yibao]);
+    assert.deepEqual(listOrder(categoryKeyword), [TITLES.tielu]);
     // 领域经隐藏字段保留在表单内
-    assert.match(categoryKeyword, /<input type="hidden" name="category" value="医疗卫生"/);
+    assert.match(categoryKeyword, /<input type="hidden" name="category" value="交通运输"/);
 
     const combinedNone = await fetchHome(
-      `/?category=${encodeURIComponent('医疗卫生')}&q=${encodeURIComponent('仲裁')}`,
+      `/?category=${encodeURIComponent('交通运输')}&q=${encodeURIComponent('仲裁')}`,
     );
     assert.match(combinedNone, /data-testid="notice-empty-state"/, '组合无结果应展示空态');
     assert.match(combinedNone, /没有符合筛选条件的公示/);

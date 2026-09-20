@@ -30,36 +30,48 @@ const fixturesDir = path.join(repoRoot, 'fixtures', 'e2e-stats');
 const workDir = fs.mkdtempSync(path.join(os.tmpdir(), 'zhurenweng-e2e-issue11-'));
 const dbFile = path.join(workDir, 'app.db');
 
-/** 种子条目清单（title = 列表页标题，detailPath = fixture 快照地址）。 */
+/**
+ * 种子条目清单：
+ * - title = 列表页标题；
+ * - detailPath = 详情内容快照地址（npc 为详情接口 …/flca/<lid>/info/，moj/govcn 为详情页）；
+ * - officialPath = 官方原文（人工可读页面）地址，即入库唯一键与 /go 跳转目标
+ *   （npc 正文来自接口，但用户可见链接是 userIndex.html?lid=…）。
+ */
 const ITEMS = {
   A: {
     title: '中华人民共和国慈善法（修正草案）征求意见',
-    detailPath: '/npc/c2/c30834/t20260912_910001.html',
+    detailPath: '/npc/flca/t20260912_910001/info/',
+    officialPath: '/npc/userIndex.html?lid=t20260912_910001',
     source: 'npc',
   },
   B: {
     title: '中华人民共和国广播电视法（草案征求意见稿）征求意见',
-    detailPath: '/npc/c2/c30834/t20260912_910002.html',
+    detailPath: '/npc/flca/t20260912_910002/info/',
+    officialPath: '/npc/userIndex.html?lid=t20260912_910002',
     source: 'npc',
   },
   C: {
     title: '司法部关于《中华人民共和国律师法（修订草案）》征求意见的通知',
     detailPath: '/moj/pub/sfbgw/zqyj/t20260912_920001.html',
+    officialPath: '/moj/pub/sfbgw/zqyj/t20260912_920001.html',
     source: 'moj',
   },
   D: {
     title: '司法部关于《中华人民共和国非物质文化遗产法（修订草案）》公开征求意见的通知',
     detailPath: '/moj/pub/sfbgw/zqyj/t20260912_920002.html',
+    officialPath: '/moj/pub/sfbgw/zqyj/t20260912_920002.html',
     source: 'moj',
   },
   E: {
     title: '国家发展改革委关于《中华人民共和国能源法（草案征求意见稿）》公开征求意见的通知',
     detailPath: '/govcn/zhengce/yjzj/202609/content_930001.html',
+    officialPath: '/govcn/zhengce/yjzj/202609/content_930001.html',
     source: 'govcn',
   },
   F: {
     title: '国家铁路局关于《地方铁路安全管理条例（修订草案征求意见稿）》公开征求意见的通知',
     detailPath: '/govcn/zhengce/yjzj/202609/content_930002.html',
+    officialPath: '/govcn/zhengce/yjzj/202609/content_930002.html',
     source: 'govcn',
   },
 };
@@ -172,40 +184,38 @@ let expectedCache = null;
 async function expectedStats() {
   if (expectedCache) return expectedCache;
 
-  const npcListHtml = await fetchFixtureText('/npc/list.html');
-  const npcItems = [
-    ...npcListHtml.matchAll(
-      /<a href="([^"]+)" target="_blank">([^<]+)<\/a>\s*<span class="time">([^<]+)<\/span>/g,
-    ),
-  ].map((match) => ({ title: match[2], published: normalizeDateText(match[3]) }));
+  const npcListPayload = JSON.parse(await fetchFixtureText('/npc/list.json'));
+  const npcItems = npcListPayload.rows.map((row) => ({
+    title: row.flxxmc,
+    published: normalizeDateText(row.ksrq),
+  }));
 
   const records = [];
   for (const [key, item] of Object.entries(ITEMS)) {
-    const detailHtml = await fetchFixtureText(item.detailPath);
+    const detailText = await fetchFixtureText(item.detailPath);
     let agency;
     let published;
+    let deadlineText;
 
     if (item.source === 'npc') {
+      // 列表接口给标题与发布日期，详情接口给正文与截止日期（jsrq）
       const listItem = npcItems.find((candidate) => item.title === candidate.title);
       assert.ok(listItem, `npc 列表应含条目「${item.title}」`);
       agency = '全国人大常委会法制工作委员会'; // 适配器列表层兜底机关（DEFAULT_AGENCY）
       published = listItem.published;
+      deadlineText = String(JSON.parse(detailText).jsrq ?? '');
     } else if (item.source === 'moj') {
-      agency = lastCrumb(detailHtml);
-      published = normalizeDateText(/发布时间[:：]\s*([^\s<]+)/.exec(detailHtml)[1]);
+      agency = lastCrumb(detailText);
+      published = normalizeDateText(/发布时间[:：]\s*([^\s<]+)/.exec(detailText)[1]);
+      deadlineText = /征求意见截止时间：<b>([^<]+)<\/b>/.exec(detailText)[1];
     } else {
-      agency = /<a class="dept-item"[^>]*>([^<]+)<\/a>/.exec(detailHtml)[1];
+      agency = /<a class="dept-item"[^>]*>([^<]+)<\/a>/.exec(detailText)[1];
       published = normalizeDateText(
-        /<span class="pub-date">发布日期：([^<]+)<\/span>/.exec(detailHtml)[1],
+        /<span class="pub-date">发布日期：([^<]+)<\/span>/.exec(detailText)[1],
       );
+      deadlineText = /<div class="deadline-value">([^<]+)<\/div>/.exec(detailText)[1];
     }
 
-    const deadlineText =
-      item.source === 'moj'
-        ? /征求意见截止时间：<b>([^<]+)<\/b>/.exec(detailHtml)[1]
-        : item.source === 'govcn'
-          ? /<div class="deadline-value">([^<]+)<\/div>/.exec(detailHtml)[1]
-          : /征求意见截止日期：([^\s<（]+)/.exec(detailHtml)[1];
     const deadline = normalizeDateText(deadlineText);
 
     const gap = daysBetween(published, deadline);
@@ -407,7 +417,7 @@ describe('issue #11：数据统计页与出站点击聚合', () => {
         isFirstClick = false;
         assert.equal(
           response.headers.get('location'),
-          `${fixtureUrl}${ITEMS[key].detailPath}`,
+          `${fixtureUrl}${ITEMS[key].officialPath}`,
           `302 目标应为 ${key} 的官方原文 URL`,
         );
       }
