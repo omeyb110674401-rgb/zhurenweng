@@ -2,6 +2,7 @@ import Link from 'next/link';
 import { listNoticesFiltered, listNoticeAgencies } from '@/db/repo/notices';
 import { NoticeItem } from '@/app/_lib/notice-item';
 import { SearchForm } from '@/app/_lib/search-form';
+import { IcpFiling } from '@/app/_lib/icp-filing';
 import { DOMAIN_CATEGORIES, isKnownCategory } from '@/lib/categories';
 
 // 数据随抓取管线持续更新，首页始终服务端实时渲染，不做静态预渲染。
@@ -192,7 +193,7 @@ export default async function HomePage({ searchParams }: HomePageProps) {
         <p>
           本站只聚合官方公开信息并提供 AI 解读（AI 生成内容将显著标注），提交意见请一律前往官方渠道。
         </p>
-        <p>ICP 备案：待备案（占位）</p>
+        <IcpFiling />
       </footer>
     </main>
   );

@@ -50,9 +50,11 @@ vim .env   # 按模板逐项填写；POSTGRES_PASSWORD/MEILI_MASTER_KEY/ADMIN_TO
 ```
 
 必填清单：`POSTGRES_PASSWORD`、`DOMAIN`、`SITE_URL`、`APP_BASE_URL`、`GLM_API_KEY`、
-`SMTP_HOST/PORT/USER/PASS/SECURE`、`MAIL_FROM`、`MEILI_MASTER_KEY`、`ADMIN_TOKEN`、`ALERT_EMAIL`。
+`SMTP_HOST/PORT/USER/PASS/SECURE`、`MAIL_FROM`、`MEILI_MASTER_KEY`、`ADMIN_TOKEN`、`ALERT_EMAIL`、
+`ICP_NUMBER`（备案号，展示在首页/搜索页页脚并链接工信部备案系统）。
 
 其中 `DOMAIN` 供 Caddy 签发证书使用；`SITE_URL` / `APP_BASE_URL` 必须与其一致且为 `https://`。
+`ICP_NUMBER` 在 `web` 的运行时读取，改后 `docker compose up -d web` 即生效（无需重新构建）。
 
 ## 4. 启动
 

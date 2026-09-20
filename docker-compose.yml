@@ -56,6 +56,8 @@ services:
       APP_BASE_URL: ${APP_BASE_URL:-}
       ADMIN_TOKEN: ${ADMIN_TOKEN:-}
       ALERT_EMAIL: ${ALERT_EMAIL:-}
+      # 页脚 ICP 备案号（未配置时页脚显示占位文案）
+      ICP_NUMBER: ${ICP_NUMBER:-}
     ports:
       - "127.0.0.1:3000:3000"
     depends_on:

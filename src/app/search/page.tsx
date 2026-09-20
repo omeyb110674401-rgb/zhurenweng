@@ -4,6 +4,7 @@ import { getNoticesByIds } from '@/db/repo/notices';
 import { createSearchPort, type SearchHit } from '@/lib/ports';
 import { NoticeItem } from '@/app/_lib/notice-item';
 import { SearchForm } from '@/app/_lib/search-form';
+import { IcpFiling } from '@/app/_lib/icp-filing';
 
 // 搜索结果随索引持续更新，服务端实时渲染，不做静态预渲染。
 export const dynamic = 'force-dynamic';
@@ -90,7 +91,7 @@ export default async function SearchPage({ searchParams }: SearchPageProps) {
         <p>
           本站只聚合官方公开信息并提供 AI 解读（AI 生成内容将显著标注），提交意见请一律前往官方渠道。
         </p>
-        <p>ICP 备案：待备案（占位）</p>
+        <IcpFiling />
       </footer>
     </main>
   );
