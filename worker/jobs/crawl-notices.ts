@@ -10,6 +10,7 @@ import {
   type NormalizedNotice,
   type ParsedDetail,
   type SourceAdapter,
+  type SourceFetchOptions,
 } from '../../src/sources/registry.ts';
 import type { Job, JobContext } from '../registry.ts';
 
@@ -18,9 +19,16 @@ import type { Job, JobContext } from '../registry.ts';
  * 逐条抓取详情页补充正文 / 截止日期 / 附件 → 以原文 URL 为唯一键幂等入库。
  *
  * 抓取来源：生产环境使用各适配器的生产 listUrl；设置 SOURCES_FIXTURE_BASE 后
- * 重写为 `<base>/<源ID>/list.html`，E2E 借此把全部源指向本地 fixture 源站
- * （ADR-0001：测试不访问真实源站）。每日调度由 worker 主循环的
- * WORKER_INTERVAL_MS 控制（生产 compose 设为每日），WORKER_ONCE=1 可单轮运行。
+ * 重写为 `<base>/<源ID>/<listFixturePath ?? list.html>`，E2E 借此把全部源指向
+ * 本地 fixture 源站（ADR-0001：测试不访问真实源站）。列表本身是接口的源
+ * （如全国人大网的 JSON 接口）用 list.json 承载快照。
+ * 每日调度由 worker 主循环的 WORKER_INTERVAL_MS 控制（生产 compose 设为每日），
+ * WORKER_ONCE=1 可单轮运行。
+ *
+ * 源级抓取处置（issue #14）：适配器可通过 `fetch` 声明本站特有的传输要求
+ * （目前只有司法部站点的 WAF cookie 挑战，见 SourceFetchOptions）；详情内容
+ * 默认取条目原文 URL，前端渲染型详情页由适配器的 detailContentUrl 指向数据接口，
+ * 但入库唯一键与用户可见的「官方原文」始终是原文 URL。
  *
  * 健康与告警（issue #12）：失败登记源的错误列（健康看板展示）并发送告警邮件
  * （收件人 ALERT_EMAIL；同日 × 任务 × 源去重）；管理后台停用的源整轮跳过。
@@ -30,15 +38,30 @@ import type { Job, JobContext } from '../registry.ts';
  */
 
 const FETCH_TIMEOUT_MS = 15_000;
+/**
+ * 详情抓取之间的礼貌间隔（issue #14）：三源都是政府站点，串行连发上百个详情
+ * 请求容易被 WAF 判定为爬虫而封 IP，整条数据管线会直接断掉。
+ * 取值依据：单轮最大约 100 条 × 400ms ≈ 40s 额外耗时（可接受，不需要并发），
+ * 400ms 明显高于连续机器请求的间隔、又远低于人工浏览节奏。
+ */
+const DETAIL_FETCH_INTERVAL_MS = 400;
 // HTTP 头只能是 ByteString，UA 必须保持 ASCII
 const USER_AGENT =
   'zhurenweng-crawler/0.1 (+https://github.com/omeyb110674401-rgb/zhurenweng; gov-notice aggregator)';
+
+/** 两行小工具：等待若干毫秒（礼貌间隔，见 DETAIL_FETCH_INTERVAL_MS）。 */
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
+}
 
 /** 解析某适配器本次运行使用的列表页 URL（环境变量可重写为 fixture 源站）。 */
 export function resolveListUrl(adapter: SourceAdapter): string {
   const fixtureBase = process.env.SOURCES_FIXTURE_BASE;
   if (fixtureBase) {
-    return `${fixtureBase.replace(/\/+$/, '')}/${adapter.id}/list.html`;
+    const listFile = adapter.listFixturePath ?? 'list.html';
+    return `${fixtureBase.replace(/\/+$/, '')}/${adapter.id}/${listFile}`;
   }
   return adapter.listUrl;
 }
@@ -68,13 +91,50 @@ function mergeDetail(notice: NormalizedNotice, detail: ParsedDetail): Normalized
   };
 }
 
-async function fetchText(url: string): Promise<string> {
+/**
+ * 抓取文本（HTML 或接口 JSON 原文）。options 为适配器声明的源级处置：
+ * - 默认：普通 fetch，非 2xx 视为失败；
+ * - cookieChallenge（司法部站点实测）：首个响应是 3xx + Set-Cookie 且 Location 指回
+ *   同一地址的 WAF 挑战，必须带 cookie 重放一次；用 redirect: 'manual' 接住挑战，
+ *   避免 fetch 自动跟随重定向时陷入自我循环。
+ */
+async function fetchText(url: string, options?: SourceFetchOptions): Promise<string> {
+  const headers = { 'user-agent': USER_AGENT };
+
+  if (!options?.cookieChallenge) {
+    const response = await fetch(url, {
+      headers,
+      signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+    });
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`);
+    }
+    return response.text();
+  }
+
+  const challenge = await fetch(url, {
+    headers,
+    redirect: 'manual',
+    signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+  });
+  const cookies = challenge.headers
+    .getSetCookie()
+    .map((value) => value.split(';')[0] ?? '')
+    .filter((value) => value.length > 0)
+    .join('; ');
+  if (cookies.length === 0) {
+    if (!challenge.ok) {
+      throw new Error(`HTTP ${challenge.status}（WAF 未下发 cookie）`);
+    }
+    return challenge.text();
+  }
+
   const response = await fetch(url, {
-    headers: { 'user-agent': USER_AGENT },
+    headers: { ...headers, cookie: cookies },
     signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
   });
   if (!response.ok) {
-    throw new Error(`HTTP ${response.status}`);
+    throw new Error(`HTTP ${response.status}（携带 WAF cookie 重放后仍失败）`);
   }
   return response.text();
 }
@@ -86,13 +146,16 @@ async function enrichWithDetail(
   ctx: JobContext,
 ): Promise<NormalizedNotice> {
   if (!adapter.parseDetail) return notice;
+  // 详情内容默认取原文 URL；前端渲染型详情页由适配器指向数据接口（见 SourceAdapter）
+  const contentUrl = adapter.detailContentUrl?.(notice) ?? notice.url;
   try {
-    const detailHtml = await fetchText(notice.url);
+    const detailHtml = await fetchText(contentUrl, adapter.fetch);
+    // 第二参始终传人工页 URL：详情解析器用它解析相对链接（附件等）
     const detail = await adapter.parseDetail(detailHtml, notice.url);
     return detail ? mergeDetail(notice, detail) : notice;
   } catch (error) {
     ctx.logger(
-      `详情页抓取失败（保留列表层数据）url=${notice.url}：${errorMessage(error)}`,
+      `详情页抓取失败（保留列表层数据）url=${contentUrl}：${errorMessage(error)}`,
     );
     return notice;
   }
@@ -126,7 +189,8 @@ export const crawlNoticesJob: Job = {
           healthy: true,
         });
 
-        const listHtml = await fetchText(listUrl);
+        // 列表同样要走源级处置（司法部站点的 WAF cookie 挑战对列表请求也生效）
+        const listHtml = await fetchText(listUrl, adapter.fetch);
         const listItems = await adapter.parseList(listHtml, listUrl);
 
         let inserted = 0;
@@ -135,6 +199,11 @@ export const crawlNoticesJob: Job = {
         const changedNoticeIds: string[] = [];
         for (const notice of listItems) {
           const normalized = await enrichWithDetail(adapter, notice, ctx);
+          // 对源站礼貌、避免触发限流（issue #14）：三源都是政府站点，串行连发
+          // 上百个详情请求容易被 WAF 判定为爬虫而封 IP，整条数据管线会直接断掉。
+          // 取值依据：单轮最大约 100 条 × 400ms ≈ 40s 额外耗时（可接受），
+          // 400ms 低于任何人工浏览节奏、又明显高于连续机器请求的间隔。
+          await sleep(DETAIL_FETCH_INTERVAL_MS);
           const id = noticeIdForUrl(normalized.url);
           const result = await upsertNotice({
             id,

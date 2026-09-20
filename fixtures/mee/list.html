@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <title>意见征集_中华人民共和国生态环境部</title>
+  </head>
+  <body>
+    <!--
+      fixture 快照：生态环境部「意见征集」列表页（真实结构，2026-09-20 服务器实抓后裁剪）。
+      真实来源：https://www.mee.gov.cn/hdjl/yjzj/
+      结构要点：条目 = <li><a href>标题</a><span class="date">2026-09-14</span></li>；
+      链接混用两种相对路径 —— 栏目内页 ./zjyj/202609/t….shtml 与政府信息公开页
+      ../../xxgk2018/xxgk/xxgk06/202609/t….html（适配器相对列表页地址解析）；
+      导航项（最新征集 / 往期征集）没有 span.date，适配器据此过滤。快照里的列表位于 <源根>/list.html（真实页面在 /hdjl/yjzj/ 下），故 href 从源根起用相对路径书写（真实页面写作 ./zjyj/… 与 ../../xxgk2018/…）——相对链接解析由适配器统一处理。
+      日期令牌 {{CN_DATE±N}} / {{DATE±N}} 由 fixture 源站在服务时替换。
+    -->
+    <div class="innerBzCenter">
+      <div class="neiright_Box">
+        <ul class="sub">
+          <li>
+            <span class="mobile_none"><a href="./zjyj/" target="_blank">最新征集</a></span>
+            <span class="pc_none">最新征集</span>
+          </li>
+          <li>
+            <span class="mobile_none"><a href="./wqzj_1/" target="_blank">往期征集</a></span>
+            <span class="pc_none">往期征集</span>
+          </li>
+        </ul>
+      </div>
+      <div class="bd mobile_list">
+        <div>
+          <ul>
+            <li><a href="hdjl/yjzj/zjyj/202609/t20260914_1166201.shtml" target="_blank">关于公开征求国家生态环境标准《生态环境影响评价技术导则 核动力厂（征求意见稿）》（修订HJ808-2016）意见的通知</a><span class="date">2026-09-14</span></li>
+            <li><a href="xxgk2018/xxgk/xxgk06/202609/t20260911_1165826.html" target="_blank">关于公开征求《沿海省（区、市）近岸海域重要物种名录》意见的函</a><span class="date">2026-09-11</span></li>
+            <li><a href="xxgk2018/xxgk/xxgk06/202609/t20260907_1165270.html" target="_blank">关于公开征求《饮用水水源地基础信息数据元技术规范（征求意见稿）》等2项国家生态环境标准意见的通知</a><span class="date">2026-09-07</span></li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </body>
+</html>

@@ -31,12 +31,26 @@ const workDir = fs.mkdtempSync(path.join(os.tmpdir(), 'zhurenweng-e2e-issue8-'))
 const dbFile = path.join(workDir, 'app.db');
 const tempFixturesDir = path.join(workDir, 'fixtures');
 
-const TITLES = {
-  yibao: '中华人民共和国医疗保障法（草案征求意见稿）征求意见',
-  park: '中华人民共和国国家公园法（草案二次审议稿）征求意见',
-  fishery: '中华人民共和国渔业法（修订草案）征求意见',
+/** 条目 ID（列表接口的 flxxId）：详情接口路径与官方原文链接都由它拼出。 */
+const LIDS = {
+  open1: 'ff8081819ff541ea01a03d7b3d7e4871',
+  open2: 'ff8081819ff54ab801a03d624f823cc3',
+  closed: 'ff8081819e48b44c019efe4840675d16',
 };
-/** 更新场景追加到渔业法详情正文的特征句（全仓 fixture 中不存在的关键词） */
+
+const TITLES = {
+  open1: '企业破产法（修订草案二次审议稿）征求意见',
+  open2: '道路交通安全法（修订草案）征求意见',
+  closed: '检察公益诉讼法（草案二次审议稿）征求意见',
+};
+/**
+ * 只出现在 npc 正文（详情接口 tsy）而不在任何标题里的特征串：用于断言正文确实入索引
+ * （三源标题都不含该串，moj / mee 正文里登录的是各自门户）。
+ * 注意：必须是纯汉字串 —— 检索层按「相邻汉字插空格 + 短语查询」建索引，
+ * 汉字与数字/字母相邻处会合成一个词元（如「街1」），带数字的短语匹配不到。
+ */
+const BODY_ONLY_KEYWORD = '社会公众可以直接登录中国人大网';
+/** 更新场景追加到已截止条目正文的特征句（全仓 fixture 中不存在的关键词） */
 const UPDATED_BODY_KEYWORD = '量子比特';
 const UPDATED_BODY_SENTENCE =
   '环境影响评价公众意见征询过程中的量子比特安全审查试点工作同步开展。';
@@ -121,17 +135,22 @@ describe('issue #8：抓取 → 索引 → 搜索命中（SearchPort local）', 
     assert.match(html, /name="q"/);
   });
 
-  it('标题关键词命中：「国家公园法」返回该条目并复用列表条目展示', async () => {
-    const html = stripSsrComments(await (await fetch(`${app.url}/search?q=国家公园法`)).text());
-    assert.match(html, /data-testid="search-query-text"[^>]*>国家公园法/);
+  it('标题关键词命中：「道路交通安全法」返回该条目并复用列表条目展示', async () => {
+    const html = stripSsrComments(
+      await (await fetch(`${app.url}/search?q=道路交通安全法`)).text(),
+    );
+    assert.match(html, /data-testid="search-query-text"[^>]*>道路交通安全法/);
     assert.match(html, /data-testid="search-result-count"[^>]*>共 1 条/);
 
     const items = extractNoticeItems(html);
     assert.equal(items.length, 1);
-    assert.ok(items[0].includes(TITLES.park), `条目应为国家公园法，实际：${items[0].slice(0, 200)}`);
+    assert.ok(
+      items[0].includes(TITLES.open2),
+      `条目应为道路交通安全法，实际：${items[0].slice(0, 200)}`,
+    );
     // 复用列表条目展示：状态徽标（征求意见中）+ 发布机关 + 截止日期 + 详情链接
     assert.match(items[0], /data-testid="notice-status-badge"[^>]*>\s*征求意见中/);
-    assert.match(items[0], /全国人民代表大会常务委员会法制工作委员会/);
+    assert.match(items[0], /全国人大常委会法制工作委员会/);
     assert.match(items[0], /发布：2026-08-28/);
     assert.match(items[0], /截止：\d{4}-\d{2}-\d{2}/);
     assert.match(items[0], /data-testid="notice-title-link"/);
@@ -139,25 +158,33 @@ describe('issue #8：抓取 → 索引 → 搜索命中（SearchPort local）', 
     // 结果项指向正确条目的详情页
     const detailHref = /href="(\/notices\/[0-9a-f]+)"/.exec(items[0])[1];
     const detail = await (await fetch(`${app.url}${detailHref}`)).text();
-    assert.ok(detail.includes(TITLES.park), '结果项应链接到国家公园法详情页');
+    assert.ok(detail.includes(TITLES.open2), '结果项应链接到道路交通安全法详情页');
   });
 
-  it('正文关键词命中：「监督检查」只出现在医疗保障法正文中', async () => {
-    const html = stripSsrComments(await (await fetch(`${app.url}/search?q=监督检查`)).text());
+  it('正文关键词命中：正文特征串只出现在 npc 正文（标题不含），证明正文入索引', async () => {
+    const html = stripSsrComments(
+      await (await fetch(`${app.url}/search?q=${encodeURIComponent(BODY_ONLY_KEYWORD)}`)).text(),
+    );
     const items = extractNoticeItems(html);
-    assert.equal(items.length, 1, '正文关键词应恰好命中 1 条');
-    assert.ok(items[0].includes(TITLES.yibao), `应命中医疗保障法，实际：${items[0].slice(0, 200)}`);
-    assert.ok(!items[0].includes(TITLES.park), '不应命中其他条目');
+    assert.equal(items.length, 3, 'npc 三条正文都含该地址，应恰好命中 3 条');
+    for (const title of Object.values(TITLES)) {
+      assert.ok(
+        items.some((item) => item.includes(title)),
+        `应命中「${title}」`,
+      );
+    }
   });
 
   it('AI 摘要文本可被检索：stub 摘要语「固定测试摘要」命中两条未截止条目', async () => {
     const html = stripSsrComments(await (await fetch(`${app.url}/search?q=固定测试摘要`)).text());
     const items = extractNoticeItems(html);
     assert.equal(items.length, 2, '两条已生成摘要的未截止条目都应命中');
-    const titles = items.map((item) => item);
-    assert.ok(titles.some((item) => item.includes(TITLES.yibao)));
-    assert.ok(titles.some((item) => item.includes(TITLES.park)));
-    assert.ok(!titles.some((item) => item.includes(TITLES.fishery)), '已截止且未摘要的条目不命中');
+    assert.ok(items.some((item) => item.includes(TITLES.open1)));
+    assert.ok(items.some((item) => item.includes(TITLES.open2)));
+    assert.ok(
+      !items.some((item) => item.includes(TITLES.closed)),
+      '已截止且未摘要的条目不命中',
+    );
   });
 
   it('无关关键词返回空态，提示友好', async () => {
@@ -182,13 +209,19 @@ describe('issue #8：抓取 → 索引 → 搜索命中（SearchPort local）', 
   });
 
   it('更新条目正文后重新抓取，新内容可被检索命中', async () => {
-    // 向渔业法详情页正文（#UCAP-CONTENT 容器内）追加特征句（URL 不变 → upsert 更新同一行）
-    const detailPath = path.join(tempFixturesDir, 'npc', 'c2', 'c30834', 't20260801_150003.html');
-    const original = fs.readFileSync(detailPath, 'utf8');
-    const bodyAnchor =
-      '从事捕捞作业的单位和个人，应当按照捕捞许可证规定的作业类型、场所、时限和渔具数量进行作业。</p>';
-    assert.ok(original.includes(bodyAnchor), 'fixture 正文锚点应存在');
-    fs.writeFileSync(detailPath, original.replace(bodyAnchor, `${bodyAnchor}\n        <p>${UPDATED_BODY_SENTENCE}</p>`));
+    // 向已截止条目的详情接口快照正文（tsy）追加特征句（条目 URL 不变 → upsert 更新同一行）
+    const detailPath = path.join(
+      tempFixturesDir,
+      'npc',
+      'flca',
+      LIDS.closed,
+      'info',
+      'index.json',
+    );
+    const payload = JSON.parse(fs.readFileSync(detailPath, 'utf8'));
+    assert.ok(String(payload.tsy).includes('征求意见期限为30日'), 'fixture 正文锚点应存在');
+    payload.tsy = `${payload.tsy}<p>${UPDATED_BODY_SENTENCE}</p>`;
+    fs.writeFileSync(detailPath, `${JSON.stringify(payload, null, 2)}\n`);
 
     const run = await runWorkerOnce();
     assert.equal(run.code, 0, `worker 应正常退出，输出：${run.output}`);
@@ -198,6 +231,9 @@ describe('issue #8：抓取 → 索引 → 搜索命中（SearchPort local）', 
     const html = stripSsrComments(await (await fetch(`${app.url}/search?q=${UPDATED_BODY_KEYWORD}`)).text());
     const items = extractNoticeItems(html);
     assert.equal(items.length, 1, '更新后的正文关键词应恰好命中 1 条');
-    assert.ok(items[0].includes(TITLES.fishery), `应命中渔业法，实际：${items[0].slice(0, 200)}`);
+    assert.ok(
+      items[0].includes(TITLES.closed),
+      `应命中检察公益诉讼法，实际：${items[0].slice(0, 200)}`,
+    );
   });
 });

@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <title>意见征集_中华人民共和国生态环境部</title>
+  </head>
+  <body>
+    <!--
+      fixture 快照（issue #11 统计页场景专用；结构照 2026-09-20 服务器实抓的生态环境部
+      「意见征集」列表页，内容为场景合成数据）：
+      两行发布日期同为 {{DATE-20}}（同月双条目，验证月度趋势矩阵按机关分列）：
+      - E：xxgk 模板（详情页「发布机关」= 生态环境部办公厅），截止 {{CN_DATE+10}} → 公示期 30 天（16-30 桶）；
+      - F：hdjl 模板（详情页无发布机关字段 → 栏目常量 生态环境部），截止 {{CN_DATE-5}} → 公示期 15 天（8-15 桶），已截止。
+    -->
+    <div class="innerBzCenter">
+      <div class="neiright_Box">
+        <ul class="sub">
+          <li>
+            <span class="mobile_none"><a href="./zjyj/" target="_blank">最新征集</a></span>
+            <span class="pc_none">最新征集</span>
+          </li>
+          <li>
+            <span class="mobile_none"><a href="./wqzj_1/" target="_blank">往期征集</a></span>
+            <span class="pc_none">往期征集</span>
+          </li>
+        </ul>
+      </div>
+      <div class="bd mobile_list">
+        <div>
+          <ul>
+            <li><a href="xxgk2018/xxgk/xxgk06/202609/t20260912_930001.html" target="_blank">关于公开征求国家生态环境标准《排污单位自行监测技术指南（征求意见稿）》意见的通知</a><span class="date">{{DATE-20}}</span></li>
+            <li><a href="hdjl/yjzj/zjyj/202609/t20260912_930002.shtml" target="_blank">关于公开征求《生态环境分区管控管理暂行规定（征求意见稿）》意见的函</a><span class="date">{{DATE-20}}</span></li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </body>
+</html>

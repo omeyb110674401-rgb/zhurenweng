@@ -1,4 +1,5 @@
 import { createServer } from 'node:http';
+import { existsSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 
@@ -12,11 +13,21 @@ import path from 'node:path';
 
 const CONTENT_TYPES = {
   '.html': 'text/html; charset=utf-8',
+  // 政府 CMS 常用扩展名（如生态环境部栏目内页 …/t20260914_1166201.shtml）：
+  // 与 .html 同样按文本提供并做日期令牌替换
+  '.shtml': 'text/html; charset=utf-8',
   '.json': 'application/json; charset=utf-8',
   '.txt': 'text/plain; charset=utf-8',
 };
 
 const TEXT_EXTENSIONS = new Set(Object.keys(CONTENT_TYPES));
+
+/**
+ * 可选 WAF cookie 挑战（司法部站点真实行为）：源目录内放该标记文件即启用，
+ * 挑战 cookie 名即标记文件名。见请求处理里的注释。
+ */
+const WAF_MARKER = 'waf-cookie-challenge';
+const WAF_COOKIE = 'waf-cookie-challenge=ok';
 
 /**
  * 日期令牌：快照文件里的 {{DATE±N}} / {{CN_DATE±N}} 在服务时按「服务器启动时刻」
@@ -70,18 +81,50 @@ export function createFixtureServer({ fixturesDir, host = '127.0.0.1', port = 0 
         res.end('bad request');
         return;
       }
-      const filePath = path.join(root, ...segments);
-      const ext = path.extname(filePath).toLowerCase();
-      const contentType = CONTENT_TYPES[ext] ?? 'application/octet-stream';
-      if (TEXT_EXTENSIONS.has(ext)) {
-        const body = substituteDateTokens(await readFile(filePath, 'utf8'), anchor);
-        res.writeHead(200, { 'content-type': contentType });
-        res.end(body);
+      const basePath = path.join(root, ...segments);
+      // 可选：模拟司法部站点的 WAF cookie 挑战（源目录内放 waf-cookie-challenge 标记文件）。
+      // 命中标记时，**列表请求**（list.html / list.json）在未带 cookie 的条件下返回
+      // 302 + Set-Cookie 且 Location 指回同一地址 —— 与真实站点一致；抓取层的
+      // fetch.cookieChallenge 必须带该 cookie 重放才能拿到内容，否则整源抓取失败。
+      // 仅挑战列表请求：详情请求与测试里的直接 fixture 读取保持无挑战，避免影响其他断言。
+      if (
+        existsSync(path.join(root, segments[0] ?? '', WAF_MARKER)) &&
+        /\/list\.(html|json)$/.test(url.pathname) &&
+        !(req.headers.cookie ?? '').includes(WAF_COOKIE)
+      ) {
+        res.writeHead(302, {
+          location: url.toString(),
+          'set-cookie': `${WAF_COOKIE}; Path=/`,
+        });
+        res.end();
         return;
       }
-      const body = await readFile(filePath);
-      res.writeHead(200, { 'content-type': contentType });
-      res.end(body);
+      // 目录式接口路径（真实站点以 …/flca/<id>/info/ 形式提供 JSON 数据）→
+      // 目录下的 index.json / index.html；其余路径按文件精确匹配。
+      const candidates = url.pathname.endsWith('/')
+        ? [path.join(basePath, 'index.json'), path.join(basePath, 'index.html')]
+        : [basePath];
+
+      for (const filePath of candidates) {
+        const ext = path.extname(filePath).toLowerCase();
+        const contentType = CONTENT_TYPES[ext] ?? 'application/octet-stream';
+        try {
+          if (TEXT_EXTENSIONS.has(ext)) {
+            const body = substituteDateTokens(await readFile(filePath, 'utf8'), anchor);
+            res.writeHead(200, { 'content-type': contentType });
+            res.end(body);
+            return;
+          }
+          const body = await readFile(filePath);
+          res.writeHead(200, { 'content-type': contentType });
+          res.end(body);
+          return;
+        } catch {
+          // 该候选不存在：目录式路径继续试下一个，其余落到 404
+        }
+      }
+      res.writeHead(404, { 'content-type': 'text/plain; charset=utf-8' });
+      res.end('fixture not found');
     } catch {
       res.writeHead(404, { 'content-type': 'text/plain; charset=utf-8' });
       res.end('fixture not found');

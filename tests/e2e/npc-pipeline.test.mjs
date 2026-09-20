@@ -11,8 +11,9 @@ import { createFixtureServer } from './helpers/fixture-server.mjs';
 /**
  * E2E（issue #3）：首条贯穿全栈的 tracer bullet。
  *
- * fixture 人大快照（fixtures/npc/，{{CN_DATE±N}} 日期令牌按 fixture 源站启动时刻
- * 替换，保证「征求意见中 / 已截止」与倒计时断言不随运行日期衰减）
+ * fixture 人大快照（fixtures/npc/，真实结构：list.json 为 flca-list 接口响应、
+ * flca/<lid>/info/index.json 为详情接口响应；截止日期 {{DATE±N}} 令牌按 fixture
+ * 源站启动时刻替换，保证「征求意见中 / 已截止」与倒计时断言不随运行日期衰减）
  *   → 触发抓取（真实 worker 进程，WORKER_ONCE=1，SOURCES_FIXTURE_BASE 注入 fixture 源站）
  *   → 列表页：按截止日期升序（即将截止在前）+ 倒计时 + 状态徽标
  *   → 详情页：全部字段 + 官方原文链接 + 提意指引 + AI 摘要展示（issue #4：
@@ -28,11 +29,28 @@ const fixturesDir = path.join(repoRoot, 'fixtures');
 const workDir = fs.mkdtempSync(path.join(os.tmpdir(), 'zhurenweng-e2e-issue3-'));
 const dbFile = path.join(workDir, 'app.db');
 
-const TITLES = {
-  open1: '中华人民共和国医疗保障法（草案征求意见稿）征求意见',
-  open2: '中华人民共和国国家公园法（草案二次审议稿）征求意见',
-  closed: '中华人民共和国渔业法（修订草案）征求意见',
+/** 条目 ID（flca 接口的 flxxId）；详情接口路径与官方原文链接都由它拼出。 */
+const LIDS = {
+  open1: 'ff8081819ff541ea01a03d7b3d7e4871',
+  open2: 'ff8081819ff54ab801a03d624f823cc3',
+  closed: 'ff8081819e48b44c019efe4840675d16',
 };
+
+const TITLES = {
+  open1: '企业破产法（修订草案二次审议稿）征求意见',
+  open2: '道路交通安全法（修订草案）征求意见',
+  closed: '检察公益诉讼法（草案二次审议稿）征求意见',
+};
+
+/** 官方原文（人工可读页面）：条目 URL 由列表接口地址相对解析而来。 */
+function officialUrlOf(lid) {
+  return `${fixtureUrl}/npc/userIndex.html?lid=${lid}`;
+}
+
+/** 详情接口地址（正文 / 起止日期由它提供，页面本身是前端渲染）。 */
+function detailApiUrlOf(lid) {
+  return `${fixtureUrl}/npc/flca/${lid}/info/`;
+}
 
 let app;
 let fixtures;
@@ -114,12 +132,13 @@ function extractNoticeId(href) {
   return match[1];
 }
 
-/** 从 fixture 源站取已替换令牌的详情页，解析截止日期并计算距今天的日历天数。 */
-async function expectedDaysUntilDeadline(detailPath) {
-  const response = await fetch(`${fixtureUrl}${detailPath}`);
-  const html = await response.text();
-  const match = /征求意见截止日期：(\d{4})年(\d{1,2})月(\d{1,2})日/.exec(html);
-  assert.ok(match, 'fixture 详情页应含已替换的中文截止日期');
+/** 从 fixture 源站取已替换令牌的详情接口 JSON，解析截止日期并计算距今天的日历天数。 */
+async function expectedDaysUntilDeadline(lid) {
+  const response = await fetch(detailApiUrlOf(lid));
+  assert.equal(response.status, 200, 'fixture 应提供详情接口快照');
+  const payload = await response.json();
+  const match = /^(\d{4})-(\d{1,2})-(\d{1,2})/.exec(String(payload.jsrq ?? ''));
+  assert.ok(match, 'fixture 详情接口应含已替换令牌的截止日期（jsrq）');
   const [, y, m, d] = match;
   const now = new Date();
   const todayUtc = Date.UTC(now.getFullYear(), now.getMonth(), now.getDate());
@@ -186,15 +205,15 @@ describe('issue #3：全国人大源 → 入库 → 列表/详情 → 出站跳�
       npcBlocks.map((block) => block.badge),
       ['征求意见中', '征求意见中', '已截止'],
     );
-    const expectedDays = await expectedDaysUntilDeadline('/npc/c2/c30834/t20260830_150001.html');
+    const expectedDays = await expectedDaysUntilDeadline(LIDS.open1);
     assert.equal(npcBlocks[0].countdown, `剩 ${expectedDays} 天`);
     assert.match(npcBlocks[1].countdown, /剩 \d+ 天/);
     assert.equal(npcBlocks[2].countdown, null);
 
-    // 列表条目元信息：发布机关与发布日期
+    // 列表条目元信息：发布机关与发布日期（机关为栏目主办方常量 —— flca 接口不提供该字段）
     const visibleText = stripSsrComments(html);
-    assert.match(visibleText, /全国人民代表大会常务委员会法制工作委员会/);
-    assert.match(visibleText, /发布：2026-08-30/);
+    assert.match(visibleText, /全国人大常委会法制工作委员会/);
+    assert.match(visibleText, /发布：2026-08-28/);
   });
 
   it('详情页：全部字段、官方原文链接、分步提意指引与 AI 摘要展示', async () => {
@@ -208,21 +227,18 @@ describe('issue #3：全国人大源 → 入库 → 列表/详情 → 出站跳�
 
     // 全部字段
     assert.match(html, new RegExp(TITLES.open1));
-    assert.match(html, /发布机关[\s\S]{0,40}全国人民代表大会常务委员会法制工作委员会/);
+    assert.match(html, /发布机关[\s\S]{0,40}全国人大常委会法制工作委员会/);
     assert.match(html, /全国人大网·法律草案征求意见/, '应展示来源（源适配器名称）');
-    assert.match(html, /2026-08-30/, '发布日期');
+    assert.match(html, /2026-08-28/, '发布日期');
     assert.match(html, /征求意见中/, '状态徽标');
-    assert.match(html, /社会公开征求意见/, '正文纯文本');
-    assert.match(html, /第一条/, '正文纯文本');
-    assert.match(
-      html,
-      /中华人民共和国医疗保障法（草案征求意见稿）\.pdf/,
-      '附件清单：草案文本',
-    );
-    assert.match(html, /关于《中华人民共和国医疗保障法（草案征求意见稿）》的说明\.pdf/, '附件清单：说明');
+    // 正文纯文本来自详情接口的 tsy 字段（页面 #fcontent 渲染的同一内容）
+    assert.match(html, /社会公众可以直接登录中国人大网/, '正文纯文本');
+    assert.match(html, /征求意见期限为30日/, '正文纯文本');
+    // 本源详情接口不提供附件字段（见适配器文件头「已知取舍」）：附件留空、不臆造文件名
+    assert.ok(!html.includes('附件清单'), '无附件条目不应渲染附件清单区');
 
-    // 官方原文链接 = fixture 源站上的快照地址
-    const officialUrl = `${fixtureUrl}/npc/c2/c30834/t20260830_150001.html`;
+    // 官方原文链接 = fixture 源站上的条目人工页地址（不是接口地址）
+    const officialUrl = officialUrlOf(LIDS.open1);
     assert.ok(
       html.includes(`href="${officialUrl}"`),
       `详情页应含官方原文链接 ${officialUrl}`,
@@ -260,7 +276,7 @@ describe('issue #3：全国人大源 → 入库 → 列表/详情 → 出站跳�
   it('出站跳转：/go/<id> 记录点击并 302 到官方原文 URL', async () => {
     const listHtml = await (await fetch(`${app.url}/`)).text();
     const noticeId = extractNoticeId(hrefOf(extractListItems(listHtml), TITLES.open1));
-    const officialUrl = `${fixtureUrl}/npc/c2/c30834/t20260830_150001.html`;
+    const officialUrl = officialUrlOf(LIDS.open1);
 
     for (const round of [1, 2]) {
       const response = await fetch(`${app.url}/go/${noticeId}`, { redirect: 'manual' });

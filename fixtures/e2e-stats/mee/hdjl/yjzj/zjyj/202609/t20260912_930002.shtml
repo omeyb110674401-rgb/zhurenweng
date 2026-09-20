@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <title>关于公开征求《生态环境分区管控管理暂行规定（征求意见稿）》意见的函_中华人民共和国生态环境部</title>
+  </head>
+  <body>
+    <!--
+      fixture 快照（issue #11 统计页场景）：生态环境部「意见征集」栏目内页（hdjl 模板，真实结构）。
+      统计口径：发布 {{DATE-20}} / 截止 {{CN_DATE-5}} → 公示期恰 15 天（8-15 桶），已截止；
+      机关 = 栏目常量「生态环境部」（hdjl 模板没有「发布机关」字段）。
+    -->
+    <div class="wzsmCenter">
+      <div class="innerBzCenter">
+        <div class="stbzXq">
+          <div class="neiright_Box">
+            <h2 class="neiright_Title">关于公开征求《生态环境分区管控管理暂行规定（征求意见稿）》意见的函</h2>
+            <div class="neiright_Content">
+              <div class="neiright_JPZ_GK">
+                <p class="ydLyZzBox"><span style="float: none;">{{DATE-20}}</span></p>
+                <span class="xqLyPc time">{{DATE-20}}</span>
+              </div>
+              <div class="neiright_JPZ_GK_CP clearHtml">
+                <div class=TRS_Editor><div class="Custom_UnionStyle">
+                  <div>为落实生态环境分区管控要求，我部组织起草了《生态环境分区管控管理暂行规定（征求意见稿）》，现公开征求意见。</div>
+                  <div>各机关团体、企事业单位和个人均可提出意见和建议，有关意见请书面反馈我部。征求意见截止时间为{{CN_DATE-5}}。</div>
+                  <div>邮箱：hpc@mee.gov.cn</div>
+                </div></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </body>
+</html>

@@ -1,0 +1,24 @@
+{
+  "_snapshot": {
+    "source": "http://www.npc.gov.cn/flcaw/flca-list?flag=0&type=0&page=1&per_page=100",
+    "capturedAt": "2026-09-20",
+    "note": "结构照服务器实抓的列表接口响应；内容为 e2e-stats 场景合成数据（标题 / 正文 / 令牌按场景需要设计）。"
+  },
+  "per_page": 100,
+  "total": 2,
+  "page": 1,
+  "rows": [
+    {
+      "flxxmc": "中华人民共和国慈善法（修正草案）征求意见",
+      "ksrq": "{{DATE-40}} 23:59:59",
+      "flxxId": "t20260912_910001",
+      "jsrq": "{{DATE-10}} 23:59:59"
+    },
+    {
+      "flxxmc": "中华人民共和国广播电视法（草案征求意见稿）征求意见",
+      "ksrq": "{{DATE-100}} 23:59:59",
+      "flxxId": "t20260912_910002",
+      "jsrq": "{{DATE-85}} 23:59:59"
+    }
+  ]
+}

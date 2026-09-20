@@ -35,7 +35,7 @@ const dbFile = path.join(workDir, 'app.db');
 const FEED_MAX_ITEMS = 200;
 /** 批量合成条目数：3 条 fixture + 205 条 > 200 上限，验证截断 */
 const BULK_COUNT = 205;
-const AGENCY = '全国人民代表大会常务委员会法制工作委员会';
+const AGENCY = '全国人大常委会法制工作委员会';
 
 const TITLES = {
   special: '中华人民共和国航道法（修订草案）<征求意见稿>&配套说明征求意见',
@@ -43,10 +43,11 @@ const TITLES = {
   closed: '中华人民共和国渔业法（修订草案）征求意见',
 };
 
-const DETAILS = {
-  special: '/npc/c2/c30834/t20260912_160001.html',
-  open: '/npc/c2/c30834/t20260901_160002.html',
-  closed: '/npc/c2/c30834/t20260815_160003.html',
+/** 条目 ID（列表接口的 flxxId）：官方原文 URL 与详情接口路径都由它拼出。 */
+const LIDS = {
+  special: 't20260912_160001',
+  open: 't20260901_160002',
+  closed: 't20260815_160003',
 };
 
 let app;
@@ -56,6 +57,11 @@ let fixtureUrl;
 /** 与抓取管线一致的条目主键：原文 URL 的 SHA-256 前缀。 */
 function noticeIdFor(url) {
   return createHash('sha256').update(url).digest('hex').slice(0, 16);
+}
+
+/** 官方原文（人工可读页面）URL。 */
+function officialUrlOf(lid) {
+  return `${fixtureUrl}/npc/userIndex.html?lid=${lid}`;
 }
 
 /** 单轮运行真实 worker 子进程，返回 { code, output }。 */
@@ -77,15 +83,14 @@ function runWorkerOnce() {
   });
 }
 
-/** 从 fixture 源站取已替换日期令牌的截止日期，归一化为 ISO（YYYY-MM-DD）。 */
-async function servedDeadline(detailPath) {
-  const response = await fetch(`${fixtureUrl}${detailPath}`);
-  const html = await response.text();
-  const iso = /征求意见截止日期：(\d{4}-\d{1,2}-\d{1,2})/.exec(html);
-  const cn = /征求意见截止日期：(\d{4})年(\d{1,2})月(\d{1,2})日/.exec(html);
-  assert.ok(iso || cn, `fixture 详情页应含已替换的截止日期：${detailPath}`);
-  if (iso) return iso[1];
-  const [, y, m, d] = cn;
+/** 从 fixture 源站取已替换日期令牌的详情接口 JSON，读出截止日期（ISO，YYYY-MM-DD）。 */
+async function servedDeadline(lid) {
+  const response = await fetch(`${fixtureUrl}/npc/flca/${lid}/info/`);
+  assert.equal(response.status, 200, `fixture 应提供详情接口快照：${lid}`);
+  const payload = await response.json();
+  const iso = /^(\d{4})-(\d{1,2})-(\d{1,2})/.exec(String(payload.jsrq ?? ''));
+  assert.ok(iso, `fixture 详情接口应含已替换的截止日期（jsrq）：${lid}`);
+  const [, y, m, d] = iso;
   return `${y}-${String(Number(m)).padStart(2, '0')}-${String(Number(d)).padStart(2, '0')}`;
 }
 
@@ -213,7 +218,7 @@ describe('issue #6：全量 RSS feed（/feed.xml）', () => {
       ['closed', TITLES.closed],
     ]) {
       const field = fields.find((item) => item.title === title);
-      const officialUrl = `${fixtureUrl}${DETAILS[key]}`;
+      const officialUrl = officialUrlOf(LIDS[key]);
       const expectedId = noticeIdFor(officialUrl);
       assert.equal(field.link, `${app.url}/notices/${expectedId}`, 'link 应为详情页绝对 URL');
       assert.equal(field.guid, expectedId, 'guid 应为条目 ID（sha256 前缀）');
@@ -234,7 +239,7 @@ describe('issue #6：全量 RSS feed（/feed.xml）', () => {
     );
 
     // description：发布机关 + 截止日期 + AI 摘要片段（显著标注）+ 官方原文链接
-    const specialDeadline = await servedDeadline(DETAILS.special);
+    const specialDeadline = await servedDeadline(LIDS.special);
     assert.ok(
       specialFields.description.includes(`发布机关：${AGENCY}`),
       `description 应含发布机关：${specialFields.description}`,
@@ -252,7 +257,7 @@ describe('issue #6：全量 RSS feed（/feed.xml）', () => {
       '摘要就绪条目应含 AI 摘要片段',
     );
     assert.ok(
-      specialFields.description.includes(`官方原文：${fixtureUrl}${DETAILS.special}`),
+      specialFields.description.includes(`官方原文：${officialUrlOf(LIDS.special)}`),
       'description 应含官方原文链接',
     );
 
@@ -261,13 +266,13 @@ describe('issue #6：全量 RSS feed（/feed.xml）', () => {
       openFields.description.includes('【stub】这是一份政府公示征求意见稿（固定测试摘要）。'),
       '征求意见中条目摘要就绪，应含 AI 摘要片段',
     );
-    assert.ok(openFields.description.includes(`官方原文：${fixtureUrl}${DETAILS.open}`));
+    assert.ok(openFields.description.includes(`官方原文：${officialUrlOf(LIDS.open)}`));
 
     // 未就绪摘要（已截止、摘要未生成）：description 无任何 AI 内容
-    const closedDeadline = await servedDeadline(DETAILS.closed);
+    const closedDeadline = await servedDeadline(LIDS.closed);
     assert.equal(
       fields[2].description,
-      `发布机关：${AGENCY}；截止日期：${closedDeadline}；官方原文：${fixtureUrl}${DETAILS.closed}`,
+      `发布机关：${AGENCY}；截止日期：${closedDeadline}；官方原文：${officialUrlOf(LIDS.closed)}`,
       '未就绪摘要条目的 description 应只有机关 / 截止日期 / 官方原文，无 AI 内容',
     );
     assert.ok(!fields[2].description.includes('AI 摘要'), 'description 不应出现 AI 摘要段');

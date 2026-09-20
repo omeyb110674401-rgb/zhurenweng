@@ -2,46 +2,69 @@
 
 目录约定（PRD「Testing Decisions」）：每个官方源的页面快照存放在
 `fixtures/<source>/`，`<source>` 与 `src/sources/registry.ts` 中适配器的 `id`
-一致，例如：
+一致，例如（issue #14 起三个源都改成**真实站点结构**的快照）：
 
 ```
 fixtures/
-  npc/                       # 全国人大网「法律草案征求意见」（issue #3，真实感合成快照）
-    list.html                # 列表页快照（含导航等噪声链接，适配器负责过滤）
-    c2/c30834/*.html         # 条目详情页快照（仿 npc.gov.cn 栏目路径）
-  moj/                       # 司法部征求意见系统（issue #5，卡片+表格混合版式）
-    list.html                # 列表页快照（置顶卡片 + 含发布机关列的表格）
-    pub/sfbgw/zqyj/*.html    # 条目详情页快照（TRS CMS 版式，面包屑机关 /
-                             # 截止提示条 / 文末附件区）
-  govcn/                     # 中国政府网「意见征集」栏目（issue #5，纯表格版式）
-    list.html                # 列表页快照（每行带发布机关与截止日期列；
-                             # 首行为转发条目，原文指向 moj 快照 —— 跨源去重场景）
-    zhengce/yjzj/*.html      # 条目详情页快照（关联部门框 / 截止日期框）
+  npc/                       # 全国人大网「法律草案征求意见」（真实结构，2026-09-20 服务器实抓）
+    list.json                # 列表快照 = flca-list JSON 接口响应（本源列表页是前端渲染，
+                             #   适配器直接消费接口；_snapshot 字段记录来源与裁剪说明）
+    flca/<flxxId>/info/      # 详情内容快照 = 详情接口响应；目录式路径由 fixture 源站
+      index.json             #   映射到 index.json（真实接口地址形如 …/flca/<id>/info/）
+  moj/                       # 司法部「立法意见征集」（真实结构 + 真实正文裁剪）
+    list.html                # 列表快照：ul.newsMsgList_zzy > li（日期 + 截断标题）
+    pub/sfbgw/lfyjzj/lflfyjzj/*/*.html   # 详情快照：h1 / .sT / .news_content_style > .TRS_Editor
+                             #   第 4 条为场景合成的转发条目（原文 URL 指向 mee 快照）
+  mee/                       # 生态环境部「意见征集」（真实结构，替代已下线的 govcn）
+    list.html                # 列表快照：li > a + span.date（导航项无日期，被适配器过滤）
+    hdjl/yjzj/zjyj/*/*.shtml # 详情快照（栏目内页模板：h2.neiright_Title + .neiright_JPZ_GK_CP）
+    xxgk2018/xxgk/xxgk06/*/*.html        # 详情快照（政府信息公开模板：h1 + 「发布机关」+ .content_body_box）
   npc-law-drafts/            # issue #2 的占位快照，仅供 fixture 源站冒烟场景使用
     list.html
     detail-fl-001.html
   e2e-reminders/             # issue #7 截止提醒场景专用（截止日期 = 今天 +7 / +3 天，
-    npc/                     #   条目按订阅关键词 / 领域规则设计命中与不命中对照）
-      list.html
-      c2/c30834/*.html
-  e2e-feed/                  # issue #6 RSS feed 场景专用（条目标题含 & / < 用于
-    npc/                     #   XML 转义断言，含已截止对照条目；与 npc/ 同构独立成目录）
-      list.html
-      c2/c30834/*.html
-  e2e-versions/              # issue #10 版本链与条款对比场景专用（同一法案两轮
-    npc/                     #   公示：标题措辞不同、正文有增删改；另含一条无关
-      list.html              #   单轮条目作「无上一版」对照；与 npc/ 同构独立成目录）
-      c2/c30834/*.html
-  e2e-stats/                 # issue #11 统计页场景专用（三源同构、独立成 fixture 根
-    npc/                     #   目录；发布与截止日期全用令牌 —— 公示期差值恒定
-    moj/                     #   30/15/7/45/30/15 天，发布月份恒落在最近 6 个月窗口）
-    govcn/
+    npc/                     #   条目按订阅关键词 / 领域规则设计命中与不命中对照；
+      list.json              #   结构与 fixtures/npc/ 同构，内容为场景合成数据）
+      flca/<lid>/info/index.json
+  e2e-feed/                  # issue #6 RSS feed 场景专用（条目标题含 & / <，含已截止
+    npc/                     #   对照条目；与 npc/ 同构、独立成目录）
+      list.json
+      flca/<lid>/info/index.json
+  e2e-versions/              # issue #10 版本链与条款对比场景专用（同一法案两轮公示：
+    npc/                     #   标题措辞不同、正文有增删改；另含一条无关单轮条目）
+      list.json
+      flca/<lid>/info/index.json
+  e2e-stats/                 # issue #11 统计页场景专用（三源同构、独立成 fixture 根目录；
+    npc/                     #   发布与截止日期全用令牌 —— 公示期差值恒定，发布月份
+    moj/                     #   恒落在最近 6 个月窗口）
+    mee/
 ```
 
-列表页快照固定为 `<source>/list.html`（抓取管线的 `SOURCES_FIXTURE_BASE`
-重写即指向该路径）；详情页快照可按仿真的真实栏目路径存放子目录，快照文件
-统一用 `.html` 扩展名以获得日期令牌替换（fixture 源站只对 `.html`/`.json`/
-`.txt` 做文本替换）。
+## 快照命名与路径约定
+
+- **列表快照**：默认 `<source>/list.html`；本源列表本身是 JSON 接口的源用
+  `<source>/list.json`（适配器以 `SourceAdapter.listFixturePath` 声明）。
+  抓取管线的 `SOURCES_FIXTURE_BASE` 重写即指向该路径。
+- **详情快照**：按**真实栏目路径**存放（去掉协议与域名，前面加 `<source>/`），
+  如 `fixtures/moj/pub/sfbgw/lfyjzj/lflfyjzj/202603/t20260320_532981.html`。
+  列表快照里的链接据此书写：跨源转发条目写完整路径（`/mee/xxgk2018/…`），
+  同源条目写相对源根的相对路径（`hdjl/yjzj/zjyj/…`）—— 相对链接解析本身也是
+  适配器要处理的一环（真实站点混用 `./…` 与 `../../…`）。
+- **目录式接口路径**：URL 以 `/` 结尾（真实接口如 `…/flca/<id>/info/`）时，
+  fixture 源站映射到该目录下的 `index.json` / `index.html`。
+- **扩展名**：`.html` / `.shtml` / `.json` / `.txt` 都会在服务时做日期令牌替换
+  （`.shtml` 是政府 CMS 常用扩展名，如生态环境部栏目内页）。
+- **WAF cookie 挑战（可选）**：源目录里放一个名为 `waf-cookie-challenge` 的空标记
+  文件，fixture 源站即对该源的**列表请求**模拟司法部站点的行为：未带 cookie 时返回
+  302 + `Set-Cookie` 且 Location 指回同一地址，带 cookie 重放才返回内容。
+  `fixtures/moj/` 已启用（真实站点确实如此，抓取层 `fetch.cookieChallenge` 负责重放）。
+
+## 快照来源与裁剪标注
+
+真实抓回的 JSON 快照带 `_snapshot` 字段（`source` 原始地址 / `capturedAt` 抓取日期 /
+`note` 裁剪说明），HTML 快照在文件头注释里写明同样内容。适配器忽略未知字段，
+因此标注不影响解析。裁剪原则：只保留页面结构与关键文本（正文可截断）、
+标题与 ID 尽量用真实值、截止日期换成令牌、单个文件远小于 200KB。
 
 ## 日期令牌（fixture 源站服务时替换）
 
@@ -55,16 +78,16 @@ fixtures/
 
 ## 如何添加一个新的 fixture 源
 
-1. 在 `fixtures/` 下新建以源 ID 命名的目录，放入该源列表页 / 详情页的 HTML 快照；
+1. 在 `fixtures/` 下新建以源 ID 命名的目录，放入该源列表页 / 详情页快照
+   （真实站点结构优先；列表为接口的源用 `list.json`）；
 2. 在 `src/sources/registry.ts` 的 `sourceAdapters` 数组登记对应适配器；
 3. 为该源写一条端到端场景（node:test，放 `tests/e2e/`）：给应用 / worker 注入
    `SOURCES_FIXTURE_BASE=<fixture 源站地址>`，抓取即被重定向到
-   `<base>/<source>/list.html`，从 HTTP 层断言抓取入库结果。
+   `<base>/<source>/<listFixturePath ?? list.html>`，从 HTTP 层断言抓取入库结果。
 
-快照建议只保留页面结构与关键文本（可脱敏、可截断），并在文件头注释标注来源与
-快照日期。E2E 运行期间 fixture 由本地 HTTP 服务提供，不访问真实源站。
-`npc/` 快照为仿真实 npc.gov.cn 页面结构的**合成数据**（含中文正文与附件链接），
-其中附件文件本体不随快照提供（下载链接指向 fixture 源站会 404，仅断言其展示）。
+快照只保留结构与关键文本（可脱敏、可截断），并在文件头注释 / `_snapshot`
+标注来源与快照日期。E2E 运行期间 fixture 由本地 HTTP 服务提供，不访问真实源站。
+附件文件本体不随快照提供（下载链接指向 fixture 源站会 404，仅断言其展示）。
 
 ## 本地预览
 
