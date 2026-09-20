@@ -46,6 +46,19 @@ export interface ParsedDetail {
   categoryTags?: string[];
 }
 
+/**
+ * 源级抓取选项（可选）：个别站点需要特殊处置，见各适配器注释里的实测依据。
+ * 不设置时与全局 fetch 行为一致，不影响其他源。
+ */
+export interface SourceFetchOptions {
+  /**
+   * WAF cookie 挑战（司法部站点实测，2026-09-20）：首次请求返回 3xx + Set-Cookie，
+   * 且 Location 指向同一地址；必须带上该 cookie 重放一次才能拿到 200 ——
+   * 不带 cookie 时 fetch 的自动重定向会陷入自我循环。仅对本源生效。
+   */
+  cookieChallenge?: boolean;
+}
+
 export interface SourceAdapter {
   /** 源 ID，与 fixtures/<source>/ 目录名一致，如 npc */
   id: string;
@@ -53,13 +66,27 @@ export interface SourceAdapter {
   name: string;
   /** 入口列表页 URL（生产地址；测试经 SOURCES_FIXTURE_BASE 重写为 fixture 源站地址） */
   listUrl: string;
-  /** 解析列表页 HTML，返回条目列表 */
+  /**
+   * fixture 列表快照文件名（默认 list.html）。列表本身是 JSON 接口的源用 list.json
+   * （fixture 源站对 .json 与 .html 同样做日期令牌替换，并按 JSON 提供内容类型）。
+   */
+  listFixturePath?: string;
+  /** 抓取选项（默认无，见 SourceFetchOptions） */
+  fetch?: SourceFetchOptions;
+  /** 解析列表页 HTML（列表为接口的源即接口原文，如 JSON），返回条目列表 */
   parseList(html: string, baseUrl: string): Promise<NormalizedNotice[]>;
   /**
    * 解析条目详情页 HTML（可选）。抓取管线会对列表产出的每个条目抓取其
-   * 原文 URL 并调用本方法，把结果按字段合并进标准化条目。
+   * 详情内容 URL 并调用本方法，把结果按字段合并进标准化条目。
    */
   parseDetail?(html: string, pageUrl: string): Promise<ParsedDetail | null>;
+  /**
+   * 详情内容 URL（可选，默认 = 条目的原文 URL）：详情页由前端脚本渲染、正文另由
+   * 数据接口提供时（全国人大网 flcaw 系统即如此），适配器在此返回该接口地址；
+   * 抓取管线用它取详情内容，但仍以 notice.url（人工可读页面）作为入库唯一键
+   * 与用户可见的「官方原文」链接。返回 null 表示回退到原文 URL。
+   */
+  detailContentUrl?(notice: NormalizedNotice): string | null;
 }
 
 /** 注册表：所有源适配器在此登记，调度器按此数组驱动。 */

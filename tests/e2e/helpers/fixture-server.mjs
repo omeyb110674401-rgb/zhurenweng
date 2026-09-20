@@ -70,18 +70,33 @@ export function createFixtureServer({ fixturesDir, host = '127.0.0.1', port = 0 
         res.end('bad request');
         return;
       }
-      const filePath = path.join(root, ...segments);
-      const ext = path.extname(filePath).toLowerCase();
-      const contentType = CONTENT_TYPES[ext] ?? 'application/octet-stream';
-      if (TEXT_EXTENSIONS.has(ext)) {
-        const body = substituteDateTokens(await readFile(filePath, 'utf8'), anchor);
-        res.writeHead(200, { 'content-type': contentType });
-        res.end(body);
-        return;
+      const basePath = path.join(root, ...segments);
+      // 目录式接口路径（真实站点以 …/flca/<id>/info/ 形式提供 JSON 数据）→
+      // 目录下的 index.json / index.html；其余路径按文件精确匹配。
+      const candidates = url.pathname.endsWith('/')
+        ? [path.join(basePath, 'index.json'), path.join(basePath, 'index.html')]
+        : [basePath];
+
+      for (const filePath of candidates) {
+        const ext = path.extname(filePath).toLowerCase();
+        const contentType = CONTENT_TYPES[ext] ?? 'application/octet-stream';
+        try {
+          if (TEXT_EXTENSIONS.has(ext)) {
+            const body = substituteDateTokens(await readFile(filePath, 'utf8'), anchor);
+            res.writeHead(200, { 'content-type': contentType });
+            res.end(body);
+            return;
+          }
+          const body = await readFile(filePath);
+          res.writeHead(200, { 'content-type': contentType });
+          res.end(body);
+          return;
+        } catch {
+          // 该候选不存在：目录式路径继续试下一个，其余落到 404
+        }
       }
-      const body = await readFile(filePath);
-      res.writeHead(200, { 'content-type': contentType });
-      res.end(body);
+      res.writeHead(404, { 'content-type': 'text/plain; charset=utf-8' });
+      res.end('fixture not found');
     } catch {
       res.writeHead(404, { 'content-type': 'text/plain; charset=utf-8' });
       res.end('fixture not found');
