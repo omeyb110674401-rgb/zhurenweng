@@ -93,6 +93,9 @@ services:
       # 任务失败告警收件邮箱（issue #12；未配置则不发告警）
       APP_BASE_URL: ${APP_BASE_URL:-}
       ALERT_EMAIL: ${ALERT_EMAIL:-}
+      # 调度间隔：默认每日一轮（86_400_000ms）。worker 代码内默认 60s 只适合本地，
+      # 生产若沿用会把政府站点敲成每分钟一次，极易被限流封 IP。
+      WORKER_INTERVAL_MS: ${WORKER_INTERVAL_MS:-86400000}
     depends_on:
       db:
         condition: service_healthy
