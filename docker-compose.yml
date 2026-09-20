@@ -40,10 +40,18 @@ services:
       # 变量名必须与代码读取的一致：glm 端口读 GLM_API_KEY（adapters/glm-llm.ts），
       # 摘要区可用性门控也读同一个名字（lib/llm-availability.ts）—— 曾误传 LLM_API_KEY，
       # 结果 .env 里填了 Key 也到不了容器。tests/unit/deploy-env-contract.test.mjs 钉死。
-      LLM_PROVIDER: glm
+      LLM_PROVIDER: ${LLM_PROVIDER:-glm}
+      # 预设服务商（默认智谱 GLM）
       GLM_API_KEY: ${GLM_API_KEY:-}
       GLM_API_BASE: ${GLM_API_BASE:-}
       GLM_MODEL: ${GLM_MODEL:-}
+      # 通用 OpenAI 兼容端点（LLM_PROVIDER=openai 时用：任何兼容端点，换模型不改代码）
+      LLM_API_KEY: ${LLM_API_KEY:-}
+      LLM_API_BASE: ${LLM_API_BASE:-}
+      LLM_MODEL: ${LLM_MODEL:-}
+      LLM_TIMEOUT_MS: ${LLM_TIMEOUT_MS:-}
+      # 额外请求头（JSON；部分网关要求客户端带会话头，如 {"x-session-id":"…"}）
+      LLM_EXTRA_HEADERS: ${LLM_EXTRA_HEADERS:-}
       MAILER_PROVIDER: smtp
       SMTP_HOST: ${SMTP_HOST:-}
       SMTP_PORT: ${SMTP_PORT:-}
@@ -79,10 +87,18 @@ services:
       NODE_ENV: production
       DB_DRIVER: postgres
       DATABASE_URL: postgres://zhurenweng:${POSTGRES_PASSWORD:-zhurenweng}@db:5432/zhurenweng
-      LLM_PROVIDER: glm
+      LLM_PROVIDER: ${LLM_PROVIDER:-glm}
+      # 预设服务商（默认智谱 GLM）
       GLM_API_KEY: ${GLM_API_KEY:-}
       GLM_API_BASE: ${GLM_API_BASE:-}
       GLM_MODEL: ${GLM_MODEL:-}
+      # 通用 OpenAI 兼容端点（LLM_PROVIDER=openai 时用：任何兼容端点，换模型不改代码）
+      LLM_API_KEY: ${LLM_API_KEY:-}
+      LLM_API_BASE: ${LLM_API_BASE:-}
+      LLM_MODEL: ${LLM_MODEL:-}
+      LLM_TIMEOUT_MS: ${LLM_TIMEOUT_MS:-}
+      # 额外请求头（JSON；部分网关要求客户端带会话头，如 {"x-session-id":"…"}）
+      LLM_EXTRA_HEADERS: ${LLM_EXTRA_HEADERS:-}
       MAILER_PROVIDER: smtp
       SMTP_HOST: ${SMTP_HOST:-}
       SMTP_PORT: ${SMTP_PORT:-}

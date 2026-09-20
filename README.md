@@ -47,8 +47,10 @@ npm run dev            # http://localhost:3000
 | --- | --- | --- |
 | `DB_DRIVER` | `sqlite` | `sqlite` 或 `postgres` |
 | `DATABASE_URL` | `data/zhurenweng.db` | SQLite 文件路径或 PG 连接串 |
-| `LLM_PROVIDER` | `stub` | `stub`（固定摘要，可注入失败）/ `glm`（智谱 GLM 系列，需 `GLM_API_KEY`） |
-| `GLM_API_KEY` / `GLM_API_BASE` / `GLM_MODEL` | （空）/ `https://open.bigmodel.cn/api/paas/v4` / `glm-4-flash` | GLM 大模型接入配置（`LLM_PROVIDER=glm` 时必填 Key） |
+| `LLM_PROVIDER` | `stub` | `stub`（固定摘要，可注入失败）/ `glm`（智谱 GLM 预设，PRD 默认）/ `openai`（任何 OpenAI 兼容端点） |
+| `GLM_API_KEY` / `GLM_API_BASE` / `GLM_MODEL` | （空）/ `https://open.bigmodel.cn/api/paas/v4` / `glm-4-flash` | 智谱预设配置（`LLM_PROVIDER=glm` 时必填 Key，其余有默认值） |
+| `LLM_API_KEY` / `LLM_API_BASE` / `LLM_MODEL` | （空） | 通用 OpenAI 兼容端点（`LLM_PROVIDER=openai` 时三项都必填）：换服务商/换模型只改环境变量，不动代码 |
+| `LLM_TIMEOUT_MS` / `LLM_EXTRA_HEADERS` | （空） | 单次请求超时（缺省 60000）/ 额外请求头 JSON 对象（部分网关要求客户端带会话头） |
 | `LLM_STUB_FAILURES` / `LLM_STUB_CALLS_FILE` | （空） | stub LLM 注入失败（前 N 次调用抛错，或 `always`）/ stub 调用日志 JSONL（跨进程断言调用次数） |
 | `SUMMARY_MAX_RETRIES` / `SUMMARY_RETRY_DELAY_MS` | `3` / `500` | 摘要失败重试次数 / 指数退避基数（毫秒） |
 | `MAILER_PROVIDER` | `stub` | `stub`（捕获邮件）/ `smtp`（nodemailer 生产实现） |

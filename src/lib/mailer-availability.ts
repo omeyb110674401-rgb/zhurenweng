@@ -1,3 +1,5 @@
+import { resolveSmtpOptions } from './adapters/smtp-mailer.ts';
+
 /**
  * 邮件订阅可用性（issue #17）：订阅入口的可见性与表单可用性由邮件端口配置决定。
  *
@@ -16,11 +18,19 @@
 /** 邮件端口是否可用于对外订阅（true = 入口可见、表单可用）。 */
 export function mailerReady(env: NodeJS.ProcessEnv = process.env): boolean {
   const provider = env.MAILER_PROVIDER ?? 'stub';
-  if (provider === 'stub') return true;
-  if (provider !== 'smtp') return false;
-  return isSet(env.SMTP_HOST) && isSet(env.MAIL_FROM);
-}
-
-function isSet(value: string | undefined): boolean {
-  return (value ?? '').trim() !== '';
+  try {
+    switch (provider) {
+      case 'stub':
+        return true;
+      case 'smtp':
+        // 直接用端口构造的同一套解析（issue #25）：端口还额外校验端口号与
+        // 「半套凭据」——门控跟着一起判不可用，才不会出现「表单能提交但发信必失败」
+        resolveSmtpOptions(env);
+        return true;
+      default:
+        return false;
+    }
+  } catch {
+    return false;
+  }
 }

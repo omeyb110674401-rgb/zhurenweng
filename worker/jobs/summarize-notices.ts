@@ -1,5 +1,5 @@
 import { createLlmPort } from '../../src/lib/ports.ts';
-import { llmReady } from '../../src/lib/llm-availability.ts';
+import { llmReady, llmUnavailableReason } from '../../src/lib/llm-availability.ts';
 import { sendTaskFailureAlert } from '../../src/lib/alerts.ts';
 import { syncNoticesToSearchIndex } from '../../src/lib/search/sync.ts';
 import {
@@ -82,7 +82,9 @@ export const summarizeNoticesJob: Job = {
     // 每天一封任务级告警邮件，而这件事并不会因为重试而好转。跳过并说清原因，
     // 配置补齐后自动恢复（与 /subscribe 的 mailerReady 门控同一套路数）。
     if (!llmReady()) {
-      ctx.logger('LLM 端口未配置（LLM_PROVIDER=glm 需要 GLM_API_KEY），本轮跳过摘要任务');
+      // 原因直接取门控的实现（issue #25）：换服务商后这句日志不必再改，
+      // 也不会出现「日志说的和界面判的不一致」
+      ctx.logger(`LLM 端口未配置，本轮跳过摘要任务：${llmUnavailableReason() ?? '原因未知'}`);
       return;
     }
     const llm = createLlmPort();

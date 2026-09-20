@@ -111,6 +111,10 @@ const SHARED_PORT_KEYS = [
   'GLM_API_KEY',
   'GLM_API_BASE',
   'GLM_MODEL',
+  'LLM_API_KEY',
+  'LLM_API_BASE',
+  'LLM_MODEL',
+  'LLM_EXTRA_HEADERS',
   'SMTP_HOST',
   'SMTP_PORT',
   'SMTP_USER',
@@ -124,6 +128,10 @@ const SHARED_PORT_KEYS = [
 const ENV_KEYS = [
   'LLM_PROVIDER',
   'GLM_API_KEY',
+  'LLM_API_KEY',
+  'LLM_API_BASE',
+  'LLM_MODEL',
+  'LLM_EXTRA_HEADERS',
   'MAILER_PROVIDER',
   'SMTP_HOST',
   'SMTP_PORT',
@@ -203,6 +211,43 @@ describe('部署环境变量契约（compose ↔ .env.example ↔ docs ↔ 代�
       { env: { LLM_PROVIDER: 'glm' }, ready: false, label: 'glm 未设置 Key' },
       { env: { LLM_PROVIDER: 'glm', GLM_API_KEY: '   ' }, ready: false, label: 'glm Key 只有空白' },
       { env: { LLM_PROVIDER: 'GLM', GLM_API_KEY: 'dummy-key' }, ready: false, label: 'provider 名拼错' },
+      // 通用 OpenAI 兼容端点（issue #25）：三项都必填 —— 缺一项就不该对外说「可用」
+      {
+        env: {
+          LLM_PROVIDER: 'openai',
+          LLM_API_KEY: 'dummy-key',
+          LLM_API_BASE: 'https://example.invalid/v1',
+          LLM_MODEL: 'some-flash-model',
+        },
+        ready: true,
+        label: 'openai 三项齐全',
+      },
+      {
+        env: { LLM_PROVIDER: 'openai', LLM_API_KEY: 'dummy-key', LLM_API_BASE: 'https://example.invalid/v1' },
+        ready: false,
+        label: 'openai 缺 LLM_MODEL',
+      },
+      {
+        env: { LLM_PROVIDER: 'openai', LLM_API_KEY: 'dummy-key', LLM_MODEL: 'm' },
+        ready: false,
+        label: 'openai 缺 LLM_API_BASE',
+      },
+      {
+        env: { LLM_PROVIDER: 'openai', LLM_API_BASE: 'https://example.invalid/v1', LLM_MODEL: 'm' },
+        ready: false,
+        label: 'openai 缺 LLM_API_KEY',
+      },
+      {
+        env: {
+          LLM_PROVIDER: 'openai',
+          LLM_API_KEY: 'dummy-key',
+          LLM_API_BASE: 'https://example.invalid/v1',
+          LLM_MODEL: 'm',
+          LLM_EXTRA_HEADERS: '不是 JSON',
+        },
+        ready: false,
+        label: 'openai 额外请求头不是合法 JSON（构造期就该失败，别等到调用）',
+      },
       { env: {}, ready: true, label: '未设置 provider（默认 stub）' },
     ];
     for (const item of cases) {

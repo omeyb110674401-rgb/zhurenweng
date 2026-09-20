@@ -1,4 +1,5 @@
-import { GlmLlm } from './adapters/glm-llm.ts';
+import { createGlmLlm } from './adapters/glm-llm.ts';
+import { createOpenAiLlmFromEnv } from './adapters/openai-compatible-llm.ts';
 import { StubLlm } from './adapters/stubs/stub-llm.ts';
 import { StubMailer } from './adapters/stubs/stub-mailer.ts';
 import { createSmtpMailerFromEnv } from './adapters/smtp-mailer.ts';
@@ -85,10 +86,13 @@ export function createLlmPort(): LlmPort {
     case 'stub':
       return new StubLlm();
     case 'glm':
-      // GLM 系列（智谱开放平台）：GLM_API_KEY / GLM_API_BASE / GLM_MODEL 配置，见 adapters/glm-llm.ts
-      return new GlmLlm();
+      // 智谱 GLM 预设（PRD 默认服务商）：GLM_API_KEY / GLM_API_BASE / GLM_MODEL
+      return createGlmLlm();
+    case 'openai':
+      // 通用 OpenAI 兼容端点（换模型不改代码）：LLM_API_KEY / LLM_API_BASE / LLM_MODEL
+      return createOpenAiLlmFromEnv();
     default:
-      throw new Error(`未知的 LLM_PROVIDER "${provider}"（可选：stub | glm）`);
+      throw new Error(`未知的 LLM_PROVIDER "${provider}"（可选：stub | glm | openai）`);
   }
 }
 

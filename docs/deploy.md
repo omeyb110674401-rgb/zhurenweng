@@ -49,6 +49,11 @@ cp .env.example .env
 vim .env   # 按模板逐项填写；POSTGRES_PASSWORD/MEILI_MASTER_KEY/ADMIN_TOKEN 换成强随机值
 ```
 
+大模型服务商可切换（PRD「通过环境变量可切换服务商」）：默认 `LLM_PROVIDER=glm` 走智谱预设
+（只填 `GLM_API_KEY`）；换任何 OpenAI 兼容端点则设 `LLM_PROVIDER=openai` 并填 `LLM_API_KEY` /
+`LLM_API_BASE` / `LLM_MODEL`（可另加 `LLM_EXTRA_HEADERS`）。**对外提供生成式 AI 服务的模型须为
+已备案的国产模型**（PRD 第 49 条），不要指向境外聚合服务。
+
 必填清单：`POSTGRES_PASSWORD`、`DOMAIN`、`SITE_URL`、`APP_BASE_URL`、`GLM_API_KEY`、
 `SMTP_HOST/PORT/USER/PASS/SECURE`、`MAIL_FROM`、`MEILI_MASTER_KEY`、`ADMIN_TOKEN`、`ALERT_EMAIL`、
 `ICP_NUMBER`（备案号，展示在首页/搜索页页脚并链接工信部备案系统）。
