@@ -15,7 +15,7 @@ services:
     environment:
       NODE_ENV: production
       DB_DRIVER: postgres
-      DATABASE_URL: postgres://zhurenweng:zhurenweng@db:5432/zhurenweng
+      DATABASE_URL: postgres://zhurenweng:${POSTGRES_PASSWORD:-zhurenweng}@db:5432/zhurenweng
       # LLM 与邮件在生产通过环境变量接入真实服务商（ADR-0001 第 5 条）
       LLM_PROVIDER: glm
       LLM_API_KEY: ${LLM_API_KEY:-}
@@ -52,7 +52,7 @@ services:
     environment:
       NODE_ENV: production
       DB_DRIVER: postgres
-      DATABASE_URL: postgres://zhurenweng:zhurenweng@db:5432/zhurenweng
+      DATABASE_URL: postgres://zhurenweng:${POSTGRES_PASSWORD:-zhurenweng}@db:5432/zhurenweng
       LLM_PROVIDER: glm
       LLM_API_KEY: ${LLM_API_KEY:-}
       GLM_API_BASE: ${GLM_API_BASE:-}
@@ -79,7 +79,7 @@ services:
     image: postgres:17
     environment:
       POSTGRES_USER: zhurenweng
-      POSTGRES_PASSWORD: zhurenweng
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-zhurenweng}
       POSTGRES_DB: zhurenweng
     volumes:
       - db-data:/var/lib/postgresql/data

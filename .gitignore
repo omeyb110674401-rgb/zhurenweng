@@ -8,6 +8,10 @@ out/
 # local data（SQLite 文件库、stub 输出等运行时产物）
 data/
 
+# secrets
+.env
+.env.local
+
 # misc
 *.tsbuildinfo
 *.log
