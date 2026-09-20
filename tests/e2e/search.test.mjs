@@ -46,10 +46,12 @@ const TITLES = {
 /**
  * 只出现在 npc 正文（详情接口 tsy）而不在任何标题里的特征串：用于断言正文确实入索引
  * （三源标题都不含该串，moj / mee 正文里登录的是各自门户）。
- * 注意：必须是纯汉字串 —— 检索层按「相邻汉字插空格 + 短语查询」建索引，
- * 汉字与数字/字母相邻处会合成一个词元（如「街1」），带数字的短语匹配不到。
  */
 const BODY_ONLY_KEYWORD = '社会公众可以直接登录中国人大网';
+/** npc 正文里的地址（含「街1号」这种汉字紧邻数字的写法，issue #15 缺陷 1 的回归锚点） */
+const DIGIT_ADJACENT_PHRASE = '前门西大街';
+/** npc 正文里的期限句（短语自身含数字，issue #15 缺陷 1 的回归锚点） */
+const DIGIT_INSIDE_PHRASE = '征求意见期限为30日';
 /** 更新场景追加到已截止条目正文的特征句（全仓 fixture 中不存在的关键词） */
 const UPDATED_BODY_KEYWORD = '量子比特';
 const UPDATED_BODY_SENTENCE =
@@ -173,6 +175,27 @@ describe('issue #8：抓取 → 索引 → 搜索命中（SearchPort local）', 
         `应命中「${title}」`,
       );
     }
+  });
+
+  it('汉字紧邻数字不切断短语匹配（issue #15 缺陷 1）：纯汉字短语与含数字短语都应命中', async () => {
+    // 「北京市西城区前门西大街1号」：短语本身全是汉字，但正文里紧跟数字 ——
+    // 索引变换若把「街1号」合成一个词元，短语「前门西大街」就匹配不到（旧实现的实际表现）。
+    const addressItems = extractNoticeItems(
+      stripSsrComments(await (await fetch(`${app.url}/search?q=${DIGIT_ADJACENT_PHRASE}`)).text()),
+    );
+    assert.equal(addressItems.length, 3, 'npc 三条正文都含该地址，应恰好命中 3 条');
+
+    // 「征求意见期限为30日」：短语自身含数字，同样不应被切断
+    const digitItems = extractNoticeItems(
+      stripSsrComments(await (await fetch(`${app.url}/search?q=${DIGIT_INSIDE_PHRASE}`)).text()),
+    );
+    assert.equal(digitItems.length, 3, '含数字的正文短语应恰好命中 3 条');
+
+    // 只含数字的查询仍按前缀命中（数字与汉字拆开后，「30」能命中「30日」）
+    const numberItems = extractNoticeItems(
+      stripSsrComments(await (await fetch(`${app.url}/search?q=30`)).text()),
+    );
+    assert.equal(numberItems.length, 3, '数字查询应命中三条正文含「30日」的条目');
   });
 
   it('AI 摘要文本可被检索：stub 摘要语「固定测试摘要」命中两条未截止条目', async () => {

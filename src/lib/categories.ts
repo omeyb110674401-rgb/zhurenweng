@@ -7,6 +7,8 @@
  *   querystring 取值（/?category=…），三处消费同一份常量，杜绝词表漂移。
  * - **关键词规则**：每个领域一组关键词，命中条目标题或正文（不区分大小写）
  *   即打上该领域标签；多领域同时命中则多标签（categoryTags 为数组）。
+ * - **排除语境**：个别关键词只出现在特定更长词内部时不算命中（如「数据」在
+ *   「国家法律法规数据库」内），见 KEYWORD_CONTEXT_EXCLUSIONS。
  * - **无兜底标签**：没有任何关键词命中的条目 categoryTags 保持空数组
  *   （不强行归入「其他」）——订阅词表因此无需引入一个永远泛匹配的领域，
  *   未打标条目仍出现在未筛选列表与检索结果中，只是不参与领域筛选。
@@ -75,9 +77,35 @@ const KNOWN_CATEGORY_LABELS: ReadonlySet<string> = new Set(
   DOMAIN_CATEGORIES.map((domain) => domain.label),
 );
 
+/**
+ * 关键词的排除语境（issue #15 缺陷 2）：关键词只出现在这些更长词内部时不算命中。
+ * 中文没有词边界，「数据」在「国家法律法规数据库」里只是专有名词的一部分 ——
+ * 真实 npc 正文通篇引用该数据库，导致三条立法类条目被误打「数据与网络安全」。
+ * 判定方式为「先剔除排除词、再看关键词是否仍出现」（剔除是字面替换，不做分词）；
+ * 只登记真正包含该关键词的排除词 —— 否则剔除动作本身可能把两个残段拼成关键词，
+ * 造成新的假命中。
+ */
+const KEYWORD_CONTEXT_EXCLUSIONS: ReadonlyMap<string, readonly string[]> = new Map([
+  ['数据', ['数据库']],
+]);
+
 /** 值是否为已知领域标签（列表筛选参数校验：未知值不生效，避免任意串触发无效筛选）。 */
 export function isKnownCategory(value: string): boolean {
   return KNOWN_CATEGORY_LABELS.has(value);
+}
+
+/**
+ * 关键词是否命中文本（已小写化的 haystack 与 keyword 传入）。
+ * 有排除语境的关键词先剔除排除词再判包含（见 KEYWORD_CONTEXT_EXCLUSIONS）。
+ */
+function keywordHits(haystack: string, keyword: string): boolean {
+  const exclusions = KEYWORD_CONTEXT_EXCLUSIONS.get(keyword);
+  if (exclusions === undefined) return haystack.includes(keyword);
+  let remaining = haystack;
+  for (const exclusion of exclusions) {
+    remaining = remaining.replaceAll(exclusion, '');
+  }
+  return remaining.includes(keyword);
 }
 
 /**
@@ -92,7 +120,7 @@ export function deriveCategoryTags(title: string, bodyText?: string | null): str
   for (const domain of DOMAIN_CATEGORIES) {
     const hit = domain.keywords.some((keyword) => {
       const needle = keyword.toLowerCase();
-      return haystackTitle.includes(needle) || haystackBody.includes(needle);
+      return keywordHits(haystackTitle, needle) || keywordHits(haystackBody, needle);
     });
     if (hit) tags.push(domain.label);
   }

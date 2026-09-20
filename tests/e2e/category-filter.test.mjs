@@ -14,9 +14,11 @@ import { createFixtureServer } from './helpers/fixture-server.mjs';
  * 场景（三源 fixture 入库 → 打标 → 浏览筛选）：
  *   worker 单轮抓取三源（npc / moj / mee，跨源去重后 9 条）
  *   → 每条目的领域标签由关键词规则自动推导且与期望一致
- *     （关键词命中标题：医疗保障法「医疗」、铁路条例「铁路」、仲裁法「仲裁」等；
- *       关键词命中正文：国家公园法标题无领域词、正文「生态」命中生态环境；
- *       无关键词命中：渔业法 / 历史文化遗产保护法不打标签）
+ *     （关键词命中标题：道路交通安全法「交通/道路」、饮用水水源地标准「生态环境」、
+ *       行政复议法实施条例「行政复议」等；
+ *       关键词命中正文：沿海物种名录「海洋生态环境保护」、行政法规制定程序条例「立法」；
+ *       排除语境：npc 三条正文的「国家法律法规数据库」不算「数据」领域（issue #15）；
+ *       无关键词命中：金融法、npc 三条不打标签）
  *   → 按领域过滤列表只含对应条目，且激活态落在对应标签云链接上
  *   → 按发布机关过滤（下拉选项 = 库内去重机关，精确匹配）
  *   → 关键词过滤（标题 / 正文包含匹配）
@@ -51,18 +53,19 @@ const TITLES = {
  * 每条 fixture 条目的期望领域标签（src/lib/categories.ts 关键词规则的预期结果）。
  * 标题命中：xingzheng（行政复议）、shuiyuan（生态环境标准）、hedian（生态环境）、
  * npc2（交通 / 道路）；
- * 仅正文命中：npc1 / npc3（人大真实正文含「国家法律法规数据库」→「数据」）、
- * chengxu（moj 正文「落实立法法要求」→「立法」）、
+ * 仅正文命中：chengxu（moj 正文「落实立法法要求」→「立法」）、
  * haiyu（正文「海洋生态环境保护」→「生态环境」）、
- * shuiyuan（正文「数据元」→「数据与网络安全」）；
+ * shuiyuan（正文「数据元」→「数据与网络安全」，裸「数据」仍应命中）；
+ * npc 三条 = 不打标签：正文唯一的「数据」出现在「国家法律法规数据库」内，
+ * 属「数据」关键词的排除语境（issue #15 缺陷 2）；
  * jingrong = 标题与正文均无关键词命中 → 不打标签。
  */
 const EXPECTED_TAGS = {
-  [TITLES.npc1]: ['数据与网络安全'], // 标题无领域词，正文「国家法律法规数据库」命中「数据」
-  [TITLES.npc2]: ['交通运输', '数据与网络安全'], // 标题命中「交通/道路」，正文命中「数据」
-  [TITLES.npc3]: ['数据与网络安全'], // 标题无领域词，正文命中「数据」
+  [TITLES.npc1]: [], // 正文「数据」全部在「数据库」内 → 不计命中
+  [TITLES.npc2]: ['交通运输'], // 标题命中「交通/道路」
+  [TITLES.npc3]: [], // 同 npc1
   [TITLES.jingrong]: [], // 标题与正文（已裁剪）均无关键词命中 → 不打兜底标签
-  [TITLES.shuiyuan]: ['生态环境', '数据与网络安全'], // 标题「生态环境标准」+ 正文「数据元」
+  [TITLES.shuiyuan]: ['生态环境', '数据与网络安全'], // 标题「生态环境标准」+ 正文 6 处裸「数据」
   [TITLES.haiyu]: ['生态环境'], // 标题无领域词，正文「海洋生态环境保护」命中
   [TITLES.hedian]: ['生态环境'], // 标题命中「生态环境」
   [TITLES.xingzheng]: ['立法与司法'], // 标题命中「行政复议」
@@ -243,14 +246,22 @@ describe('issue #9：领域标签自动打标与分类浏览筛选', () => {
     assert.ok(!/aria-current="true"[^>]*>交通运输/.test(html));
   });
 
-  it('按领域过滤：正文命中打标的「数据与网络安全」含 4 条；「立法与司法」含 2 条且保持倒计时顺序', async () => {
+  it('「国家法律法规数据库」不再误报「数据与网络安全」（issue #15 缺陷 2），裸「数据」仍打标', async () => {
     const dataDomain = await fetchHome(`/?category=${encodeURIComponent('数据与网络安全')}`);
+    const hits = listOrder(dataDomain);
     assert.deepEqual(
-      listOrder(dataDomain),
-      [TITLES.shuiyuan, TITLES.npc1, TITLES.npc2, TITLES.npc3],
-      'npc 三条由正文「国家法律法规数据库」命中；mee 的饮用水条目正文含「数据元」',
+      hits,
+      [TITLES.shuiyuan],
+      'npc 三条正文里的「数据」全部出现在「数据库」内（排除语境）→ 不命中；饮用水条目正文 6 处裸「数据」→ 仍命中',
     );
+    assert.match(dataDomain, /data-testid="filter-result-count"[^>]*>筛选后共 1 条/);
+    // 反向断言：npc 三条确实不在该领域下（同时证明「数据」关键词未被整个关掉）
+    for (const title of [TITLES.npc1, TITLES.npc2, TITLES.npc3]) {
+      assert.ok(!hits.includes(title), `「${title}」不应命中「数据与网络安全」`);
+    }
+  });
 
+  it('按领域过滤：「立法与司法」含 2 条且保持倒计时顺序', async () => {
     const lijisifa = await fetchHome(`/?category=${encodeURIComponent('立法与司法')}`);
     assert.deepEqual(listOrder(lijisifa), [TITLES.xingzheng, TITLES.chengxu]);
     assert.match(lijisifa, /data-testid="filter-result-count"[^>]*>筛选后共 2 条/);
