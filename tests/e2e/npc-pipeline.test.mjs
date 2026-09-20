@@ -91,6 +91,15 @@ function extractOutboundClicks(rawHtml) {
   return Number(match[1]);
 }
 
+/**
+ * /go 点击计数的请求身份（issue #17）：北极星指标只计人的点击。
+ * fetch 默认 UA 是「node」（脚本客户端），不带头就等同于爬虫 —— 模拟真人点击
+ * 必须带浏览器 UA；反之爬虫 UA 的请求应照常 302 但不计数。
+ */
+const BROWSER_UA =
+  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36';
+const CRAWLER_UA = 'Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)';
+
 /** 从列表页 HTML 按展示顺序提取条目（标题 + 详情链接）。 */
 function extractListItems(html) {
   const anchors = [...html.matchAll(/<a[^>]*notice-title-link[^>]*>([^<]+)<\/a>/g)];
@@ -279,7 +288,10 @@ describe('issue #3：全国人大源 → 入库 → 列表/详情 → 出站跳�
     const officialUrl = officialUrlOf(LIDS.open1);
 
     for (const round of [1, 2]) {
-      const response = await fetch(`${app.url}/go/${noticeId}`, { redirect: 'manual' });
+      const response = await fetch(`${app.url}/go/${noticeId}`, {
+        redirect: 'manual',
+        headers: { 'user-agent': BROWSER_UA },
+      });
       assert.equal(response.status, 302, `第 ${round} 次点击应 302`);
       assert.equal(response.headers.get('location'), officialUrl, '应 302 到官方原文 URL');
       assert.equal(response.headers.get('set-cookie'), null, '不记录任何个人身份（无 Cookie）');
@@ -289,12 +301,66 @@ describe('issue #3：全国人大源 → 入库 → 列表/详情 → 出站跳�
     const detailHtml = await (await fetch(`${app.url}/notices/${noticeId}`)).text();
     assert.equal(extractOutboundClicks(detailHtml), 2);
 
+    // 详情页的订阅提醒入口（issue #17）：stub 邮件端口下可见（生产按配置门控）
+    assert.match(
+      detailHtml,
+      /data-testid="subscribe-detail-link"/,
+      '邮件端口可用时详情页应有订阅提醒入口',
+    );
+
     // 不存在的条目返回 404
     const missing = await fetch(`${app.url}/go/0000000000000000`);
     assert.equal(missing.status, 404);
   });
 
+  it('爬虫 / 脚本 UA 的 /go 请求照常 302 但不计数（北极星指标只计人的点击）', async () => {
+    const listHtml = await (await fetch(`${app.url}/`)).text();
+    const noticeId = extractNoticeId(hrefOf(extractListItems(listHtml), TITLES.open1));
+    const officialUrl = officialUrlOf(LIDS.open1);
+    const detailUrl = `${app.url}/notices/${noticeId}`;
+
+    const baseline = extractOutboundClicks(await (await fetch(detailUrl)).text());
+
+    // 一次机器遍历的典型形态：爬虫 UA、脚本 UA（fetch 默认「node」）、空 UA
+    const machineRequests = [
+      { 'user-agent': CRAWLER_UA },
+      { 'user-agent': 'curl/8.4.0' },
+      { 'user-agent': 'node' },
+      { 'user-agent': '' },
+      {},
+    ];
+    for (const headers of machineRequests) {
+      const response = await fetch(`${app.url}/go/${noticeId}`, { redirect: 'manual', headers });
+      assert.equal(response.status, 302, `机器请求也应照常 302（绝不打断跳转）`);
+      assert.equal(response.headers.get('location'), officialUrl);
+    }
+
+    assert.equal(
+      extractOutboundClicks(await (await fetch(detailUrl)).text()),
+      baseline,
+      '机器请求不应计入北极星指标（45 条各 1 次的爬虫遍历会把指标打满）',
+    );
+
+    // 真人点击仍然计数（对照组：证明上面的「不计数」不是把计数整个关掉）
+    await fetch(`${app.url}/go/${noticeId}`, {
+      redirect: 'manual',
+      headers: { 'user-agent': BROWSER_UA },
+    });
+    assert.equal(
+      extractOutboundClicks(await (await fetch(detailUrl)).text()),
+      baseline + 1,
+      '浏览器 UA 的点击应计数',
+    );
+  });
+
   it('重复抓取幂等：条目数与点击计数不变', async () => {
+    // 重抓前的点击计数（不写死数值：同文件其他用例也会点 /go）
+    const listBefore = await (await fetch(`${app.url}/`)).text();
+    const noticeIdBefore = extractNoticeId(hrefOf(extractListItems(listBefore), TITLES.open1));
+    const clicksBefore = extractOutboundClicks(
+      await (await fetch(`${app.url}/notices/${noticeIdBefore}`)).text(),
+    );
+
     const second = await runWorkerOnce();
     assert.equal(second.code, 0, `worker 应正常退出，输出：${second.output}`);
     assert.match(second.output, /源 npc 抓取完成：列表 3 条，新增 0，更新 3/);
@@ -313,6 +379,6 @@ describe('issue #3：全国人大源 → 入库 → 列表/详情 → 出站跳�
 
     const noticeId = extractNoticeId(hrefOf(extractListItems(html), TITLES.open1));
     const detailHtml = await (await fetch(`${app.url}/notices/${noticeId}`)).text();
-    assert.equal(extractOutboundClicks(detailHtml), 2, '重复抓取不得清零出站点击计数');
+    assert.equal(extractOutboundClicks(detailHtml), clicksBefore, '重复抓取不得清零出站点击计数');
   });
 });

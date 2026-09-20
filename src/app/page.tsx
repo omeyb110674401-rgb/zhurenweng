@@ -4,6 +4,7 @@ import { NoticeItem } from '@/app/_lib/notice-item';
 import { SearchForm } from '@/app/_lib/search-form';
 import { IcpFiling } from '@/app/_lib/icp-filing';
 import { DOMAIN_CATEGORIES, isKnownCategory } from '@/lib/categories';
+import { mailerReady } from '@/lib/mailer-availability';
 
 // 数据随抓取管线持续更新，首页始终服务端实时渲染，不做静态预渲染。
 export const dynamic = 'force-dynamic';
@@ -80,11 +81,16 @@ export default async function HomePage({ searchParams }: HomePageProps) {
         <p className="tagline">政府公示与征求意见信息聚合 —— 发现 · 读懂 · 行动</p>
         {/* 站内搜索（issue #8）：GET 表单提交到 /search?q=…，不依赖客户端 JS */}
         <SearchForm />
-        {/* 站内导航（issue #11）：数据统计页入口 */}
+        {/* 站内导航（issue #11）：数据统计页入口；订阅入口按邮件端口配置门控（issue #17） */}
         <nav className="site-nav" aria-label="站内导航">
           <a href="/stats" data-testid="stats-nav-link">
             数据统计
           </a>
+          {mailerReady() ? (
+            <a href="/subscribe" data-testid="subscribe-nav-link">
+              订阅提醒
+            </a>
+          ) : null}
         </nav>
       </header>
 
@@ -99,6 +105,12 @@ export default async function HomePage({ searchParams }: HomePageProps) {
           <a className="rss-link" href="/feed.xml" data-testid="rss-feed-link">
             RSS 订阅
           </a>
+          {/* 邮件提醒入口（issue #17）：邮件端口可用时才出现，与 RSS 并列 */}
+          {mailerReady() ? (
+            <a className="rss-link" href="/subscribe" data-testid="subscribe-list-link">
+              邮件提醒
+            </a>
+          ) : null}
         </p>
 
         {/* 分类浏览筛选条（issue #9）：领域标签云 + 机关下拉 + 关键词框，

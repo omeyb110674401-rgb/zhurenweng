@@ -201,6 +201,14 @@ describe('issue #7：订阅 double opt-in → 截止提醒 → 一键退订', ()
     assert.match(html, /订阅截止提醒/);
     assert.match(html, /action="\/api\/subscriptions"/);
     assert.match(html, /生态环境/, '领域选项应含生态环境');
+    assert.ok(!html.includes('subscribe-unavailable-banner'), 'stub 邮件端口可用 → 不显示不可用提示');
+  });
+
+  it('邮件端口可用时首页出现订阅入口（issue #17 门控的正向分支）', async () => {
+    const home = await (await fetch(`${app.url}/`)).text();
+    assert.match(home, /data-testid="subscribe-nav-link"/, '导航应有订阅提醒入口');
+    assert.match(home, /data-testid="subscribe-list-link"/, '列表头（RSS 旁）应有邮件提醒入口');
+    assert.match(home, /href="\/subscribe"/);
   });
 
   it('输入校验：非法邮箱被拒且不发送任何邮件', async () => {
@@ -461,5 +469,16 @@ describe('issue #7：订阅 double opt-in → 截止提醒 → 一键退订', ()
       5,
       'alice 的邮件总数应停在退订前（2 封确认 + 3 封提醒），不再新增',
     );
+  });
+
+  // 放在文件末尾：详情页断言需要库内已有条目（本文件在前面才跑抓取）
+  it('邮件端口可用时详情页出现订阅提醒入口（最高意向时刻）', async () => {
+    const listHtml = await (await fetch(`${app.url}/`)).text();
+    const matched = /href="\/notices\/([0-9a-f]+)"/.exec(listHtml);
+    assert.ok(matched, '首页应有条目链接（前面的用例已完成抓取）');
+
+    const detail = await (await fetch(`${app.url}/notices/${matched[1]}`)).text();
+    assert.match(detail, /data-testid="subscribe-detail-link"/, '详情页应有订阅提醒入口');
+    assert.match(detail, /截止前 7 天、3 天各收一封提醒邮件/, '入口应说明提醒时机');
   });
 });

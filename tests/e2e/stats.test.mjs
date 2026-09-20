@@ -82,6 +82,13 @@ const TOTAL_CLICKS =
   Object.values(CLICK_PLAN.today).reduce((sum, n) => sum + n, 0) +
   Object.values(CLICK_PLAN.yesterday).reduce((sum, n) => sum + n, 0);
 
+/**
+ * 种子点击的请求身份（issue #17）：北极星指标只计人的点击，fetch 默认 UA 是
+ * 「node」（脚本客户端，等同爬虫）。这里的种子点击代表真人行为，须带浏览器 UA。
+ */
+const BROWSER_UA =
+  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36';
+
 let app;
 let fixtures;
 let fixtureUrl;
@@ -416,7 +423,10 @@ describe('issue #11：数据统计页与出站点击聚合', () => {
     // （不额外发起点击，避免污染按条目 / 按日计数）
     let isFirstClick = true;
     const clickOnce = async (key) => {
-      const response = await fetch(`${app.url}/go/${idOf[key]}`, { redirect: 'manual' });
+      const response = await fetch(`${app.url}/go/${idOf[key]}`, {
+        redirect: 'manual',
+        headers: { 'user-agent': BROWSER_UA },
+      });
       assert.equal(response.status, 302, `点击 ${key} 应 302`);
       assert.equal(response.headers.get('set-cookie'), null, '不记录任何个人身份（无 Cookie）');
       if (isFirstClick) {

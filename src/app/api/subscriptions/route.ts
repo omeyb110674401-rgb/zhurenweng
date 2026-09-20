@@ -7,6 +7,7 @@ import {
   validateSubscriptionRules,
 } from '@/lib/subscription';
 import { upsertSubscriptionRules } from '@/db/repo/subscriptions';
+import { mailerReady } from '@/lib/mailer-availability';
 
 /**
  * 订阅提交端点（issue #7，double opt-in 第一步）：POST /api/subscriptions
@@ -14,6 +15,9 @@ import { upsertSubscriptionRules } from '@/db/repo/subscriptions';
  * 校验邮箱与规则 → 按邮箱 upsert 待确认订阅（同邮箱更新规则而非重复建行）→
  * 发送确认邮件（含确认链接与一键退订链接）→ 303 回订阅页展示结果横幅。
  * 已确认的订阅重复提交只更新规则，不重发确认邮件。
+ *
+ * 邮件端口门控（issue #17）：邮件通道未配置时直接回 mailer_unavailable，
+ * 不写库、不发信 —— 否则会留下一条永远收不到确认邮件的待确认订阅。
  */
 
 // 每次提交都要实时读写库并发送邮件，禁止静态优化与缓存。
@@ -29,6 +33,11 @@ function redirectTo(path: string): Response {
 
 export async function POST(request: Request): Promise<Response> {
   const form = await request.formData();
+
+  // 邮件通道未配置：直接拒绝，不写库不发信（issue #17）
+  if (!mailerReady()) {
+    return redirectTo('/subscribe?error=mailer_unavailable');
+  }
 
   const email = normalizeEmail(String(form.get('email') ?? ''));
   if (email === null) {

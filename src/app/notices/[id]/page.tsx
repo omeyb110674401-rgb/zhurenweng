@@ -5,6 +5,7 @@ import { getNoticeSummary } from '@/db/repo/summaries';
 import { getSourceById } from '@/db/repo/sources';
 import { Countdown, StatusBadge, formatDate } from '@/app/_lib/notice-display';
 import { SummaryPlaceholder, SummaryView } from '@/app/_lib/summary-view';
+import { mailerReady } from '@/lib/mailer-availability';
 
 // 详情数据随抓取管线更新，服务端实时渲染。
 export const dynamic = 'force-dynamic';
@@ -103,6 +104,17 @@ export default async function NoticeDetailPage({ params }: NoticeDetailPageProps
           <p className="click-stats" data-testid="outbound-clicks">
             出站提意点击：{notice.outboundClicks} 次
           </p>
+          {/* 订阅提醒入口（issue #17）：详情页是「想参与」意向最强的时刻；
+              邮件端口未配置时不渲染（不挂必然失败的死流程） */}
+          {mailerReady() ? (
+            <p className="subscribe-hint">
+              不想错过同类公示？
+              <Link href="/subscribe" data-testid="subscribe-detail-link">
+                订阅截止提醒
+              </Link>
+              —— 按关键词或领域，在截止前 7 天、3 天各收一封提醒邮件。
+            </p>
+          ) : null}
         </section>
 
         {notice.attachments.length > 0 ? (

@@ -321,6 +321,18 @@ body {
   color: var(--ink-soft);
 }
 
+/* 详情页订阅提醒入口（issue #17）：紧跟在出站点击统计之后，弱化但不隐形 */
+.subscribe-hint {
+  margin: 10px 0 0;
+  font-size: 13px;
+  color: var(--ink-soft);
+}
+
+.subscribe-hint a {
+  margin: 0 3px;
+  color: var(--accent);
+}
+
 .attachments h2,
 .notice-body h2 {
   font-size: 16px;
@@ -670,6 +682,11 @@ body {
 .site-nav a {
   color: var(--accent);
   text-decoration: none;
+}
+
+/* 导航里可能有多个入口（数据统计 / 订阅提醒），相邻链接留出间距 */
+.site-nav a + a {
+  margin-left: 14px;
 }
 
 .site-nav a:hover {
