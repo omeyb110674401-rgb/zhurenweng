@@ -8,13 +8,15 @@ import { fileURLToPath } from 'node:url';
 import { after, before, describe, it } from 'node:test';
 import { startAppServer } from './helpers/app-server.mjs';
 import { createFixtureServer } from './helpers/fixture-server.mjs';
+import { sourceAdapters } from '../../src/sources/registry.ts';
 
 /**
  * E2E（issue #12）：管理后台与健康告警。
  *
- * 测试装置：只复制 npc 源的 fixture 快照到临时目录 —— moj / mee 两个源
- * 在 fixture 源站上 404，天然构造「部分源失败」的抓取局面：
- *   → 源健康看板展示 npc 健康（有最近成功时间）、moj/mee 异常（有最近错误）；
+ * 测试装置：只复制 npc 源的 fixture 快照到临时目录 —— 注册表里其余源
+ * 在 fixture 源站上 404，天然构造「部分源失败」的抓取局面
+ * （缺失源清单从注册表推导，见 MISSING_SOURCES）：
+ *   → 源健康看板展示 npc 健康（有最近成功时间）、其余源异常（有最近错误）；
  *   → 每个失败源触发告警邮件（stub 经 MAILER_OUTBOX_FILE 捕获），同日重复失败去重；
  *   → stub LLM 注入失败（LLM_STUB_FAILURES=always）→ failed_review 条目出现在
  *     复核队列 → 重置重试（stub 恢复）后摘要自动补齐；或人工编辑摘要直接保存 done；
@@ -33,6 +35,12 @@ const tempFixturesDir = path.join(workDir, 'fixtures');
 
 const ADMIN_TOKEN = 'zw-e2e-admin-token';
 const ALERT_EMAIL = 'ops@zhurenweng.example';
+
+/**
+ * 本场景只复制 npc 源的快照，其余源在 fixture 源站上一律 404 —— 这就是「部分源失败」
+ * 的构造方式。缺失源清单从注册表推导（而不是写死 moj / mee），新增源时本场景无需改动。
+ */
+const MISSING_SOURCES = sourceAdapters.map((adapter) => adapter.id).filter((id) => id !== 'npc');
 
 /** 手动补录条目（标题带唯一标记，供列表 / 检索断言） */
 const MANUAL_TITLE = '城镇供水价格管理办法（试行）（人工补录验证版）征求意见';
@@ -120,7 +128,7 @@ function countAlerts(alerts, jobName, source) {
 }
 
 before(async () => {
-  // 只复制 npc 源 fixture：moj / mee 缺失 → fixture 源站 404 → 抓取失败告警
+  // 只复制 npc 源 fixture：其余源缺失 → fixture 源站 404 → 抓取失败告警
   fs.cpSync(path.join(repoRoot, 'fixtures', 'npc'), path.join(tempFixturesDir, 'npc'), {
     recursive: true,
   });
@@ -211,23 +219,33 @@ describe('issue #12：管理后台与健康告警', () => {
     assert.ok(cookie, '重新登录成功');
   });
 
-  it('失败告警：抓取失败（moj/mee 404）与摘要失败（stub 注入）各触发一封告警邮件', async () => {
+  it('失败告警：抓取失败（缺失 fixture 的源 404）与摘要失败（stub 注入）各触发一封告警邮件', async () => {
     const first = await runWorkerOnce({ LLM_STUB_FAILURES: 'always' });
     assert.equal(first.code, 0, `worker 应正常退出，输出：${first.output}`);
     assert.match(first.output, /源 npc 抓取完成：列表 3 条，新增 3，更新 0/);
-    assert.equal((first.output.match(/源 (moj|mee) 抓取失败/g) ?? []).length, 2, '两个缺失 fixture 的源抓取失败');
+    assert.equal(
+      (first.output.match(/源 \w+ 抓取失败/g) ?? []).length,
+      MISSING_SOURCES.length,
+      `${MISSING_SOURCES.length} 个缺失 fixture 的源抓取失败`,
+    );
     assert.match(first.output, /摘要任务完成：成功 0 条，转人工复核 2 条/);
     assert.match(first.output, /任务失败告警已发送/, '告警发送日志');
 
+    // 每个失败源一封抓取告警 + 摘要任务一封（任务级 × npc 源），同日去重
     const alerts = readOutbox();
-    assert.equal(alerts.length, 3, `应为 3 封告警（crawl×moj、crawl×mee、summarize×npc），实际 ${alerts.length}`);
+    assert.equal(
+      alerts.length,
+      MISSING_SOURCES.length + 1,
+      `应为 ${MISSING_SOURCES.length + 1} 封告警（crawl × 各失败源、summarize × npc），实际 ${alerts.length}`,
+    );
     for (const mail of alerts) {
       assert.equal(mail.to, ALERT_EMAIL, '告警收件人是 ALERT_EMAIL');
       assert.match(mail.subject, /【主人翁】任务失败告警：/);
       assert.match(mail.text, /错误摘要：/, '告警正文含错误摘要');
     }
-    assert.equal(countAlerts(alerts, 'crawl-notices', 'moj'), 1);
-    assert.equal(countAlerts(alerts, 'crawl-notices', 'mee'), 1);
+    for (const id of MISSING_SOURCES) {
+      assert.equal(countAlerts(alerts, 'crawl-notices', id), 1, `源 ${id} 应恰好一封抓取告警`);
+    }
     assert.equal(countAlerts(alerts, 'summarize-notices', 'npc'), 1);
     const crawlAlert = alerts.find((mail) => mail.subject.includes('crawl-notices（源：'));
     assert.match(crawlAlert.text, /HTTP 404/, '告警正文含失败原因');

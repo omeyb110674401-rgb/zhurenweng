@@ -47,17 +47,30 @@ const REDIRECT_PARAM = 'redirected';
  */
 const DATE_TOKEN = /\{\{\s*(CN_)?DATE\s*([+-]\d+)?\s*\}\}/g;
 
+/**
+ * 毫秒时间戳令牌 {{EPOCH±N}}：替换为「当天 00:00 UTC」的毫秒时间戳。
+ * 工业和信息化部列表用隐藏字段 `<span class="endtime">1792339200000</span>`
+ * 承载截止日期（实测该站取当日 00:00 UTC），需要数值型令牌才能既表达相对日期
+ * 又保持适配器的解析路径不变。
+ */
+const EPOCH_TOKEN = /\{\{\s*EPOCH\s*([+-]\d+)?\s*\}\}/g;
+
 /** @param {string} text @param {Date} anchor @returns {string} */
 function substituteDateTokens(text, anchor) {
-  return text.replace(DATE_TOKEN, (_, chinese, offset) => {
-    const date = new Date(anchor.getTime() + Number(offset ?? 0) * 24 * 60 * 60 * 1000);
-    if (chinese) {
-      return `${date.getFullYear()}年${date.getMonth() + 1}月${date.getDate()}日`;
-    }
-    const month = String(date.getMonth() + 1).padStart(2, '0');
-    const day = String(date.getDate()).padStart(2, '0');
-    return `${date.getFullYear()}-${month}-${day}`;
-  });
+  return text
+    .replace(EPOCH_TOKEN, (_, offset) => {
+      const date = new Date(anchor.getTime() + Number(offset ?? 0) * 24 * 60 * 60 * 1000);
+      return String(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
+    })
+    .replace(DATE_TOKEN, (_, chinese, offset) => {
+      const date = new Date(anchor.getTime() + Number(offset ?? 0) * 24 * 60 * 60 * 1000);
+      if (chinese) {
+        return `${date.getFullYear()}年${date.getMonth() + 1}月${date.getDate()}日`;
+      }
+      const month = String(date.getMonth() + 1).padStart(2, '0');
+      const day = String(date.getDate()).padStart(2, '0');
+      return `${date.getFullYear()}-${month}-${day}`;
+    });
 }
 
 /**

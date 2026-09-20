@@ -1,6 +1,6 @@
 import * as cheerio from 'cheerio';
 import type { CheerioAPI } from 'cheerio';
-import type { NoticeAttachment } from '../../db/types.ts';
+import type { NoticeAttachment, NoticeStatus } from '../../db/types.ts';
 import { normalizeDateText } from '../../lib/dates.ts';
 
 /**
@@ -93,27 +93,35 @@ const ATTACHMENT_PATH = /\.(pdf|docx?|wps|xls[xm]?|zip|rar)$/i;
 /**
  * 按扩展名收集附件链接（去重、保序）：名称取链接文本，链接文本为空时退化为文件名。
  * containerSelector 省略时扫描整篇文档。
+ *
+ * 选择器命中多个容器时**逐个扫描**（不是只取第一个）：市场监管总局详情页的附件
+ * 链接在 `ul.contentLeft0102box` 里，而该 class 在页面上出现两次（前一个是空占位、
+ * 后一个才是附件清单）——只取第一个会一个附件都收不到。`seen` 保证跨容器去重。
  */
 export function collectAttachments(
   $: CheerioAPI,
   pageUrl: string,
   containerSelector?: string,
 ): NoticeAttachment[] {
-  const root = containerSelector ? $(containerSelector).first() : $.root();
-  if (root.length === 0) return [];
+  const roots = containerSelector ? $(containerSelector).toArray() : [$.root()[0]];
+  if (roots.length === 0) return [];
 
   const attachments: NoticeAttachment[] = [];
   const seen = new Set<string>();
-  root.find('a[href]').each((_, element) => {
-    const anchor = $(element);
-    const url = resolveUrl(anchor.attr('href') ?? '', pageUrl);
-    if (!url || !ATTACHMENT_PATH.test(new URL(url).pathname)) return;
-    if (seen.has(url)) return;
-    seen.add(url);
-    const name = normalizeWhitespace(anchor.text());
-    const fallbackName = decodeURIComponent(new URL(url).pathname.split('/').pop() ?? url);
-    attachments.push({ name: name.length > 0 ? name : fallbackName, url });
-  });
+  for (const element of roots) {
+    $(element)
+      .find('a[href]')
+      .each((_, anchorElement) => {
+        const anchor = $(anchorElement);
+        const url = resolveUrl(anchor.attr('href') ?? '', pageUrl);
+        if (!url || !ATTACHMENT_PATH.test(new URL(url).pathname)) return;
+        if (seen.has(url)) return;
+        seen.add(url);
+        const name = normalizeWhitespace(anchor.text());
+        const fallbackName = decodeURIComponent(new URL(url).pathname.split('/').pop() ?? url);
+        attachments.push({ name: name.length > 0 ? name : fallbackName, url });
+      });
+  }
   return attachments;
 }
 
@@ -145,6 +153,80 @@ export function extractDeadline(bodyText: string | undefined): string | null {
     }
   }
   return null;
+}
+
+/**
+ * 源列表自带的状态标注 → 条目状态。
+ *
+ * 多个部委栏目直接在标题或状态列里给出权威状态，写法实测三种：
+ * 交通运输部 `[进行中]` / `[已结束]`、教育部 `[已结束]`、市场监管总局 `(进行中)`、
+ * 国家发展改革委 `【进行中】`。两侧括号形式不一，这里统一剥离后再认词。
+ * 未标注或词不在表内时返回 undefined（调用方退回截止日期推导）。
+ */
+const STATUS_WORD: Record<string, NoticeStatus> = {
+  进行中: 'open',
+  征集中: 'open',
+  已结束: 'closed',
+  已截止: 'closed',
+};
+
+/** 状态词的可选分支（正则源码片段，见下方 STATUS_MARKER 的构造方式）。 */
+const STATUS_ALTERNATION = Object.keys(STATUS_WORD).join('|');
+
+export function parseStatusText(text: string): NoticeStatus | undefined {
+  const word = normalizeWhitespace(text).replace(/^[【[(（\s]+|[】\])）\s]+$/g, '');
+  return STATUS_WORD[word];
+}
+
+/**
+ * 标题里的状态标注：剥离并返回状态（`[已结束]教育部关于…` → closed + `教育部关于…`）。
+ *
+ * 标注位置实测两种：**前缀**（教育部、交通运输部）与**后缀**（国家发展改革委
+ * `…意见的公告[已结束]`），故两端都试。只在括号紧贴词、且位于标题首/尾时剥离，
+ * 避免误伤标题正文里出现的括号内容（如《办法（试行）》）。
+ * 未标注时 status 为 undefined、text 原样返回。
+ *
+ * 与 agencyFromTitle 同理，这里用 `new RegExp` 构造而**不写正则字面量**：本文件里
+ * 含全角括号的字符类字面量（`/^[【[(（]…/`）会让 Node 的类型擦除解析器误判，
+ * 在几十行之外报 ERR_INVALID_TYPESCRIPT_SYNTAX（见文件内 agencyFromTitle 的说明）。
+ */
+const OPEN_BRACKETS = '【\\[（(';
+const CLOSE_BRACKETS = '】\\]）)';
+// 第 1 捕获组 = 标注本体（不含分隔符），交给 parseStatusText 认词
+const STATUS_MARKER = new RegExp(
+  `^([${OPEN_BRACKETS}]\\s*(?:${STATUS_ALTERNATION})\\s*[${CLOSE_BRACKETS}])\\s*[-—－]?\\s*`,
+);
+const STATUS_MARKER_TAIL = new RegExp(
+  `\\s*([${OPEN_BRACKETS}]\\s*(?:${STATUS_ALTERNATION})\\s*[${CLOSE_BRACKETS}])$`,
+);
+
+export function stripStatusMarker(title: string): { status?: NoticeStatus; text: string } {
+  const text = normalizeWhitespace(title);
+  const head = STATUS_MARKER.exec(text);
+  if (head) {
+    return { status: parseStatusText(head[1]), text: text.slice(head[0].length).trim() };
+  }
+  const tail = STATUS_MARKER_TAIL.exec(text);
+  if (tail) {
+    return { status: parseStatusText(tail[1]), text: text.slice(0, tail.index).trim() };
+  }
+  return { text };
+}
+
+/**
+ * 毫秒时间戳 → ISO 日期（YYYY-MM-DD，UTC）。
+ *
+ * 工业和信息化部列表项用隐藏字段 `<span class="endtime">1792339200000</span>`
+ * 承载截止日期（实测该值与详情正文「请于2026年10月14日前反馈意见」完全一致）。
+ * 该站时间戳取当日 00:00 UTC，UTC 与东八区落在同一日期，故按 UTC 切日即可。
+ */
+export function epochMsToIsoDate(value: string | undefined): string | null {
+  if (!value) return null;
+  const ms = Number(normalizeWhitespace(value));
+  if (!Number.isFinite(ms) || ms <= 0) return null;
+  const date = new Date(ms);
+  if (Number.isNaN(date.getTime())) return null;
+  return date.toISOString().slice(0, 10);
 }
 
 /**

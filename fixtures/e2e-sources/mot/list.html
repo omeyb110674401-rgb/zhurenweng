@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <title>意见征集-互动-中华人民共和国交通运输部</title>
+  </head>
+  <body>
+    <!--
+      fixture 快照：交通运输部「意见征集」列表页（真实结构，2026-09-20 实抓后裁剪）。
+      真实来源：https://www.mot.gov.cn/hudong/yijianzhengji/index.html
+      结构要点：<ul class="news-list"><li class="news-item"><a class="news-link"> 内含
+      <span class="news-title"><span class="statusX">[进行中]</span> - 标题</span> 与
+      <span class="news-date">2026-09-07</span>。**状态标注是本源的真实列表判据**：
+      状态位为空的两类内容（答记者问、公开征求意见反馈情况）不是征求意见条目，被适配器过滤。
+      真实列表里条目链接跨域混排（民航局 / 铁路局站点用绝对地址）；快照里改为
+      fixture 源站内的相对路径（E2E 不访问真实站点，ADR-0001），并保留「模板不同」
+      这一关键事实（见 foreign/caac-t20260908.html）。列表快照位于 <源根>/list.html
+      （真实页面在 /hudong/yijianzhengji/ 下），故 href 从源根起用相对路径书写。
+      本文件含两条**场景合成**条目（真实列表里没有对应条目，见下），其余为真实条目：
+      ① foreign/caac-…：跨域条目，详情页是别的站点模板 → 状态退回源标注；
+      ② t20260910_4299999：标注 [进行中] 但详情截止日期已过 → 锁定「截止日期优先于源标注」。
+      截止日期在详情页正文（「意见反馈截止日期为…」），用 {{CN_DATE±N}} 令牌。
+    -->
+    <section class="news-list-section">
+      <div class="news-list-block">
+        <ul class="news-list">
+      <li class="news-item">
+        <a href="hudong/yijianzhengji/202609/t20260903_4223746.html" target="_blank" class="news-link">
+          <span class="news-title"><span class="statusX">[进行中]</span> - 关于《中华人民共和国公路法（修正草案征求意见稿）》公开征求意见的通知</span>
+          <span class="news-date">2026-09-07</span>
+        </a>
+      </li>
+      <li class="news-item">
+        <a href="hudong/yijianzhengji/202607/t20260730_4210791.html" target="_blank" class="news-link">
+          <span class="news-title"><span class="statusX">[已结束]</span> - 交通运输部关于《公路建设项目可行性研究报告编制办法（征求意见稿）》公开征求意见的通知</span>
+          <span class="news-date">2026-07-30</span>
+        </a>
+      </li>
+      <li class="news-item">
+        <a href="hudong/yijianzhengji/202607/t20260727_4210542.html" target="_blank" class="news-link">
+          <span class="news-title"><span class="statusX">[已结束]</span> - 交通运输部关于公开征求《关于修改〈中华人民共和国船舶油污损害民事责任保险实施办法〉的决定（征求意见稿）》 意见的通知</span>
+          <span class="news-date">2026-07-27</span>
+        </a>
+      </li>
+      <li class="news-item">
+        <a href="hudong/yijianzhengji/202604/t20260401_4202868.html" target="_blank" class="news-link">
+          <span class="news-title"><span class="statusX"></span> - 关于《交通运输重大项目后评价管理办法（征求意见稿）》公开征求意见反馈情况</span>
+          <span class="news-date">2026-04-01</span>
+        </a>
+      </li>
+      <li class="news-item">
+        <a href="foreign/caac-t20260908.html" target="_blank" class="news-link">
+          <span class="news-title"><span class="statusX">[进行中]</span> - 中国民航局关于《运输机场运营许可规定（征求意见稿）》公开征求意见的通知</span>
+          <span class="news-date">2026-09-09</span>
+        </a>
+      </li>
+      <li class="news-item">
+        <a href="hudong/yijianzhengji/202609/t20260910_4299999.html" target="_blank" class="news-link">
+          <span class="news-title"><span class="statusX">[进行中]</span> - 关于《公路水运工程安全生产监督管理办法（修订征求意见稿）》公开征求意见的通知</span>
+          <span class="news-date">2026-09-10</span>
+        </a>
+      </li>
+        </ul>
+      </div>
+    </section>
+  </body>
+</html>

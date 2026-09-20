@@ -74,10 +74,24 @@ export function resolveListUrl(adapter: SourceAdapter): string {
  * 实现见 src/lib/notice-id.ts（与手动补录共用）。
  */
 
-/** 状态推导：截止日期早于今天 → 已截止；无截止日期默认征求意见中。 */
-function deriveStatus(deadlineAt: string | null, now: Date): NoticeStatus {
-  if (!deadlineAt) return 'open';
-  return deadlineAt < localDateIso(now) ? 'closed' : 'open';
+/**
+ * 状态推导，按可信度取三级：
+ * 1. **截止日期**（最精确的事实）：早于今天 → 已截止，否则征求意见中；
+ * 2. **源自身标注**（issue #18）：交通运输部 / 教育部 / 市场监管总局等栏目直接在
+ *    标题或状态列标注「进行中 / 已结束」，截止日期解析不到时采用它 ——
+ *    比默认「征求意见中」准确（否则跨域的民航局条目、详情缺截止句的条目
+ *    会全部被误判为进行中）；
+ * 3. 兜底「征求意见中」（与 M1 行为一致）。
+ *
+ * 截止日期优先于源标注：源标注是抓取时刻的快照，日期是事实，两者冲突时以日期为准。
+ */
+function deriveStatus(
+  deadlineAt: string | null,
+  adapterStatus: NoticeStatus | undefined,
+  now: Date,
+): NoticeStatus {
+  if (deadlineAt) return deadlineAt < localDateIso(now) ? 'closed' : 'open';
+  return adapterStatus ?? 'open';
 }
 
 function mergeDetail(notice: NormalizedNotice, detail: ParsedDetail): NormalizedNotice {
@@ -90,6 +104,7 @@ function mergeDetail(notice: NormalizedNotice, detail: ParsedDetail): Normalized
     bodyText: detail.bodyText ?? notice.bodyText,
     attachments: detail.attachments ?? notice.attachments,
     categoryTags: detail.categoryTags ?? notice.categoryTags,
+    status: detail.status ?? notice.status,
   };
 }
 
@@ -226,7 +241,7 @@ export const crawlNoticesJob: Job = {
             url: normalized.url,
             publishedAt: normalized.publishedAt,
             deadlineAt: normalized.deadlineAt,
-            status: deriveStatus(normalized.deadlineAt, now),
+            status: deriveStatus(normalized.deadlineAt, normalized.status, now),
             // 领域标签（issue #9）：适配器规则优先（NormalizedNotice.categoryTags），
             // 未提供时不传 —— 入库路径按关键词规则自动打标（与手动补录单一入口）
             categoryTags: normalized.categoryTags,

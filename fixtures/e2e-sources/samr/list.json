@@ -1,0 +1,12 @@
+{
+  "_snapshot": {
+    "source": "https://www.samr.gov.cn/api-gateway/jpaas-publish-server/front/page/build/unit?parseType=bulidstatic&webId=29e9522dc89d4e088a953d8cede72f4c&tplSetId=5c30fb89ae5e48b9aefe3cdf49853830&pageType=column&tagId=%E5%86%85%E5%AE%B9%E5%8C%BA%E5%9F%9F&editType=null&pageId=b00644872e354a96b66e3cd954e9996f",
+    "capturedAt": "2026-09-20",
+    "note": "真实接口响应裁剪：只保留 5 条列表行（原 21 条），去掉检索表单与内联样式；征集期换成日期令牌"
+  },
+  "code": "200",
+  "success": true,
+  "data": {
+    "html": "<div class=\"page-content\"><ul class=\"Three_zhnlist_02\"><li class=\"zjnav04Left02_content\">\n\t\t\t  <div class=\"doctitle\"><a href=\"hd/zjdc/art/2026/art_7690dba6fb90477cae8299c67f7966d9.html\" target=\"_blank\" title=\"市场监管总局关于公开征求《关于出口\n转内销产品强制性产品认证便利化试点的通知\n（征求意见稿）》意见的通知\">市场监管总局关于公开征求《关于出口转内销产品强制性产品认证便利化试点的通知（征求意见稿）》意见的通知</a></div>\n\t\t\t  <div class=\"doctime tim\">{{DATE-3}}至{{DATE+27}}</div>\n\t\t\t  <div class=\"docstatus stu\">(进行中)</div>\n\t\t\t</li>\n<li class=\"zjnav04Left02_content\">\n\t\t\t  <div class=\"doctitle\"><a href=\"hd/zjdc/art/2026/art_52ab04656e214654b6255ef099d6bc01.html\" target=\"_blank\" title=\"市场监管总局关于公开征求《国家标准外文版管理办法（征求意见稿）》意见的通知\">市场监管总局关于公开征求《国家标准外文版管理办法（征求意见稿）》意见的通知</a></div>\n\t\t\t  <div class=\"doctime tim\">{{DATE-11}}至{{DATE+20}}</div>\n\t\t\t  <div class=\"docstatus stu\">(进行中)</div>\n\t\t\t</li>\n<li class=\"zjnav04Left02_content\">\n\t\t\t  <div class=\"doctitle\"><a href=\"hd/zjdc/art/2026/art_fa9c0ba512ff4d8790aff5abd4c3ef65.html\" target=\"_blank\" title=\"市场监管总局特种设备局关于《电梯安全技术规程\n（征求意见稿）》再次公开征求意见的公告\">市场监管总局特种设备局关于《电梯安全技术规程（征求意见稿）》再次公开征求意见的公告</a></div>\n\t\t\t  <div class=\"doctime tim\">{{DATE-23}}至{{DATE+7}}</div>\n\t\t\t  <div class=\"docstatus stu\">(进行中)</div>\n\t\t\t</li>\n<li class=\"zjnav04Left02_content\">\n\t\t\t  <div class=\"doctitle\"><a href=\"hd/zjdc/art/2026/art_68686f054fe043b6b62c21f50e230b79.html\" target=\"_blank\" title=\"市场监管总局关于公开征求《网络交易小程序平台合规指引（征求意见稿）》意见的公告\">市场监管总局关于公开征求《网络交易小程序平台合规指引（征求意见稿）》意见的公告</a></div>\n\t\t\t  <div class=\"doctime tim\">{{DATE-19}}至{{DATE-12}}</div>\n\t\t\t  <div class=\"docstatus stu\">(已结束)</div>\n\t\t\t</li>\n<li class=\"zjnav04Left02_content\">\n\t\t\t  <div class=\"doctitle\"><a href=\"hd/zjdc/art/2026/art_9229ca8fad4f4df5b65af58ff2bdb025.html\" target=\"_blank\" title=\"市场监管总局关于公开征求《国际单位制及其应用（征求意见稿）》意见的公告\">市场监管总局关于公开征求《国际单位制及其应用（征求意见稿）》意见的公告</a></div>\n\t\t\t  <div class=\"doctime tim\">{{DATE-39}}至{{DATE-7}}</div>\n\t\t\t  <div class=\"docstatus stu\">(已结束)</div>\n\t\t\t</li></ul></div>"
+  }
+}

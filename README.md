@@ -101,6 +101,11 @@ npm test               # 等价命令：依次跑上面两层
   零改动）：三源条目并存于聚合列表且按截止日期全局排序互不串扰、各源详情字段
   独立解析，同一原文 URL 出现在两个源列表时按原文 URL 唯一键去重只入库一条，
   重复抓取幂等。
+- **issue #18 M2 扩源场景**（`tests/e2e/sources-expansion.test.mjs`）：交通运输部 /
+  市场监管总局 / 工业和信息化部 / 教育部四源（`fixtures/e2e-sources/`）—— 覆盖
+  「接口列表自带征集期」「隐藏字段毫秒时间戳截止日期」「静态列表状态标注」
+  「标题取 title 属性」四类接入形态，并锁定状态推导次序（截止日期优先于源标注、
+  解析不到时退回源标注）与栏目内非征求意见条目（答记者问 / 结果反馈）的过滤。
 - **issue #7 邮件订阅与截止提醒场景**（`tests/e2e/deadline-reminders.test.mjs`）：
   `/subscribe` 表单校验 → double opt-in 确认邮件（outbox 断言）→ 未确认时
   触发提醒任务不发送 → 确认后触发：截止前 7 天 / 3 天各一封，内容含标题、
@@ -366,18 +371,32 @@ worker 注册表中的 `summarize-notices` 任务（`worker/jobs/summarize-notic
   同一天同一源同一任务类型只发一封，worker 重启后依然有效；邮件发送失败不落
   去重标记，下一轮任务再失败时重试发送。
 
-## 接入的源（issue #14：三个源均对着活站校准）
+## 接入的源（issue #14 三源 + issue #18 扩至七源，均对着活站校准）
 
 | 源 ID | 栏目与真实列表地址 | 传输处置 | 列表 / 详情结构要点 |
 | --- | --- | --- | --- |
 | `npc` | 全国人大网「法律草案征求意见」<br>`http://www.npc.gov.cn/flcaw/flca-list?flag=0&type=0&page=1&per_page=100` | **只能用 http**：`www.npc.gov.cn` 的 HTTPS 在 TLS 握手阶段即被拒（`sslv3 alert handshake failure`；换 TLS1.2 / 降 SECLEVEL / `--insecure` 均无效，**不是证书链问题**）。风险：明文传输；缓解：只读官方公开信息、不带凭据、不下载附件 | 列表与正文都是 JSON 接口（页面为前端渲染）；正文取自 `/flcaw/flca/<id>/info/`，用户可见链接仍是 `userIndex.html?lid=<id>`；接口不提供发布机关与附件 |
 | `moj` | 司法部「立法意见征集」<br>`https://www.moj.gov.cn/pub/sfbgw/lfyjzj/lflfyjzj/` | **WAF cookie 挑战**：首包 302 + `Set-Cookie`（CT6T/CT6TS）且 Location 指回同一地址，需带 cookie 重放一次才 200（抓取层 `fetch.cookieChallenge`，仅本源生效） | 列表 `ul.newsMsgList_zzy > li`（标题被截断，完整标题取自详情 `h1`）；发布日期在 `.sT`；截止日期只在正文句「征求意见时间为 X 至 Y」；机关取自标题前缀（详情页无发布机关行） |
 | `mee` | 生态环境部「意见征集」<br>`https://www.mee.gov.cn/hdjl/yjzj/` | 无特殊要求（爬虫 UA 直接 200） | 列表 `li > a + span.date`，链接混用栏目内相对路径与 `../../xxgk2018/…` 跨目录相对路径；详情两套模板（栏目内页 `h2.neiright_Title`，政府信息公开页 `h1` + 「发布机关」字段）；截止日期在正文句；附件是正文内的相对 `.pdf` 链接 |
+| `mot` | 交通运输部「意见征集」<br>`https://www.mot.gov.cn/hudong/yijianzhengji/index.html` | 无特殊要求（静态 HTML） | 列表 `ul.news-list li.news-item > a.news-link`，状态标注 `[进行中]/[已结束]` 是真实列表判据（状态位为空的是混入的答记者问 / 反馈情况，被过滤）；条目链接跨域混排（民航局 / 铁路局站点，其详情页不属本源模板 → 保留列表层字段）；截止日期在详情正文「意见反馈截止日期为…」 |
+| `samr` | 市场监管总局「征集调查」<br>`https://www.samr.gov.cn/hd/zjdc/` | 无特殊要求；列表是站内 TRS jpaas 接口<br>`/api-gateway/jpaas-publish-server/front/page/build/unit`（GET + queryData，返回 `{data:{html}}` 片段） | 列表行自带**征集期**（`2026-09-17至2026-10-17`）与状态列 —— 起作发布日期、止作截止日期（多数详情正文没有截止句）；正文 `.Three_xilan_07`；附件不在正文里，在「附件下载」清单 `ul.contentLeft0102box`（该 class 出现两次，前一个是空占位） |
+| `miit` | 工业和信息化部「意见征集」<br>`https://www.miit.gov.cn/gzcy/yjzj/` | 无特殊要求；列表同上 TRS jpaas 接口（参数不同） | 截止日期在列表隐藏字段 `span.endtime` 的**毫秒时间戳**（与详情正文「请于…前反馈意见」互为印证）；正文 `#con_con`；附件是正文内的 pdf 链接；标题多为「关于公开征求…的公示」，机关兜底为部本级 |
+| `moe` | 教育部「征求意见」<br>`http://www.moe.gov.cn/jyb_xwfb/s248/` | 无特殊要求（静态 HTML） | 列表 `#list li`，**标题必须取 `title` 属性**（联合发布条目的链接文本被截断）；状态标注在标题前缀；正文 `.moe-detail-box .TRS_Editor`（页面尾部的 `#detail-editor` 只是「责任编辑」一行，不是正文）。**该栏目自 2024-02 起未再更新**（历史归档，52 条全部已截止），接入理由见适配器文件头 |
 
 第三源为何不是中国政府网：原 `govcn`（中国政府网「政策 → 意见征集」）实测**已下线**
 （`/zhengce/yjzj/**` 全 404；政策频道仅剩最新政策 / 国务院公报 / 政策解读 / 图解政策，
 政策文件库路径对爬虫一律 403）。本产品承诺「聚合征求意见稿 + 截止提醒」，故换用真实
 在运营、可抓取且含截止日期的部委征求意见栏目（issue #14）。
+
+PRD M2 的「部委直爬源扩展至 8 个」当前为 **7 个**，第 8 个（国家发展改革委）已评估但
+未接入，原因与实测依据写在 `src/sources/registry.ts` 的注册表注释里（正文在
+`sa.html#/<key>` 前端渲染页之后，需经 access-url 接口 → article.html → 正文接口三跳，
+现有 `detailContentUrl` 契约表达不了；且列表页不含截止日期）。国家网信办首页无
+「征求意见」栏目入口、常见候选路径全 404，同样未接入。
+
+**状态推导次序**（issue #18）：截止日期是事实、优先；解析不到时采用源自身标注
+（`NormalizedNotice.status`，来自列表的状态列 / 标题标注）；都取不到才兜底「征求意见中」。
+否则跨域条目与详情缺截止句的条目会被误判为进行中。
 
 抓取礼貌性：详情请求之间固定间隔 400ms（`worker/jobs/crawl-notices.ts` 的
 `DETAIL_FETCH_INTERVAL_MS`），避免政府站点 WAF 限流封 IP。

@@ -38,6 +38,22 @@ fixtures/
     npc/                     #   发布与截止日期全用令牌 —— 公示期差值恒定，发布月份
     moj/                     #   恒落在最近 6 个月窗口）
     mee/
+  e2e-sources/               # issue #18 M2 扩源场景专用（四个新源，独立成 fixture 根目录）
+    samr/                    #   市场监管总局「征集调查」：list.json = TRS jpaas 接口响应，
+      list.json              #   列表行自带征集期（{{DATE±N}}）与状态列 (进行中)/(已结束)
+      hd/zjdc/art/2026/*.html      # 详情：.Three_xilan_07 正文 + 附件清单 ul.contentLeft0102box
+    miit/                    #   工业和信息化部「意见征集」：list.json 同上（参数不同），
+      list.json              #   截止日期在隐藏字段 span.endtime（{{EPOCH±N}} 毫秒时间戳令牌）
+      gzcy/yjzj/art/2026/*.html    # 详情：#con_con 正文（含 pdf 附件链接）
+    mot/                     #   交通运输部「意见征集」：list.html 静态列表，状态标注
+      list.html              #   [进行中]/[已结束] 是列表判据；含两条场景合成条目
+                             #   （跨域条目、标注与截止日期冲突条目）与一条被过滤的
+                             #   非征求意见条目（反馈情况）—— 详见 list.html 内注释
+      hudong/yijianzhengji/*/*.html
+      foreign/caac-t20260908.html  # 跨域条目指向的「其它站点模板」详情页（解析不到正文）
+    moe/                     #   教育部「征求意见」：list.html 静态列表，标题取 title 属性
+      list.html              #   （联合发布条目的链接文本被截断）；历史归档，不用令牌
+      jyb_xwfb/s248/*/*.html
 ```
 
 ## 快照命名与路径约定
@@ -68,7 +84,9 @@ fixtures/
 
 ## 日期令牌（fixture 源站服务时替换）
 
-快照中的 `{{CN_DATE±N}}`（→ `YYYY年M月D日`）与 `{{DATE±N}}`（→ `YYYY-MM-DD`）
+快照中的 `{{CN_DATE±N}}`（→ `YYYY年M月D日`）、`{{DATE±N}}`（→ `YYYY-MM-DD`）与
+`{{EPOCH±N}}`（→ 当天 00:00 UTC 的**毫秒时间戳**，供工业和信息化部列表的
+`span.endtime` 隐藏字段使用）
 由本地 fixture 源站（`tests/e2e/helpers/fixture-server.mjs`）在**每次 start() 时
 锚定当天日期**替换为具体日期。截止日期等影响状态与倒计时断言的字段一律用令牌，
 保证「征求意见中 / 已截止」的判定与「剩 N 天」的断言不随测试运行日期衰减；
@@ -88,6 +106,14 @@ fixtures/
 快照只保留结构与关键文本（可脱敏、可截断），并在文件头注释 / `_snapshot`
 标注来源与快照日期。E2E 运行期间 fixture 由本地 HTTP 服务提供，不访问真实源站。
 附件文件本体不随快照提供（下载链接指向 fixture 源站会 404，仅断言其展示）。
+
+抓回真实页面并裁剪的过程可复现：`node scripts/capture-m2-fixtures.mjs [源ID…]`
+（一次性脚本，只在更新快照时手动跑；需要联网访问真实政府站点）。它保留了
+「真实选择器在快照里仍然命中」这一约束 —— 例如教育部详情要保留 `.moe-detail-box`
+容器**本体**而不是它的后代，否则祖先 class 丢失、快照就测不到适配器用的后代选择器。
+另注意：列表快照里的 href 要写成**相对源根的相对路径**（真实页面可能是站内绝对路径
+`/hd/zjdc/…` 或 `./202609/…`），使「相对列表地址解析」在 fixture 源站内落位；
+真实形态写在快照注释里。
 
 ## 本地预览
 

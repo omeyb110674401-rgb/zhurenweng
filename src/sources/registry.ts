@@ -1,7 +1,11 @@
-import type { NoticeAttachment } from '../db/types.ts';
+import type { NoticeAttachment, NoticeStatus } from '../db/types.ts';
 import { meeAdapter } from './adapters/mee.ts';
+import { miitAdapter } from './adapters/miit.ts';
+import { moeAdapter } from './adapters/moe.ts';
 import { mojAdapter } from './adapters/moj.ts';
+import { motAdapter } from './adapters/mot.ts';
 import { npcLawDraftsAdapter } from './adapters/npc.ts';
+import { samrAdapter } from './adapters/samr.ts';
 
 /**
  * 源适配器注册表 —— 数据接入的唯一扩展点（PRD「源与适配器」）。
@@ -32,6 +36,13 @@ export interface NormalizedNotice {
    * （src/lib/categories.ts 的 deriveCategoryTags，抓取与手动补录共用）。
    */
   categoryTags?: string[];
+  /**
+   * 源自身标注的条目状态（可选）：多个部委栏目直接在标题或状态列里标注
+   * 「进行中 / 已结束」（交通运输部 [进行中]、教育部 [已结束]、市场监管总局
+   * 「(进行中)」），这是源给出的权威状态。抓取管线只在**截止日期解析不到**时
+   * 采用它（截止日期是更精确的事实，见 crawl-notices 的 deriveStatus）。
+   */
+  status?: NoticeStatus;
 }
 
 /** 详情页解析结果：与列表层数据按字段合并（只覆盖解析出值的字段）。 */
@@ -44,6 +55,8 @@ export interface ParsedDetail {
   attachments?: NoticeAttachment[];
   /** 适配器已知领域标签（可选，见 NormalizedNotice.categoryTags） */
   categoryTags?: string[];
+  /** 源自身标注的条目状态（可选，见 NormalizedNotice.status） */
+  status?: NoticeStatus;
 }
 
 /**
@@ -89,9 +102,35 @@ export interface SourceAdapter {
   detailContentUrl?(notice: NormalizedNotice): string | null;
 }
 
-/** 注册表：所有源适配器在此登记，调度器按此数组驱动。 */
+/**
+ * 注册表：所有源适配器在此登记，调度器按此数组驱动。
+ *
+ * 当前 7 个源（PRD M2 要求部委直爬源扩至 8 个，第 8 个见下方「已评估但未接入」）：
+ * 全国人大 / 司法部 / 生态环境部（M1 三源）+ 交通运输部 / 市场监管总局 /
+ * 工业和信息化部 / 教育部（M2 扩源）。
+ *
+ * ## 已评估但未接入的源（附实测依据，避免后人重复踩）
+ *
+ * - **国家发展改革委**（`https://www.ndrc.gov.cn/hdjl/yjzq/`，栏目在运营、条目真实）：
+ *   列表项链接全部是前端渲染页 `https://yyglxxbsgw.ndrc.gov.cn/sa.html#/<shortKey>`，
+ *   正文要经**三跳**才能拿到：① `GET /public/submission-service/article/access-url?shortKey=<k>`
+ *   返回 `{"data":"…/htmls/article/article.html?articleId=<uuid>"}`；② 该 article.html
+ *   仍是空壳（`<h2></h2>`，正文由脚本填充）；③ 再用 articleId 取正文接口。
+ *   现有适配器契约里 `detailContentUrl` 是同步单跳、且由抓取层负责请求，
+ *   表达不了「先解析再请求」的链式跳转；且列表页**不含截止日期**（只有
+ *   【进行中】/【已结束】标注），硬接会得到没有正文、没有截止日期的空条目。
+ *   接入前需要给契约加一个「异步解析详情地址」的钩子（并让该跳转同样支持
+ *   fixture 重写），属独立改动。
+ * - **国家网信办**（www.cac.gov.cn）：首页导航无「征求意见」栏目入口，
+ *   常见候选路径（/zcfg/、/xxfb/、/hdjl/yjzj/ 等）实测均 404。
+ * - **中国政府网「意见征集」**：栏目已下线（见 mee.ts 文件头的实测记录）。
+ */
 export const sourceAdapters: SourceAdapter[] = [
   npcLawDraftsAdapter,
   mojAdapter,
   meeAdapter,
+  motAdapter,
+  samrAdapter,
+  miitAdapter,
+  moeAdapter,
 ];

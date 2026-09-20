@@ -1,0 +1,12 @@
+{
+  "_snapshot": {
+    "source": "https://www.miit.gov.cn/api-gateway/jpaas-publish-server/front/page/build/unit?parseType=buildstatic&webId=8d828e408d90447786ddbe128d495e9e&tplSetId=209741b2109044b5b7695700b2bec37e&pageType=column&tagId=%E5%8F%B3%E4%BE%A7%E5%86%85%E5%AE%B9&editType=null&pageId=ff3aac0962cb45e48e8e4da69450e847",
+    "capturedAt": "2026-09-20",
+    "note": "真实接口响应裁剪：只保留 4 条列表行（原 24 条），去掉检索表单与内联样式；endtime 时间戳换成 {{EPOCH±N}} 令牌"
+  },
+  "code": "200",
+  "success": true,
+  "data": {
+    "html": "<div class=\"clist_con\"><ul><li>\n\t\t\t<span class=\"fr\">2026-09-20</span>\n\t\t\t<a href=\"gzcy/yjzj/art/2026/art_03d6631242cd45c5bef6e8d62571beff.html\" target=\"_blank\" title=\"公开征求《氢能装备（碱性水电解制氢装备）制造行业规范条件（2026年本）（征求意见稿）》的意见\"><i></i><font></font>公开征求《氢能装备（碱性水电解制氢装备）制造行业规范条件（2026年本）（征求意见稿）》的意见</a>\n\t\t\t\n\t\t\t<span class=\"endtime\" style=\"display:none !important;\">{{EPOCH+27}}</span>\n\t\t</li>\n<li>\n\t\t\t<span class=\"fr\">2026-09-14</span>\n\t\t\t<a href=\"gzcy/yjzj/art/2026/art_ebc8c235df1b4582bcbdb5b54a1d0125.html\" target=\"_blank\" title=\"公开征求对《中华人民共和国无线电频率划分规定（征求意见稿）》的意见\"><i></i><font></font>公开征求对《中华人民共和国无线电频率划分规定（征求意见稿）》的意见</a>\n\t\t\t\n\t\t\t<span class=\"endtime\" style=\"display:none !important;\">{{EPOCH+24}}</span>\n\t\t</li>\n<li>\n\t\t\t<span class=\"fr\">2026-09-11</span>\n\t\t\t<a href=\"gzcy/yjzj/art/2026/art_8f612a418b71457e9cc49b424cc01937.html\" target=\"_blank\" title=\"关于公开征求《面向车联网应用的算力网络安全指南》等89项通信行业标准报批意见的公示\"><i></i><font></font>关于公开征求《面向车联网应用的算力网络安全指南》等89项通信行业标准报批意见的公示</a>\n\t\t\t\n\t\t\t<span class=\"endtime\" style=\"display:none !important;\">{{EPOCH+21}}</span>\n\t\t</li>\n<li>\n\t\t\t<span class=\"fr\">2026-09-04</span>\n\t\t\t<a href=\"gzcy/yjzj/art/2026/art_3c2e4c31f3174237ba8575b3d8a8745d.html\" target=\"_blank\" title=\"关于公开征求《饲料加工机械卫生规范》等14项强制性国家标准制修订计划项目意见的公示\"><i></i><font></font>关于公开征求《饲料加工机械卫生规范》等14项强制性国家标准制修订计划项目意见的公示</a>\n\t\t\t\n\t\t\t<span class=\"endtime\" style=\"display:none !important;\">{{EPOCH-10}}</span>\n\t\t</li></ul></div>"
+  }
+}
