@@ -12,8 +12,10 @@
 - **Worker**：与 web 同仓的 Node 后台任务进程（`worker/`），任务经注册表调度
 - **数据访问**：Drizzle ORM，双方言（开发 / 测试 = SQLite 文件库，生产 = PostgreSQL）；
   SQL 只用双方言交集子集，JSON 一律存 TEXT 列
-- **测试**：node:test + 原生 fetch 的端到端管线缝（本地 fixture 源站 + stub LLM / stub 邮件），
-  `npm run e2e` 一条命令跑通，**不依赖 Docker 与任何外部服务**
+- **测试**：node:test 两层 —— 单元层（`npm run test:unit`，规则表等纯函数，Node 原生
+  类型擦除直接 import TS，无需构建）与端到端层（`npm run e2e`：`next build` + 本地
+  fixture 源站 + stub LLM / stub 邮件，从 HTTP 层驱动真实管线缝）；`npm test` 依次
+  跑两层，**不依赖 Docker 与任何外部服务**
 
 ## 目录结构
 
@@ -70,10 +72,12 @@ npm run fixtures   # 终端 1：本地 fixture 源站 http://127.0.0.1:4170
 SOURCES_FIXTURE_BASE=http://127.0.0.1:4170 WORKER_ONCE=1 npm run worker   # 终端 2：单轮抓取
 ```
 
-## 运行端到端测试
+## 运行测试
 
 ```bash
-npm run e2e            # 等价命令：npm test
+npm run test:unit      # 单元层：规则表等纯函数，秒级，无需构建
+npm run e2e            # 端到端层：next build + 进程内生产应用 + fixture 源站
+npm test               # 等价命令：依次跑上面两层
 ```
 
 一条命令完成：`next build` → node:test 启动**进程内生产模式应用**（随机端口）+
@@ -239,7 +243,10 @@ worker 注册表中的 `summarize-notices` 任务（`worker/jobs/summarize-notic
   一组关键词，命中条目标题或正文即打上该领域标签；多领域同时命中则多标签，
   无任何命中则不打标签（不设「其他」兜底，未打标条目仍出现在未筛选列表、
   检索与 RSS 中）。词表刻意避开「司法部」「邮政编码」「科技与法制司」这类
-  机关名 / 高频泛词（详见该文件模块注释），宁缺勿滥。
+  机关名 / 高频泛词（详见该文件模块注释），宁缺勿滥；词表避不开的机关名与
+  专有名词由**排除语境**兜底（`KEYWORD_CONTEXT_EXCLUSIONS`：真实数据里
+  「国家法律法规数据库」的「数据」、「工业和信息化部」的「信息化」都不算
+  命中，裸词仍命中）。法案 / 条例草案按「草案」标记进「立法与司法」。
 - **单一打标入口**：`upsertNotice` 在调用方未提供 `categoryTags` 时按关键词
   规则自动打标（更新路径同样按最新标题 / 正文重算）——抓取管线与后台手动
   补录（issue #12）共用该入口，任何写入方零改动即获得打标；适配器可经
@@ -260,8 +267,11 @@ worker 注册表中的 `summarize-notices` 任务（`worker/jobs/summarize-notic
   列表（征求意见中在前、截止日期升序）的同序子序列。仓库层新增
   `listNoticesFiltered` / `listNoticeAgencies`（`src/db/repo/notices.ts`），
   排序表达式与 `listNotices` 共用同一常量；不改动既有查询函数语义。
+- **单元**：`tests/unit/categories.test.mjs` —— 规则表逐条钉死：关键词命中标题 /
+  正文、两种排除语境（专有名词「数据库」与机关名「工业和信息化部」）、无兜底标签、
+  词表自洽（标签唯一、取值校验）。
 - **E2E**：`tests/e2e/category-filter.test.mjs` —— 三源 fixture 入库后逐条
-  断言标签（覆盖关键词命中标题与命中正文两类、无命中不打标），领域 / 机关 /
+  断言标签（覆盖关键词命中标题与命中正文两类、排除语境两条），领域 / 机关 /
   关键词 / 组合过滤、无结果空态与排序子序列断言。
 
 ## 版本历史与条款对比（issue #10）
