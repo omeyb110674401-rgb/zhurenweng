@@ -47,6 +47,9 @@ function migrationsFolder(driver: DbDriver): string {
   return path.join(process.cwd(), 'drizzle', driver);
 }
 
+/** 迁移串行化用的固定 advisory lock 键（任意常量，全项目唯一即可）。 */
+const MIGRATION_LOCK_KEY = 2055178350;
+
 async function openDatabase(): Promise<AppDatabase> {
   const driver = currentDriver();
   if (driver === 'postgres') return openPostgres();
@@ -56,8 +59,19 @@ async function openDatabase(): Promise<AppDatabase> {
 async function openPostgres(): Promise<AppDatabase> {
   const pool = new Pool({ connectionString: process.env.DATABASE_URL });
   const db = drizzlePostgres(pool, { schema: postgresSchema });
-  await migratePostgres(db, { migrationsFolder: migrationsFolder('postgres') });
-  // 两个 schema 互为镜像（见文件头注释），对调用方暴露统一类型。
+  // 并发启动竞态：compose 同时拉起 web/worker，两者都会执行迁移，裸跑会因
+  // __drizzle_migrations 表重复创建而崩（实测 23505 duplicate key）。用会话级
+  // advisory lock 串行化：后到者等待，随后发现迁移已应用即空跑。
+  const lockClient = await pool.connect();
+  try {
+    await lockClient.query('SELECT pg_advisory_lock($1)', [MIGRATION_LOCK_KEY]);
+    await migratePostgres(db, { migrationsFolder: migrationsFolder('postgres') });
+  } finally {
+    await lockClient
+      .query('SELECT pg_advisory_unlock($1)', [MIGRATION_LOCK_KEY])
+      .catch(() => {});
+    lockClient.release();
+  }
   return db as unknown as AppDatabase;
 }
 
