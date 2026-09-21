@@ -225,4 +225,47 @@ describe('issue #19：首页分页与真实合计', () => {
     assert.ok(!/data-testid="notice-pagination"/.test(html), '单页时不渲染分页导航');
     assert.ok(!/data-testid="notice-range"/.test(html), '单页时不渲染页码区间文案');
   });
+
+  it('索引口径：筛选视图 noindex、分页视图自指 canonical、首页可收录（issue #41）', async () => {
+    const head = (html) => html.slice(0, html.indexOf('</head>'));
+    const robotsMeta = (html) =>
+      /<meta name="robots" content="([^"]*)"/.exec(head(html))?.[1] ?? null;
+    const canonicalHref = (html) =>
+      /<link rel="canonical" href="([^"]*)"/.exec(head(html))?.[1]?.replaceAll('&amp;', '&') ?? null;
+
+    // 第 1 页：可收录（noindex 不能误伤首页），canonical 指根地址
+    // （Next 会把根地址规范化为不带尾斜杠的 origin —— `https://zw.test` 与
+    //  `https://zw.test/` 是同一资源，搜索侧等价）
+    const home = await fetchHome();
+    assert.equal(robotsMeta(home), null, '首页必须保持可收录');
+    assert.equal(canonicalHref(home), 'https://zw.test', '首页 canonical 指根地址');
+
+    // 分页视图：列表的不同切片（不是重复内容）—— 自指 canonical、保留可收录
+    const page2 = await fetchHome('?page=2');
+    assert.equal(robotsMeta(page2), null, '分页视图应保留可收录');
+    assert.equal(canonicalHref(page2), 'https://zw.test/?page=2', '分页视图 canonical 自指且带页码');
+    // 分页视图也要保留 RSS 自动发现：子路由导出 alternates 会整块覆盖父级 layout 的
+    // 同名字段，这一页是本 issue 里唯一重新声明 alternates 的分支，必须守住
+    assert.ok(
+      /<link[^>]*rel="alternate"[^>]*type="application\/rss\+xml"[^>]*>/.test(head(page2)),
+      '分页视图仍应含 RSS 自动发现',
+    );
+
+    // 筛选视图：querystring 空间无界（任意关键词 / 任意机关名 / 页码组合），内容只是列表
+    // 子集、标题描述与首页相同 → noindex + follow（与 /search 同一处理，见 issue #38）
+    for (const query of [
+      `?category=${encodeURIComponent('立法与司法')}`,
+      `?agency=${encodeURIComponent('司法部')}`,
+      `?q=${encodeURIComponent('征求意见')}`,
+      '?lead=1',
+      `?page=2&q=${encodeURIComponent('征求意见')}`,
+      // issue #21 之前分享出去的复合串、以及随手敲的垃圾值都会渲染出一页「筛选后共 0 条」
+      `?agency=${encodeURIComponent('司法部、中国人民银行')}`,
+      `?agency=${encodeURIComponent('不存在的机关')}`,
+    ]) {
+      const html = await fetchHome(query);
+      assert.equal(robotsMeta(html), 'noindex, follow', `${query} 应 noindex, follow`);
+      assert.equal(canonicalHref(html), null, `${query} 是参数变体，不该给出 canonical`);
+    }
+  });
 });

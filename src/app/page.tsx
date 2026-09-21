@@ -1,9 +1,12 @@
 import Link from 'next/link';
+import type { Metadata } from 'next';
 import { countNoticesFiltered, listNoticesFiltered, listNoticeAgencies } from '@/db/repo/notices';
 import { NoticeItem } from '@/app/_lib/notice-item';
 import { SearchForm } from '@/app/_lib/search-form';
 import { IcpFiling } from '@/app/_lib/icp-filing';
-import { DOMAIN_CATEGORIES, isKnownCategory } from '@/lib/categories';
+import { parseHomeQuery, type HomeSearchParams } from '@/app/_lib/home-query';
+import { DOMAIN_CATEGORIES } from '@/lib/categories';
+import { siteUrl } from '@/lib/site-url';
 import { mailerReady } from '@/lib/mailer-availability';
 
 // 数据随抓取管线持续更新，首页始终服务端实时渲染，不做静态预渲染。
@@ -22,26 +25,38 @@ function pageSize(): number {
 }
 
 interface HomePageProps {
-  searchParams: Promise<{
-    category?: string | string[];
-    agency?: string | string[];
-    q?: string | string[];
-    lead?: string | string[];
-    page?: string | string[];
-  }>;
+  searchParams: Promise<HomeSearchParams>;
 }
 
-/** 取 querystring 参数首值并去空白；空串视为未筛选。 */
-function firstParam(value: string | string[] | undefined): string | undefined {
-  const raw = Array.isArray(value) ? value[0] : value;
-  const trimmed = raw?.trim();
-  return trimmed ? trimmed : undefined;
-}
-
-/** 取 querystring 里的页码：非正整数一律当作第 1 页（不报错、不空页）。 */
-function pageParam(value: string | string[] | undefined): number {
-  const parsed = Number(firstParam(value) ?? '1');
-  return Number.isInteger(parsed) && parsed > 0 ? parsed : 1;
+/**
+ * 列表页的索引口径（issue #41）。
+ *
+ * 首页的 querystring 空间是**无界**的：`?q=` 可以是任意字符串、`?agency=` 可以是
+ * 任意机关名（含 issue #21 之前分享出去的复合串、以及随手敲的垃圾值 —— 它们都会
+ * 渲染出一页「筛选后共 0 条」），再乘上领域 / 页码的组合。这些变体的标题与描述与
+ * 首页完全相同、内容只是列表的子集 —— 收录它们等于往索引里灌薄页，并把真正有用的
+ * 条目页稀释掉（与 `/search` 同一处理，见 issue #38）。
+ *
+ * 因此：**筛选视图 noindex（仍 follow，结果里的条目链接照常被发现）；分页视图是列表
+ * 的不同切片、不是重复内容，保留可收录并给自指 canonical**（第 1 页指回根地址）。
+ * 解析与渲染共用 `parseHomeQuery`，两处口径不会分叉。
+ */
+export async function generateMetadata({ searchParams }: HomePageProps): Promise<Metadata> {
+  const query = parseHomeQuery(await searchParams);
+  // 只带 lead=1 的地址渲染结果与首页完全相同（无机关时该参数不生效），也算参数变体
+  if (query.hasFilter || query.leadAgencyOnly) {
+    return { robots: { index: false, follow: true } };
+  }
+  const base = siteUrl();
+  return {
+    alternates: {
+      // 子路由一旦导出 alternates，父级 layout 的同名字段就被整块覆盖 —— RSS 自动发现
+      // （issue #6）必须在这里一并给出，否则首页会丢掉 head 里的 feed 链接
+      // （既有 e2e「列表页含 RSS 自动发现」当场抓到了这个回归）。
+      types: { 'application/rss+xml': '/feed.xml' },
+      canonical: query.page > 1 ? `${base}/?page=${query.page}` : `${base}/`,
+    },
+  };
 }
 
 /** 当前生效的筛选状态（全部可分享于 querystring：/?category=…&agency=…&q=…&page=N）。 */
@@ -78,22 +93,22 @@ function buildFilterHref(current: FilterState, next: Partial<FilterState>): stri
 }
 
 export default async function HomePage({ searchParams }: HomePageProps) {
-  const params = await searchParams;
-  // 领域只接受已知标签值（未知值不生效，避免任意 querystring 触发无效筛选）
-  const categoryParam = firstParam(params.category);
+  // 解析与 generateMetadata 共用同一份（issue #41）：领域只接受已知标签值
+  // （未知值不生效，避免任意 querystring 触发无效筛选）
+  const query = parseHomeQuery(await searchParams);
   const current: FilterState = {
-    category: categoryParam && isKnownCategory(categoryParam) ? categoryParam : undefined,
-    agency: firstParam(params.agency),
-    keyword: firstParam(params.q),
+    category: query.category,
+    agency: query.agency,
+    keyword: query.keyword,
     // 只有「带了机关 + lead=1」才算牵头口径；裸 lead=1 不改变任何结果
-    leadAgencyOnly: firstParam(params.lead) === '1',
+    leadAgencyOnly: query.leadAgencyOnly,
   };
   const { category, agency, keyword } = current;
-  const hasFilter = category !== undefined || agency !== undefined || keyword !== undefined;
+  const hasFilter = query.hasFilter;
 
   const size = pageSize();
   // 页码先按请求值算偏移；总数拿到后再夹到有效范围（?page=999 落到末页而不是空页）
-  const requestedPage = pageParam(params.page);
+  const requestedPage = query.page;
   const filter = { category, agency, keyword, leadAgencyOnly: current.leadAgencyOnly && agency !== undefined };
 
   // 仓库层排序：征求意见中在前、截止日期升序（即将截止在前）、无截止日期靠后；
