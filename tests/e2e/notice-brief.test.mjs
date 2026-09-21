@@ -260,6 +260,30 @@ describe('issue #27：抽不到渠道时不编造', () => {
   });
 });
 
+describe('issue #46：统计页把「未参与统计的条数」说清楚', () => {
+  it('公示期分布：差额按条数说出，且与「收录总数 − 四桶之和」一致', async () => {
+    const html = stripSsrComments(await (await fetch(`${app.url}/stats`)).text());
+    const total = Number(/data-testid="stats-total-notices">(\d+)</.exec(html)[1]);
+    const buckets = [
+      ...html.matchAll(/data-bucket="[^"]+"[\s\S]{0,200}?period-count">(\d+) 条</g),
+    ].map((match) => Number(match[1]));
+    assert.equal(buckets.length, 4, '应有四个分布桶');
+
+    const sum = buckets.reduce((acc, n) => acc + n, 0);
+    const excluded = total - sum;
+    assert.ok(
+      excluded > 0,
+      `本 fixture 含未标注截止日期的条目，差额应大于 0（total=${total} sum=${sum}）`,
+    );
+    assert.match(
+      html,
+      new RegExp(`另有 ${excluded} 条未标注截止日期`),
+      '页面必须把差额按条数说出来，否则读者无法判断 178 与 176 的差是规则排除还是漏统计',
+    );
+    assert.match(html, /四桶之和因此小于收录总数/);
+  });
+});
+
 describe('issue #27：有 AI 摘要时的分工', () => {
   it('速读卡让位给五段式摘要，提交方式照常渲染', async () => {
     useAvailableLlm();

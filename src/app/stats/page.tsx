@@ -26,7 +26,9 @@ const PERIOD_LABELS: Record<string, string> = {
   lte7: '7 天以内（含 7 天）',
   b8_15: '8-15 天',
   b16_30: '16-30 天',
-  gt30: '30 天以上',
+  // 桶边界是「> 30」（见 repo 的 getPeriodLengthDistribution）：标签必须写「31 天及以上」——
+  // 原先写「30 天以上」，与上一桶「16-30 天」在 30 这个数上重叠，读者无法判断 30 天算哪一桶
+  gt30: '31 天及以上',
 };
 
 export default async function StatsPage() {
@@ -54,6 +56,10 @@ export default async function StatsPage() {
   );
 
   const periodMax = Math.max(...periodDistribution.map((bucket) => bucket.count), 1);
+  // 未参与公示期统计的条数（缺截止日期或发布日期）：页面要说清差额，见上方的分桶说明
+  const periodExcluded =
+    overview.totalNotices -
+    periodDistribution.reduce((sum, bucket) => sum + bucket.count, 0);
   const hasNotices = overview.totalNotices > 0;
 
   return (
@@ -217,7 +223,13 @@ export default async function StatsPage() {
       <section className="stats-section" aria-labelledby="stats-period-title">
         <h2 id="stats-period-title">公示期长度分布</h2>
         <p className="section-hint">
-          公示期长度 = 截止日期 - 发布日期（按日历日）；缺失发布或截止日期的条目不参与统计。
+          公示期长度 = 截止日期 - 发布日期（按日历日）；分桶为 7 天以内 / 8-15 天 / 16-30 天 /
+          31 天及以上。
+          {/* 只写规则不够：上方写着「收录 N 条」、四桶之和却是另一个数，读者无从判断差的
+              那几条是被规则排除的、还是漏统计了。这里把差额按条数说出来（issue #46）。 */}
+          {periodExcluded > 0
+            ? `另有 ${periodExcluded} 条未标注截止日期（或发布日期），不参与统计 —— 四桶之和因此小于收录总数。`
+            : '全部条目都已标注截止日期，四桶之和等于收录总数。'}
         </p>
         {!hasNotices || periodDistribution.every((bucket) => bucket.count === 0) ? (
           <EmptyBlock testId="stats-period-empty" text="暂无可统计的公示期数据。" />
