@@ -51,6 +51,10 @@ fixtures/
     npc/                     #   标题措辞不同、正文有增删改；另含一条无关单轮条目）
       list.json
       flca/<lid>/info/index.json
+  e2e-versions-degraded/     # issue #42 单侧缺正文的对比场景专用（两条版本链各三轮：
+    npc/                     #   湿地 r3 本轮无正文、草原 r1 上一轮无正文、其余可比；
+      list.json              #   另含一条单轮条目守住「无上一版」空态。缺正文的详情
+      flca/<lid>/info/index.json   # 快照 tsy 为空串 = 官方页面未提供草案正文）
   e2e-stats/                 # issue #11 统计页场景专用（三源同构、独立成 fixture 根目录；
     npc/                     #   发布与截止日期全用令牌 —— 公示期差值恒定，发布月份
     moj/                     #   恒落在最近 6 个月窗口）

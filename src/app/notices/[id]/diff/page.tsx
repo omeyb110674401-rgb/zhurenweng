@@ -1,9 +1,11 @@
 import Link from 'next/link';
+import type { Metadata } from 'next';
 import { notFound } from 'next/navigation';
 import { getNoticeById } from '@/db/repo/notices';
 import { getSourceById } from '@/db/repo/sources';
 import { formatDate } from '@/app/_lib/notice-display';
 import {
+  diffComparability,
   diffNoticeBodies,
   type DiffRow,
   type DiffSegment,
@@ -14,6 +16,27 @@ export const dynamic = 'force-dynamic';
 
 interface NoticeDiffPageProps {
   params: Promise<{ id: string }>;
+}
+
+/**
+ * 对比页的元数据（issue #42）：此前整页共用 layout 的通用标题
+ * （「主人翁 —— 政府公示与征求意见信息聚合」），每个条目的对比页长得一模一样。
+ *
+ * 索引口径：对比页的正文是**两版条目正文的并集**，与两个条目页高度重复 ——
+ * 不收录，但保留 follow（两版条目页与官方原文照常被发现）。刻意不写
+ * `alternates`：一旦导出该字段就会整块覆盖 layout 的 RSS 自动发现
+ * （issue #41 在首页踩过这个坑，这里不重复）。
+ */
+export async function generateMetadata({ params }: NoticeDiffPageProps): Promise<Metadata> {
+  const { id } = await params;
+  const notice = await getNoticeById(id);
+  if (!notice) {
+    return { title: '未找到该公示 —— 主人翁' };
+  }
+  return {
+    title: `条款对比：${notice.title} —— 主人翁`,
+    robots: { index: false, follow: true },
+  };
 }
 
 /**
@@ -47,7 +70,13 @@ export default async function NoticeDiffPage({ params }: NoticeDiffPageProps) {
   }
 
   const rows = diffNoticeBodies(previous.bodyText, notice.bodyText);
+  const comparability = diffComparability(previous.bodyText, notice.bodyText);
   const versionSeq = notice.versionSeq ?? 1;
+  const previousLink = (
+    <Link href={`/notices/${previous.id}`} data-testid="diff-previous-body-link">
+      上一轮条目页
+    </Link>
+  );
 
   return (
     <main>
@@ -85,15 +114,36 @@ export default async function NoticeDiffPage({ params }: NoticeDiffPageProps) {
           </p>
         </header>
 
-        {rows.length > 0 ? (
+        {/* 三态对比 / 缺正文说明（issue #42）：任一侧没有正文时**绝不**渲染差异行 ——
+            否则「这轮没抓到正文」会被渲染成「上一版整篇被删除」（或反向「整篇新增」），
+            与详情页的「正文未取到」自相矛盾。 */}
+        {comparability === 'comparable' ? (
           <section className="diff-rows" data-testid="diff-rows">
             {rows.map((row, index) => (
               <DiffRowView key={index} row={row} />
             ))}
           </section>
-        ) : (
+        ) : comparability === 'missing-both' ? (
           <div className="diff-empty" data-testid="diff-no-body">
             两轮公示暂无可比对的正文文本（官方页面未提供草案正文），请前往官方原文查看。
+          </div>
+        ) : (
+          <div className="diff-empty" data-testid="diff-incomplete-body">
+            {comparability === 'missing-new' ? (
+              <>
+                本轮（第 {versionSeq} 轮）的正文未取到，无法对比 —— 官方页面未提供草案正文，
+                或本轮抓取未能取到（详情页同样显示「未取到正文」）。上一轮正文可在
+                {previousLink} 查看。
+              </>
+            ) : (
+              <>
+                上一轮的正文未取到，无法对比 —— 该轮条目页同样没有正文。请以本轮为准：本轮正文见
+                <Link href={`/notices/${notice.id}`} data-testid="diff-current-body-link">
+                  本轮条目页
+                </Link>
+                与下方官方原文。
+              </>
+            )}
           </div>
         )}
       </article>

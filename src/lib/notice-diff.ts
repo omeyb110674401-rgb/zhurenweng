@@ -87,13 +87,47 @@ export function splitClauses(bodyText: string | null | undefined): ClauseUnit[] 
 }
 
 /**
+ * 对比可比性（issue #42）：任一侧没有正文就**不能比**。
+ *
+ * 为什么必须显式判定：`diffNoticeBodies(上一版正文, null)` 会把上一版每个条款都
+ * 输出成 removed —— 页面上整篇显示「删除」，读者以为这一轮把草案全删了，而真相是
+ * 我们这轮没抓到正文（详情页此时显示的是「正文未取到」）。反向则整篇「新增」。
+ * 原有的空态只在**两侧都空**时才出现，所以这种谎报此前完全静默。
+ *
+ * 判定口径与切分函数一致：`splitClauses` 切不出条款（空串、纯空白、null）就算
+ * 「没有正文」—— 不另立一套「有没有内容」的标准。
+ */
+export type DiffComparability = 'comparable' | 'missing-old' | 'missing-new' | 'missing-both';
+
+/** 正文里是否有可对比的条款单元。 */
+function hasClauses(bodyText: string | null | undefined): boolean {
+  return splitClauses(bodyText).length > 0;
+}
+
+/** 两轮正文的可比性；调用方据此决定渲染差异行还是「缺正文」说明。 */
+export function diffComparability(
+  oldBody: string | null | undefined,
+  newBody: string | null | undefined,
+): DiffComparability {
+  const hasOld = hasClauses(oldBody);
+  const hasNew = hasClauses(newBody);
+  if (hasOld && hasNew) return 'comparable';
+  if (!hasOld && !hasNew) return 'missing-both';
+  return hasOld ? 'missing-new' : 'missing-old';
+}
+
+/**
  * 两轮正文 → 差异行序列（文档顺序：修改 / 删除按旧版条款顺序穿插在相同
  * 锚点之间，新增行排在所属间隙末尾）。
+ *
+ * **任一侧没有正文时返回空数组**（见 diffComparability）：宁可什么都不输出，
+ * 也不把「没抓到正文」渲染成「整篇删除 / 整篇新增」。调用方先判可比性再选文案。
  */
 export function diffNoticeBodies(
   oldBody: string | null | undefined,
   newBody: string | null | undefined,
 ): DiffRow[] {
+  if (diffComparability(oldBody, newBody) !== 'comparable') return [];
   const oldUnits = splitClauses(oldBody);
   const newUnits = splitClauses(newBody);
   const normalized = (unit: ClauseUnit): string => unit.text.replace(/\s+/g, '');
