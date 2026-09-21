@@ -122,12 +122,31 @@ docker compose run --rm -e WORKER_ONCE=1 worker npm run worker
 - AI 摘要显著标注「AI 生成，仅供参考，以官方原文为准」
 - 管理后台看板：各源最近成功时间非空；配置 `ALERT_EMAIL` 后人为触发一次失败应收到告警
 - 出站按钮 `/go/<id>` 正常 302 到官方原文（北极星指标埋点）
+- 安全响应头（issue #52）——五条都应出现，且**不应**出现 `X-Powered-By`：
+  ```bash
+  curl -sI https://<域名>/ | grep -iE 'strict-transport|x-content-type|referrer-policy|x-frame-options|permissions-policy|x-powered-by'
+  ```
+- 后台会话 Cookie 带 `Secure`，且 `?token=` 只换取会话（不再直接放行）：
+  ```bash
+  curl -s -o /dev/null -w "%{http_code} %{redirect_url}\n" "https://<域名>/admin?token=<ADMIN_TOKEN>"   # 应 303 到 /admin
+  curl -sI -X POST "https://<域名>/admin/sources?token=<ADMIN_TOKEN>" | head -1                        # 应 401（写操作只看 Cookie）
+  ```
+- 改动部署配置（compose）后先验证解析，再重建 —— `${VAR:?}` 形式的必填项缺失会让
+  `docker compose up` 直接拒绝启动：
+  ```bash
+  docker compose config --quiet && echo COMPOSE-CONFIG-OK
+  ```
 
 ## 8. 日常运维
 
 - **更新**：增量改几个文件走 `deploy/sync-files-local.sh`（当前主用通道），整包走第 2 节 B；
   `git pull` 依赖的 GitHub 通道自 2026-09-21 起不可用。传完在服务器上
   `docker compose build web worker && docker compose up -d web worker`
+  - 注意：**删掉的路由文件要手工删**（同步脚本只传文件、不删文件）——App Router 里
+    同一段同时存在 `page.tsx` 与 `route.ts` 会直接构建失败
+- **限流阈值**（issue #52）：`SUBSCRIBE_RATE_LIMIT_PER_HOUR`（缺省 10）、
+  `ADMIN_LOGIN_RATE_LIMIT_PER_HOUR`（缺省 30），单位次/小时，按客户端 IP 的固定窗口；
+  计数在**进程内存**里，只对单实例部署有效（多副本时实际阈值 = 设定值 × 副本数）
 - **备份**：卷 `db-data`、`meili-data`（`caddy-data` 建议一并备份，含证书私钥）；
   `docker compose exec db pg_dump -U zhurenweng zhurenweng > backup.sql`
 - **日志**：`docker compose logs -f caddy worker`
