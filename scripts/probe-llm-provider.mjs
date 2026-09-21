@@ -6,14 +6,16 @@
  * 2. 输出能否通过站点自己的 parseModelJson + normalizeModelSummary；
  * 3. 最硬的一条：quotes 是否**逐字**出现在原文里（PRD 要求引用可核对）。
  *
- * 密钥从本机 provider_config.json 读取，只打印长度与前后各 4 位，绝不打印全值。
+ * 密钥从 provider_config.json 读取（路径由环境变量 ZW_PROVIDER_CONFIG 覆盖，
+ * 缺省是开发机上的位置），只打印长度与前后各 4 位，绝不打印全值。
  * 用法：node scripts/probe-llm-provider.mjs [model ...]
  */
 import fs from 'node:fs';
 import { parseModelJson, normalizeModelSummary } from '../src/lib/adapters/openai-compatible-llm.ts';
 import { buildQuotedSummary } from '../src/lib/summary-content.ts';
 
-const CONFIG = 'C:/Users/35258/.zcode/v2/provider_config.json';
+const CONFIG =
+  process.env.ZW_PROVIDER_CONFIG ?? 'C:/Users/35258/.zcode/v2/provider_config.json';
 const BASE = 'https://opencode.ai/zen/go/v1';
 const BODY_URL = 'https://cn101.top/notices/00f8313ea7880fc0';
 /** 稳定的会话标识（opencode-go 的 x-opencode-session 语义：一段对话一个固定值）。 */

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { effectiveStatus } from '../../src/lib/notice-status.ts';
+import { effectiveStatus, noticeStatusLabel } from '../../src/lib/notice-status.ts';
 
 /**
  * 单元：展示用有效状态（issue #43）。
@@ -58,5 +58,23 @@ describe('effectiveStatus：展示用有效状态', () => {
       effectiveStatus(notice('open', '2026-09-20'), new Date('2026-09-20T15:59:00Z')),
       'open',
     );
+  });
+});
+
+describe('状态文案容错（issue #51）', () => {
+  it('已知状态给中文文案', () => {
+    assert.equal(noticeStatusLabel('open'), '征求意见中');
+    assert.equal(noticeStatusLabel('closed'), '已截止');
+    assert.equal(noticeStatusLabel('resulted'), '已出结果');
+  });
+
+  it('未知取值原样返回 —— 不渲染 undefined，也不猜成别的状态', () => {
+    // status 是 TEXT 列，仓储层直接 `as NoticeStatus`（类型断言不校验运行时值）。
+    // 库里一旦出现集合外的值，`Record<NoticeStatus, string>` 的索引会给出 undefined：
+    // 页面上是一个空徽标、JSON-LD 里是 "creativeWorkStatus": undefined ——
+    // 读者与消费方都拿不到任何信息。原样显示至少把真相摆出来。
+    assert.equal(noticeStatusLabel('archived'), 'archived');
+    assert.equal(noticeStatusLabel(''), '');
+    assert.equal(noticeStatusLabel('OPEN'), 'OPEN', '大小写不同即未知值，不擅自归一');
   });
 });

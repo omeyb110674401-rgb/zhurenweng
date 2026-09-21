@@ -33,11 +33,6 @@ export const PERIOD_BUCKETS: readonly PeriodBucketDef[] = [
   { key: 'gt30', label: '31 天及以上', minDays: 31, maxDays: null },
 ];
 
-/** 桶 key 的展示顺序（统计页渲染用）。 */
-export const PERIOD_BUCKET_ORDER: readonly PeriodBucketKey[] = PERIOD_BUCKETS.map(
-  (bucket) => bucket.key,
-);
-
 /** querystring 取值是否合法桶 key（`?period=` 的校验用）。 */
 export function isPeriodBucketKey(value: string): value is PeriodBucketKey {
   return PERIOD_BUCKETS.some((bucket) => bucket.key === value);

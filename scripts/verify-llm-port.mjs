@@ -7,14 +7,16 @@
  * 额外请求头合并」这些装配环节。
  *
  * 用法：node scripts/verify-llm-port.mjs [model]
- * 密钥从本机 provider_config.json 读取，只打印前后各 4 位。
+ * 密钥从 provider_config.json 读取（路径由环境变量 ZW_PROVIDER_CONFIG 覆盖，
+ * 缺省是开发机上的位置），只打印前后各 4 位。
  */
 import fs from 'node:fs';
 import { createLlmPort } from '../src/lib/ports.ts';
 import { llmReady } from '../src/lib/llm-availability.ts';
 import { buildQuotedSummary, llmModelName } from '../src/lib/summary-content.ts';
 
-const CONFIG = 'C:/Users/35258/.zcode/v2/provider_config.json';
+const CONFIG =
+  process.env.ZW_PROVIDER_CONFIG ?? 'C:/Users/35258/.zcode/v2/provider_config.json';
 const BODY_URL = 'https://cn101.top/notices/00f8313ea7880fc0';
 const MODEL = process.argv[2] ?? 'glm-5.3-flash';
 

@@ -17,13 +17,7 @@
 
 import type { NoticeRecord, NoticeStatus } from '../db/types.ts';
 import { extractDocumentNames } from './notice-brief.ts';
-
-/** 状态的中文说法（与页面徽标同一套文案） */
-const STATUS_LABELS: Record<NoticeStatus, string> = {
-  open: '征求意见中',
-  closed: '已截止',
-  resulted: '已出结果',
-};
+import { noticeStatusLabel } from './notice-status.ts';
 
 /** 截止日期在 additionalProperty 里的属性名（逐字给，供消费方直接读） */
 const DEADLINE_PROPERTY = '征求意见截止日期';
@@ -55,7 +49,7 @@ export function buildNoticeJsonLd({
     headline: notice.title,
     url: `${siteUrl}/notices/${notice.id}`,
     inLanguage: 'zh-CN',
-    creativeWorkStatus: STATUS_LABELS[status ?? notice.status],
+    creativeWorkStatus: noticeStatusLabel(status ?? notice.status),
     // 发布方是本站（聚合方），原文出处另由 isBasedOn 表达
     publisher: { '@type': 'Organization', name: '主人翁', url: siteUrl },
     isBasedOn: notice.url,

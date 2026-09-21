@@ -7,8 +7,10 @@ on:
     branches: [main]
 
 jobs:
+  # 这个 job 曾叫 Lint 却只跑单测：`npm run lint` 与类型检查**从未在 CI 里跑过**，
+  # 唯一的类型门是 e2e job 里的 next build（issue #51 审计发现）。名字与内容现在对齐。
   lint:
-    name: Lint
+    name: Lint & typecheck & unit
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -17,6 +19,9 @@ jobs:
           node-version: 24
           cache: npm
       - run: npm ci
+      - run: npm run lint
+      # tsc 单跑一遍：next build 只覆盖被 App Router 触及的图，且它的报错混在构建日志里
+      - run: npx tsc --noEmit
       - run: npm run test:unit
 
   e2e:

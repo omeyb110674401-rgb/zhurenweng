@@ -1,4 +1,5 @@
 import { createLlmPort } from '../../src/lib/ports.ts';
+import { envInt } from '../../src/lib/env-int.ts';
 import { llmReady, llmUnavailableReason } from '../../src/lib/llm-availability.ts';
 import { sendTaskFailureAlert } from '../../src/lib/alerts.ts';
 import { syncNoticesToSearchIndex } from '../../src/lib/search/sync.ts';
@@ -27,9 +28,9 @@ import type { Job, JobContext } from '../registry.ts';
  */
 
 /** 失败后的最大重试次数（不含首次调用；共尝试 1 + SUMMARY_MAX_RETRIES 次） */
-const MAX_RETRIES = Number(process.env.SUMMARY_MAX_RETRIES ?? 3);
+const MAX_RETRIES = envInt('SUMMARY_MAX_RETRIES', 3, { min: 0, max: 10 });
 /** 重试退避基数（毫秒），按 2 的幂指数递增：base, 2*base, 4*base … */
-const RETRY_BASE_DELAY_MS = Number(process.env.SUMMARY_RETRY_DELAY_MS ?? 500);
+const RETRY_BASE_DELAY_MS = envInt('SUMMARY_RETRY_DELAY_MS', 500, { min: 0 });
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);

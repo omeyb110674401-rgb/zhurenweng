@@ -1,23 +1,21 @@
 import type { ReactNode } from 'react';
 import type { NoticeRecord, NoticeStatus } from '@/db/types';
 import { daysUntil } from '@/lib/dates';
+import { noticeStatusLabel } from '@/lib/notice-status';
 
 /**
  * 公示条目的展示组件（列表页与详情页共用）。
  * 状态徽标取自库中 status 字段（抓取时按截止日期推导）；倒计时按本地日历日
  * 计算，仅在「征求意见中」时展示。
+ *
+ * 文案表在 lib/notice-status.ts（issue #51 起与结构化数据共用一份），未知取值
+ * 原样显示 —— 不渲染 undefined。
  */
-
-const STATUS_LABELS: Record<NoticeStatus, string> = {
-  open: '征求意见中',
-  closed: '已截止',
-  resulted: '已出结果',
-};
 
 export function StatusBadge({ status }: { status: NoticeStatus }) {
   return (
     <span className={`status-badge status-${status}`} data-testid="notice-status-badge">
-      {STATUS_LABELS[status]}
+      {noticeStatusLabel(status)}
     </span>
   );
 }

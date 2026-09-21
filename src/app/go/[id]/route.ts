@@ -77,14 +77,29 @@ export async function GET(
     return NextResponse.redirect(target, { status: 302, headers: REDIRECT_HEADERS });
   }
 
-  const clicks = await recordOutboundClick(id);
-  if (clicks === null) {
+  // 计数是尽力而为的（issue #51）：北极星指标重要，但读者「到得了官方原文页」
+  // 更重要 —— 库抖一下就让跳转变 500，等于用计数失败惩罚用户的唯一动作。
+  // 两种失败要分开：抛错（库不可用）照常 302 放行；返回 null（条目在两次查询之间
+  // 被删掉）仍是 404 —— 那是真的没有可跳转的目标。
+  let clicks: number | null = null;
+  let clickWriteFailed = false;
+  try {
+    clicks = await recordOutboundClick(id);
+  } catch (error) {
+    clickWriteFailed = true;
+    console.error(
+      `[go] date=${siteDateIso(new Date())} noticeId=${id} counted=false 计数写入失败：${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
+  }
+  if (!clickWriteFailed && clicks === null) {
     return NextResponse.json({ error: '未找到该公示条目' }, { status: 404, headers: NO_STORE });
   }
 
   // 非个人身份的访问日志：仅条目 ID 与日期（不带 UA）
   console.log(
-    `[go] date=${siteDateIso(new Date())} noticeId=${id} outboundClicks=${clicks}`,
+    `[go] date=${siteDateIso(new Date())} noticeId=${id} outboundClicks=${clicks ?? '写入失败'}`,
   );
 
   return NextResponse.redirect(target, { status: 302, headers: REDIRECT_HEADERS });

@@ -16,6 +16,7 @@ export const dynamic = 'force-dynamic';
 
 const ERROR_MESSAGES: Record<string, string> = {
   invalid_email: '邮箱格式不正确，请检查后重试。',
+  invalid_form: '提交的数据格式不正确，请从订阅页重新提交。',
   no_rules: '请至少填写一个关键词或选择一个领域。',
   unknown_category: '包含未知领域，请重新选择。',
   send_failed: '确认邮件发送失败，请稍后重试。',

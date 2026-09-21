@@ -76,7 +76,11 @@ services:
         condition: service_healthy
       meilisearch:
         condition: service_started
-    command: sh -c "node scripts/db-migrate.mjs && npm run start"
+    # exec 让 node 直接成为容器 PID 1（issue #51）：`sh -c "... && npm run start"` 的
+    # PID 1 是 sh，而非交互式 sh 不转发信号 —— docker stop / `compose up -d` 重建时
+    # SIGTERM 到不了 node，只能在 stop_grace_period 后被 SIGKILL。
+    command: sh -c "node scripts/db-migrate.mjs && exec npm run start"
+    stop_grace_period: 30s
 
   worker:
     build:
@@ -118,7 +122,12 @@ services:
     depends_on:
       db:
         condition: service_healthy
-    command: sh -c "node scripts/db-migrate.mjs && npm run worker"
+    # 直接 exec node（等价于 `npm run worker`，见 package.json）而不是经 npm：
+    # 少一层进程，SIGTERM 直达 worker 的信号处理器（issue #51）。
+    command: sh -c "node scripts/db-migrate.mjs && exec node worker/index.ts"
+    # 一轮抓取是分钟级：给足在途轮次收尾的时间（worker 自己最多等
+    # WORKER_STOP_WAIT_MS=30s，这里留一倍余量），避免抓到一半被 SIGKILL。
+    stop_grace_period: 90s
 
   db:
     image: postgres:17

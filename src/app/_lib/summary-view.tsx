@@ -153,7 +153,7 @@ export function SummaryPlaceholder({ status }: { status: SummaryStatus }): React
     <section className="summary-slot" data-testid="summary-placeholder">
       <div className="summary-head">
         <span className="summary-tag">AI 摘要</span>
-        <span className="summary-pending">{SUMMARY_STATUS_LABELS[status]}</span>
+        <span className="summary-pending">{SUMMARY_STATUS_LABELS[status] ?? status}</span>
       </div>
       <p className="summary-note">
         本站正在为本条公示生成结构化 AI 摘要（这是什么 / 影响谁 / 关键条款 / 如何提意见）。

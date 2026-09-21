@@ -1,3 +1,10 @@
+# 镜像构建上下文排除清单。
+#
+# 为什么必须逐项写清：Dockerfile.web 用 `COPY . .` 把整个仓库拷进构建上下文 ——
+# 漏掉一项就是「本机文件进镜像」。`.env` 尤其严重：它含 POSTGRES_PASSWORD /
+# MEILI_MASTER_KEY / ADMIN_TOKEN / SMTP_PASS / GLM_API_KEY，进了镜像层就等于
+# 密钥随镜像分发（镜像可导出、可被 docker save，删掉文件也不会从层里消失）。
+# 对照 docs/deploy.md 第 3 节：`.env` 就是建在仓库根目录下的。
 node_modules
 .next
 out
@@ -10,3 +17,15 @@ docker-compose.yml
 Dockerfile.*
 .dockerignore
 .github
+
+# 密钥与本地凭据（绝不进镜像）
+.env
+.env.*
+!.env.example
+
+# 本地核验产物与缓存（.gitignore 只管仓库，不管构建上下文）
+.live-*
+tsconfig.tsbuildinfo
+*.log
+coverage
+*.bundle

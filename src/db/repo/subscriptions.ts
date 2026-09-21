@@ -209,19 +209,6 @@ export async function unsubscribeByToken(token: string): Promise<'done' | 'inval
   return 'done';
 }
 
-/** 按邮箱取订阅（E2E 与排查用）；不存在返回 null。 */
-export async function getSubscriptionByEmail(
-  email: string,
-): Promise<SubscriptionRecord | null> {
-  const db = await getDb();
-  const rows = await db
-    .select()
-    .from(subscriptions)
-    .where(eq(subscriptions.email, email))
-    .limit(1);
-  return rows.length > 0 ? toSubscriptionRecord(rows[0]) : null;
-}
-
 /** 提醒任务的收件人：已确认且未退订的订阅。未确认的订阅绝不接收任何提醒。 */
 export async function listActiveSubscriptions(): Promise<SubscriptionRecord[]> {
   const db = await getDb();

@@ -30,3 +30,24 @@ export function effectiveStatus(
   const days = daysUntil(notice.deadlineAt, now);
   return days !== null && days < 0 ? 'closed' : 'open';
 }
+
+/**
+ * 状态的中文说法（页面徽标与结构化数据共用这一份，issue #51 起也从这里取）。
+ *
+ * 为什么要有 `noticeStatusLabel` 这一层容错：status 是 TEXT 列，仓储层直接
+ * `as NoticeStatus`（类型断言不校验运行时值）。库里一旦出现集合外的值（手工 SQL
+ * 修数据、将来加状态忘了改这里、脚本写库），`Record<NoticeStatus, string>` 的索引
+ * 会给出 undefined —— 页面上是一个空徽标、JSON-LD 里是 `"creativeWorkStatus":
+ * undefined`，读者与消费方都拿不到任何信息。原样显示至少把真相摆出来，
+ * 也让人一眼看出数据脏了。
+ */
+export const NOTICE_STATUS_LABELS: Record<NoticeStatus, string> = {
+  open: '征求意见中',
+  closed: '已截止',
+  resulted: '已出结果',
+};
+
+/** 状态文案；未知取值原样返回（不渲染 undefined，也不猜成别的状态）。 */
+export function noticeStatusLabel(status: string): string {
+  return NOTICE_STATUS_LABELS[status as NoticeStatus] ?? status;
+}

@@ -5,6 +5,7 @@ import { getNoticeById, upsertNotice } from '../../src/db/repo/notices.ts';
 import { getSourceById, recordSourceFailure, upsertSource } from '../../src/db/repo/sources.ts';
 import { syncNoticesToSearchIndex } from '../../src/lib/search/sync.ts';
 import { siteDateIso } from '../../src/lib/dates.ts';
+import { isSourceDegraded } from '../../src/lib/source-health.ts';
 import { CRAWLER_USER_AGENT } from '../../src/lib/site-identity.ts';
 import {
   sourceAdapters,
@@ -301,10 +302,17 @@ export const crawlNoticesJob: Job = {
 
         let inserted = 0;
         let updated = 0;
+        // 逐条失败计数（issue #51）：单条失败被吞掉是为了「一条坏数据不拖垮整源」，
+        // 但**吞掉不等于没发生** —— 旧代码在详情解析全落空时照样打印「抓取完成」并把
+        // 源标成健康，正文 / 截止日期 / 附件就这么静默烂下去（#30 只解决了「不覆盖」，
+        // 没解决「没人知道」）。这两个计数用于本轮的完成日志与源健康判定。
+        let detailFailed = 0;
+        let upsertFailed = 0;
         // 本轮新增 / 更新的条目 id：入库与更新时同步检索索引（issue #8）
         const changedNoticeIds: string[] = [];
         for (const notice of listItems) {
           const enriched = await enrichWithDetail(adapter, notice, ctx);
+          if (!enriched.detailLoaded) detailFailed += 1;
           // 详情没抓到（失败或解析落空）时沿用已入库的详情层字段，避免偶发失败抹掉常态数据
           const normalized = enriched.detailLoaded
             ? enriched.notice
@@ -315,39 +323,75 @@ export const crawlNoticesJob: Job = {
           // 400ms 低于任何人工浏览节奏、又明显高于连续机器请求的间隔。
           await sleep(DETAIL_FETCH_INTERVAL_MS);
           const id = noticeIdForUrl(normalized.url);
-          const result = await upsertNotice({
-            id,
-            sourceId: adapter.id,
-            title: normalized.title,
-            agency: normalized.agency,
-            url: normalized.url,
-            publishedAt: normalized.publishedAt,
-            deadlineAt: normalized.deadlineAt,
-            status: deriveStatus(normalized.deadlineAt, normalized.status, now),
-            // 领域标签（issue #9）：适配器规则优先（NormalizedNotice.categoryTags），
-            // 未提供时不传 —— 入库路径按关键词规则自动打标（与手动补录单一入口）
-            categoryTags: normalized.categoryTags,
-            bodyText: normalized.bodyText,
-            attachments: normalized.attachments,
-            fetchedAt: now.toISOString(),
-          });
-          if (result === 'inserted') {
-            inserted += 1;
-          } else {
-            updated += 1;
+          try {
+            const result = await upsertNotice({
+              id,
+              sourceId: adapter.id,
+              title: normalized.title,
+              agency: normalized.agency,
+              url: normalized.url,
+              publishedAt: normalized.publishedAt,
+              deadlineAt: normalized.deadlineAt,
+              status: deriveStatus(normalized.deadlineAt, normalized.status, now),
+              // 领域标签（issue #9）：适配器规则优先（NormalizedNotice.categoryTags），
+              // 未提供时不传 —— 入库路径按关键词规则自动打标（与手动补录单一入口）
+              categoryTags: normalized.categoryTags,
+              bodyText: normalized.bodyText,
+              attachments: normalized.attachments,
+              fetchedAt: now.toISOString(),
+            });
+            if (result === 'inserted') {
+              inserted += 1;
+            } else {
+              updated += 1;
+            }
+            changedNoticeIds.push(id);
+          } catch (error) {
+            // 单条入库失败只跳过这一条（issue #51）：此前异常冒泡到源级 catch，
+            // 该源剩下的条目**全部不写**、源被标成失败并发一封「源抓取失败」告警 ——
+            // 一条坏数据连坐整个源，告警里的原因也指错了地方。
+            upsertFailed += 1;
+            ctx.logger(`源 ${adapter.id} 条目 ${id} 入库失败（跳过该条）：${errorMessage(error)}`);
           }
-          changedNoticeIds.push(id);
         }
 
-        await upsertSource({
-          id: adapter.id,
-          name: adapter.name,
-          adapterType: adapter.id,
-          healthy: true,
-          lastSuccessAt: now.toISOString(),
-        });
+        // 大面积逐条失败按源级失败处理（issue #51）：标成健康且不告警 = 静默烂掉。
+        // 判据（过半且列表不少于 3 条）在 lib/source-health.ts，单测钉死。
+        const failedCount = detailFailed + upsertFailed;
+        const degraded = isSourceDegraded(listItems.length, failedCount);
+        if (degraded) {
+          const message =
+            `本轮 ${listItems.length} 条里 ${detailFailed} 条详情失败、${upsertFailed} 条入库失败` +
+            `（疑似源站改版或库异常，数据可能已停止更新）`;
+          await recordSourceFailure({
+            id: adapter.id,
+            name: adapter.name,
+            adapterType: adapter.id,
+            error: message,
+            now: now.toISOString(),
+          }).catch(() => {
+            // 健康状态登记失败不掩盖本轮的数据质量事实
+          });
+          await sendTaskFailureAlert({
+            jobName: 'crawl-notices',
+            sourceId: adapter.id,
+            error: message,
+            now,
+            log: ctx.logger,
+          });
+          ctx.logger(`源 ${adapter.id} 数据质量降级：${message}`);
+        } else {
+          await upsertSource({
+            id: adapter.id,
+            name: adapter.name,
+            adapterType: adapter.id,
+            healthy: true,
+            lastSuccessAt: now.toISOString(),
+          });
+        }
         ctx.logger(
-          `源 ${adapter.id} 抓取完成：列表 ${listItems.length} 条，新增 ${inserted}，更新 ${updated}`,
+          `源 ${adapter.id} 抓取完成：列表 ${listItems.length} 条，新增 ${inserted}，更新 ${updated}` +
+            (failedCount > 0 ? `，详情失败 ${detailFailed}，入库失败 ${upsertFailed}` : ''),
         );
         // 索引同步钩子（issue #8）：同步失败只降级记日志，由重建任务兜底，不中断抓取
         try {

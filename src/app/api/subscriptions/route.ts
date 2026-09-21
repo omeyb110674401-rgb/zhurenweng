@@ -32,7 +32,13 @@ function redirectTo(path: string): Response {
 }
 
 export async function POST(request: Request): Promise<Response> {
-  const form = await request.formData();
+  // 非表单请求体（爬虫 POST JSON、扫描器探测、content-type 错配）会让 formData() 抛错，
+  // 未捕获就是 500（issue #51）。这是**公开**端点，别让一个乱发的 POST 变成错误页：
+  // 按「表单不合法」处理，回订阅页说明。
+  const form = await request.formData().catch(() => null);
+  if (form === null) {
+    return redirectTo('/subscribe?error=invalid_form');
+  }
 
   // 邮件通道未配置：直接拒绝，不写库不发信（issue #17）
   if (!mailerReady()) {

@@ -57,13 +57,27 @@ async function openDatabase(): Promise<AppDatabase> {
 }
 
 async function openPostgres(): Promise<AppDatabase> {
-  const pool = new Pool({ connectionString: process.env.DATABASE_URL });
+  const pool = new Pool({
+    connectionString: process.env.DATABASE_URL,
+    // 超时四件套（issue #51）：pg 的默认值是「无限等」。TCP 连上了但服务端不响应、
+    // 或连接池被占满时，查询会一直挂着：web 是 force-dynamic SSR，每个请求都要查库
+    // —— 池子一挂整站一起卡死，且没有任何日志或告警；worker 的任务是串行的，一个
+    // 挂住的查询就让整轮抓取停在那里。取值依据：本库量级数百行、正常查询毫秒级，
+    // 5s 建连 / 15s 语句已比正常路径宽两个数量级。
+    connectionTimeoutMillis: 5_000,
+    statement_timeout: 15_000,
+    idle_in_transaction_session_timeout: 15_000,
+    max: 10,
+  });
   const db = drizzlePostgres(pool, { schema: postgresSchema });
   // 并发启动竞态：compose 同时拉起 web/worker，两者都会执行迁移，裸跑会因
   // __drizzle_migrations 表重复创建而崩（实测 23505 duplicate key）。用会话级
   // advisory lock 串行化：后到者等待，随后发现迁移已应用即空跑。
   const lockClient = await pool.connect();
   try {
+    // 等锁也算「语句耗时」，会被 statement_timeout 掐掉 —— 迁移这一条连接上关掉它
+    // （另一容器正在迁时，等多久取决于对方的迁移时长，不该被 15s 判死）。
+    await lockClient.query('SET statement_timeout = 0');
     await lockClient.query('SELECT pg_advisory_lock($1)', [MIGRATION_LOCK_KEY]);
     await migratePostgres(db, { migrationsFolder: migrationsFolder('postgres') });
   } finally {

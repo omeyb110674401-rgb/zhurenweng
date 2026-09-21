@@ -344,3 +344,47 @@ describe('部署环境变量契约（compose ↔ .env.example ↔ docs ↔ 代�
     );
   });
 });
+
+/** compose 里某个服务的文本块（到下一个两空格缩进的服务名为止）。 */
+function serviceBlock(text, name) {
+  const lines = text.split(/\r?\n/);
+  const start = lines.findIndex((line) => line === `  ${name}:`);
+  assert.ok(start >= 0, `compose 应有 ${name} 服务`);
+  const out = [];
+  for (let i = start + 1; i < lines.length; i += 1) {
+    if (/^ {2}[a-z]/.test(lines[i])) break;
+    out.push(lines[i]);
+  }
+  return out.join('\n');
+}
+
+/**
+ * 构建与部署卫生（issue #51 审计发现的两处「本机 / 部署环境」缺口）。
+ *
+ * 这两条都属于「配置与文件写错时不报错、只静默出事」，所以和上面的环境变量契约放在
+ * 同一个文件里由测试钉死。
+ */
+describe('构建与部署卫生', () => {
+  const dockerignoreText = read('.dockerignore');
+  const dockerfileWeb = read('Dockerfile.web');
+
+  it('.dockerignore 排除 .env（web 镜像整仓 COPY . .）', () => {
+    // 不排除的后果：POSTGRES_PASSWORD / MEILI_MASTER_KEY / ADMIN_TOKEN / SMTP_PASS /
+    // GLM_API_KEY 会随镜像层分发（镜像可导出、可 docker save，事后删文件也不会从层里
+    // 消失），而 docs/deploy.md 第 3 节正是让人把 .env 建在仓库根目录。
+    assert.match(dockerfileWeb, /COPY \. \./, '前提变了：web 镜像若不再整仓拷贝，本条可重新评估');
+    const entries = dockerignoreText.split(/\r?\n/).map((line) => line.trim());
+    assert.ok(entries.includes('.env'), '.dockerignore 必须逐项列出 .env（不靠通配符的巧合）');
+  });
+
+  it('compose 的命令最后一步 exec：PID 1 必须是 node，否则 SIGTERM 到不了进程', () => {
+    // `sh -c "... && npm run worker"` 的 PID 1 是 sh，而非交互式 sh 不转发信号 ——
+    // docker stop / `compose up -d` 重建时进程收不到 SIGTERM，只能在宽限期后被 SIGKILL，
+    // worker 的优雅退出（等在途轮次收尾）因此形同虚设。
+    for (const service of ['web', 'worker']) {
+      const block = serviceBlock(composeText, service);
+      assert.match(block, /command: sh -c ".*&& exec /, `${service} 的 command 应在最后一步 exec`);
+      assert.match(block, /stop_grace_period: \d+s/, `${service} 应显式声明宽限期`);
+    }
+  });
+});

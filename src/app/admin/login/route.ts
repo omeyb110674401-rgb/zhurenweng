@@ -12,7 +12,17 @@ import { HTML_HEADERS, redirectToAdmin } from '../guard';
 export const dynamic = 'force-dynamic';
 
 export async function POST(request: Request): Promise<Response> {
-  const form = await request.formData();
+  // 非表单请求体（扫描器探测、content-type 错配）会让 formData() 抛错 → 500（issue #51）。
+  // 登录页是公开可达的：按「令牌不对」处理，返回同一张 401 引导页即可，不必暴露 500。
+  const form = await request.formData().catch(() => null);
+  if (form === null) {
+    return new Response(
+      adminPageDocument(
+        renderUnauthorizedBody({ tokenConfigured: configuredAdminToken() !== null, mismatch: true }),
+      ),
+      { status: 401, headers: HTML_HEADERS },
+    );
+  }
   const token = String(form.get('token') ?? '');
   const expected = configuredAdminToken();
 

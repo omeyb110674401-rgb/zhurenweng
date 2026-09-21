@@ -24,6 +24,17 @@ export interface SmtpMailerOptions {
   from: string;
 }
 
+/**
+ * SMTP 超时（issue #51）：nodemailer 的默认值是「很宽松」—— socketTimeout 10 分钟、
+ * connectionTimeout 2 分钟。worker 是串行的：一个黑洞 SMTP 主机（防火墙丢包、
+ * 服务商限流）会让每条提醒卡满默认超时，整轮任务停在那里，而且**没有任何告警**
+ * （提醒发送失败只记日志）。取值依据：正常 SMTP 握手在秒级，10s 建连 / 20s 单封
+ * 已经比任何正常路径宽一个数量级。
+ */
+const SMTP_CONNECTION_TIMEOUT_MS = 10_000;
+const SMTP_GREETING_TIMEOUT_MS = 10_000;
+const SMTP_SOCKET_TIMEOUT_MS = 20_000;
+
 export class SmtpMailer implements MailerPort {
   readonly provider = 'smtp';
 
@@ -40,6 +51,9 @@ export class SmtpMailer implements MailerPort {
         options.user !== undefined && options.pass !== undefined
           ? { user: options.user, pass: options.pass }
           : undefined,
+      connectionTimeout: SMTP_CONNECTION_TIMEOUT_MS,
+      greetingTimeout: SMTP_GREETING_TIMEOUT_MS,
+      socketTimeout: SMTP_SOCKET_TIMEOUT_MS,
     });
   }
 
