@@ -52,9 +52,15 @@ const MAX_REDIRECT_HOPS = 5;
  * 400ms 明显高于连续机器请求的间隔、又远低于人工浏览节奏。
  */
 const DETAIL_FETCH_INTERVAL_MS = 400;
-// HTTP 头只能是 ByteString，UA 必须保持 ASCII
-const USER_AGENT =
-  'zhurenweng-crawler/0.1 (+https://github.com/omeyb110674401-rgb/zhurenweng; gov-notice aggregator)';
+/**
+ * 爬虫 UA（HTTP 头只能是 ByteString，必须保持 ASCII）。
+ *
+ * 联系地址指向**本站**而不是代码仓库：UA 里的 URL 是给源站运维看的 ——
+ * 他们若因流量来查我们是谁，落到一个能说明来意的页面上才有意义。
+ * （原先是 GitHub 仓库地址，2026-09-21 该账号被停用、链接 404；抓取脚本里
+ * 早已统一用本站地址，这里跟上。）
+ */
+const USER_AGENT = 'zhurenweng-crawler/0.1 (+https://cn101.top; gov-notice aggregator)';
 
 /** 两行小工具：等待若干毫秒（礼貌间隔，见 DETAIL_FETCH_INTERVAL_MS）。 */
 function sleep(ms: number): Promise<void> {
