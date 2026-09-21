@@ -42,16 +42,28 @@ for file in "$@"; do
     echo "文件不存在：$file" >&2
     exit 1
   fi
-  # 换行归一（CRLF → LF）后取哈希：与远端 `tr -d '\r'` 的落地结果对齐
+  # 二进制文件（含 NUL 字节：PNG / ICO / gzip 等）**不能**做换行归一：
+  # 压缩数据里可能恰好出现 0x0D 0x0A 字节对，归一化会静默改掉内容，而校验用的是
+  # 同一套变换 —— 于是校验会通过、文件却是坏的（2026-09-21 传 issue #53 的三张
+  # 品牌图时发现：og-image.png 有 1 处、favicon.ico 有 3 处 CRLF 字节对）。
+  if python -c "import sys; sys.exit(0 if b'\x00' in open(sys.argv[1],'rb').read() else 1)" "$file"; then
+    normalize=0
+    echo "（二进制文件，按原始字节传输与校验）$file"
+  else
+    normalize=1
+  fi
   local_sum=$(python -c "
 import hashlib,sys
-print(hashlib.sha256(open(sys.argv[1],'rb').read().replace(b'\r\n',b'\n')).hexdigest())
-" "$file")
+data=open(sys.argv[1],'rb').read()
+if sys.argv[2]=='1': data=data.replace(b'\r\n',b'\n')
+print(hashlib.sha256(data).hexdigest())
+" "$file" "$normalize")
   b64gz=$(python -c "
 import base64,gzip,sys
-data=open(sys.argv[1],'rb').read().replace(b'\r\n',b'\n')
+data=open(sys.argv[1],'rb').read()
+if sys.argv[2]=='1': data=data.replace(b'\r\n',b'\n')
 print(base64.b64encode(gzip.compress(data,9)).decode())
-" "$file")
+" "$file" "$normalize")
 
   if [ "${#b64gz}" -le "$MAX_CMD_CHARS" ]; then
     run_remote "mkdir -p \"\$(dirname '$REMOTE_ROOT/$file')\" && echo $b64gz | base64 -d | gzip -d > '$REMOTE_ROOT/$file'"
@@ -59,9 +71,16 @@ print(base64.b64encode(gzip.compress(data,9)).decode())
     echo "载荷压缩后仍为 ${#b64gz} 字符，退化为分块传输：$file" >&2
     b64raw=$(python -c "
 import base64,sys
-data=open(sys.argv[1],'rb').read().replace(b'\r\n',b'\n')
+data=open(sys.argv[1],'rb').read()
+if sys.argv[2]=='1': data=data.replace(b'\r\n',b'\n')
 print(base64.b64encode(data).decode())
-" "$file")
+" "$file" "$normalize")
+    # 分块路径同样要按类型决定是否 `tr -d '\r'`：文本要（远端落地为 LF），二进制绝不能
+    if [ "$normalize" -eq 1 ]; then
+      strip_cr="tr -d '\\r'"
+    else
+      strip_cr='cat'
+    fi
     total=${#b64raw}
     offset=0
     first=1
@@ -74,7 +93,7 @@ print(base64.b64encode(data).decode())
       else
         redirect='>>'
       fi
-      run_remote "mkdir -p \"\$(dirname '$REMOTE_ROOT/$file')\" && echo $part | base64 -d | tr -d '\r' $redirect '$REMOTE_ROOT/$file'"
+      run_remote "mkdir -p \"\$(dirname '$REMOTE_ROOT/$file')\" && echo $part | base64 -d | $strip_cr $redirect '$REMOTE_ROOT/$file'"
       echo "  …已传 $offset/$total 字符" >&2
     done
   fi
