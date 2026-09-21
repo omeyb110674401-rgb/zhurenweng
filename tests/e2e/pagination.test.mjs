@@ -248,7 +248,16 @@ describe('issue #19：首页分页与真实合计', () => {
     const doc1 = parseList(page1);
     const ids1 = visibleIds(page1);
     assert.equal(doc1['@type'], 'ItemList');
-    assert.equal(doc1.numberOfItems, ids1.length, 'numberOfItems 必须等于本页可见条数');
+    // numberOfItems 是整份列表的合计，不是本页条数（issue #54，改写了 issue #49 的口径）：
+    // 位置按整份列表连续编号（第 2 页从 PAGE_SIZE+1 起），总数却写本页的 3 条，
+    // 等于在同一段结构化数据里声明「这份列表共 3 件」同时给出「第 4 件」的位置；
+    // 线上实测该矛盾表现为 numberOfItems=50 对页面可见的「共 185 条」。
+    assert.equal(
+      doc1.numberOfItems,
+      TOTAL,
+      `numberOfItems 应为整份列表合计 ${TOTAL}（与页面「共 N 条」同口径）`,
+    );
+    assert.equal(doc1.itemListElement.length, ids1.length, 'itemListElement 仍只含本页可见条目');
     assert.deepEqual(
       doc1.itemListElement.map((item) => item.url.split('/').pop()),
       ids1,
@@ -260,11 +269,11 @@ describe('issue #19：首页分页与真实合计', () => {
       '第 1 页位置从 1 起连续编号',
     );
 
-    // 第 2 页：位置接着上一页排（每页 PAGE_SIZE 条），不撞位
+    // 第 2 页：位置接着上一页排（每页 PAGE_SIZE 条），不撞位；总数仍是全量
     const page2 = await fetchHome('?page=2');
     const doc2 = parseList(page2);
     const ids2 = visibleIds(page2);
-    assert.equal(doc2.numberOfItems, ids2.length);
+    assert.equal(doc2.numberOfItems, TOTAL, '分页视图的 numberOfItems 同样是全量合计');
     assert.deepEqual(
       doc2.itemListElement.map((item) => item.position),
       ids2.map((_, index) => PAGE_SIZE + index + 1),
@@ -274,7 +283,6 @@ describe('issue #19：首页分页与真实合计', () => {
   });
 
   it('索引口径：筛选视图 noindex、分页视图自指 canonical、首页可收录（issue #41）', async () => {
-
     // 第 1 页：可收录（noindex 不能误伤首页），canonical 指根地址
     // （Next 会把根地址规范化为不带尾斜杠的 origin —— `https://zw.test` 与
     //  `https://zw.test/` 是同一资源，搜索侧等价）
@@ -309,5 +317,62 @@ describe('issue #19：首页分页与真实合计', () => {
       assert.equal(robotsMeta(html), 'noindex, follow', `${query} 应 noindex, follow`);
       assert.equal(canonicalHref(html), null, `${query} 是参数变体，不该给出 canonical`);
     }
+  });
+
+  /**
+   * 排序必须构成**全序**，否则 offset 分页会重复 / 漏行（issue #54）。
+   *
+   * 线上真实事故：两条同轮抓取的工信部条目 status / deadline_at / fetched_at 三项全等
+   * （fetched_at 是本轮批次时间戳，不逐条生成），恰好落在第 1 / 2 页的边界上。
+   * `ORDER BY … LIMIT 50 OFFSET 0` 与 `LIMIT 50 OFFSET 50` 是两次独立查询，数据库对并列行
+   * 的解析次序随取的 N 变化 → 同一条目在两页各出现一次，另一条目被挤出全部页面
+   * （185 个槽位只覆盖 184 个唯一条目，被挤出的那条收录了却从导航不可达）。
+   *
+   * 本用例把全部条目的三个排序键压成完全相同，让**每一处**页边界都落在并列组里，
+   * 然后要求分页切片恰好构成对全集的一次划分。
+   *
+   * **诚实标注这条用例能挡住什么**：实测它在修复前**也通过** —— SQLite 对小规模并列集
+   * 的排序结果恰好与 N 无关，复现不了症状；线上出问题的是 PostgreSQL 的有界 top-N
+   * 排序（`ORDER BY … LIMIT 50 OFFSET 50` 与 `OFFSET 0` 取的 N 不同，并列行被摆到不同
+   * 位置）。所以本用例锁的是「分页切片必须是一次划分」这条**不变量**，防止将来有人
+   * 改掉排序而不再有人兜住它；它**不是** issue #54 那个线上事故的复现脚本。
+   * 事故侧的验证要在生产 PostgreSQL 上做（见 docs/pending-issues/54 的核验命令）。
+   *
+   * 注意：本用例会改写库内容，必须留在本 describe 的最后。
+   */
+  it('排序键完全并列时，分页切片仍恰好覆盖全集、互不重叠（issue #54）', async () => {
+    const { default: Database } = await import('better-sqlite3');
+    const db = new Database(dbFile);
+    try {
+      db.prepare(
+        `update notices set status = 'open', deadline_at = '2030-01-01', fetched_at = '2030-01-01T00:00:00.000Z'`,
+      ).run();
+    } finally {
+      db.close();
+    }
+
+    const visibleIds = (html) =>
+      [...html.matchAll(/data-testid="notice-title-link"[^>]*href="\/notices\/([0-9a-f]+)"/g)].map(
+        (match) => match[1],
+      );
+
+    const pages = [];
+    for (let page = 1; page <= Math.ceil(TOTAL / PAGE_SIZE); page += 1) {
+      pages.push(visibleIds(await fetchHome(page === 1 ? '' : `?page=${page}`)));
+    }
+    const collected = pages.flat();
+
+    assert.equal(collected.length, TOTAL, '翻完所有页应恰好得到全量条目');
+    assert.equal(new Set(collected).size, TOTAL, '并列排序下 offset 分页不得重复任何条目');
+    // 页边界的直接症状：上一页末条 == 下一页首条
+    for (let i = 1; i < pages.length; i += 1) {
+      assert.notEqual(
+        pages[i - 1].at(-1),
+        pages[i][0],
+        `第 ${i} / ${i + 1} 页边界出现同一条目（并列行未被唯一键定序）`,
+      );
+    }
+    // 全序成立 → 顺序稳定：重复抓取同一页必须逐条一致
+    assert.deepEqual(visibleIds(await fetchHome('?page=2')), pages[1], '同一页重复请求顺序必须一致');
   });
 });

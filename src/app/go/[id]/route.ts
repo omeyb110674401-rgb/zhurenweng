@@ -34,8 +34,12 @@ const REDIRECT_HEADERS = {
   'x-robots-tag': 'noindex',
 } as const;
 
-/** 错误响应同样不该被缓存。 */
-const NO_STORE = { 'cache-control': 'no-store' } as const;
+/**
+ * 错误响应的头（issue #54）：此前这里只有 no-store，**丢了 `x-robots-tag: noindex`** ——
+ * 而 404 恰恰是爬虫最容易撞到的响应（`/nope`、已被合并掉的条目 ID），没声明 noindex
+ * 就等于把错误页留给搜索引擎收录。直接复用 302 那一份常量，两边不会各自漂移。
+ */
+const ERROR_HEADERS = { ...REDIRECT_HEADERS } as const;
 
 /**
  * 面向读者的错误页（issue #53）：此前 404 / 500 直接回 `{"error":"未找到该公示条目"}`
@@ -62,7 +66,7 @@ function errorPage(status: number, message: string): NextResponse {
   ].join('');
   return new NextResponse(html, {
     status,
-    headers: { ...NO_STORE, 'content-type': 'text/html; charset=utf-8' },
+    headers: { ...ERROR_HEADERS, 'content-type': 'text/html; charset=utf-8' },
   });
 }
 

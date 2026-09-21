@@ -162,6 +162,26 @@ describe('issue #39：详情页 JSON-LD', () => {
     );
   });
 
+  it('列表页 ItemList 的 numberOfItems 是整份列表的总数，不是本页条数（issue #54）', () => {
+    const notices = [
+      noticeRecord({ id: 'aaa', title: '第一条' }),
+      noticeRecord({ id: 'bbb', title: '第二条' }),
+    ];
+    // 位置按整份列表编号（第 2 页从 3 起），总数也必须按整份列表声明，
+    // 否则同一段结构化数据里会出现「共 2 件」与「位置 3」互相矛盾。
+    const doc = buildNoticeListJsonLd({
+      notices,
+      siteUrl: SITE,
+      startPosition: 3,
+      totalItems: 185,
+    });
+    assert.equal(doc.numberOfItems, 185);
+    assert.equal(doc.itemListElement[0].position, 3);
+
+    // 不传时回落本页条数：单页列表两者本就相等，缺省值仍自包含
+    assert.equal(buildNoticeListJsonLd({ notices, siteUrl: SITE }).numberOfItems, 2);
+  });
+
   it('列表页 ItemList 同样转义 `<`（标题来自源站页面）', () => {
     const json = serializeJsonLd(
       buildNoticeListJsonLd({

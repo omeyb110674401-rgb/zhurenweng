@@ -198,12 +198,14 @@ export default async function HomePage({ searchParams }: HomePageProps) {
     .join(' · ');
 
   // 列表页结构化数据（issue #49）：描述**本页真实渲染**的那批条目，位置从本页首条起
-  // 连续编号（分页时不会与上一页撞位）。
+  // 连续编号（分页时不会与上一页撞位）；numberOfItems 给整份列表的合计 `total`
+  // （issue #54，见 lib/notice-jsonld.ts 的说明），与页面可见的「共 N 条」同口径。
   const listJsonLd = serializeJsonLd(
     buildNoticeListJsonLd({
       notices,
       siteUrl: siteUrl(),
       startPosition: (page - 1) * size + 1,
+      totalItems: total,
     }),
   );
 

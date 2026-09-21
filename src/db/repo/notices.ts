@@ -51,12 +51,22 @@ export interface UpsertNoticeInput {
  * 3. 以抓取时间降序兜底。
  * 双方言交集下 NULL 排序位置不同（SQLite 在前、PostgreSQL 在后），
  * 故用显式 CASE 归一化。
+ *
+ * **末位必须补唯一键 `id`（issue #54）**：上面四个键都不唯一 —— 同一轮抓取入库的
+ * 一批条目，status / deadlineAt / fetchedAt 可以完全相同（fetchedAt 是本轮的批次
+ * 时间戳，不是逐条生成的）。而分页是 `LIMIT n OFFSET m`，并列行的相对次序由数据库
+ * 的排序实现决定：`ORDER BY ... LIMIT 50 OFFSET 0` 与 `LIMIT 50 OFFSET 50` 的有界
+ * top-N 排序取的 N 不同，并列行在两页里被摆到不同的位置。线上实测的后果是页边界上
+ * 同一条目在两页各出现一次、另一条目被挤出所有页面（收录了却从导航不可达）。
+ * 补上唯一键让全序成立，分页切片才互不重叠、合起来恰好等于全集。
+ * `id` 由原文 URL 的 sha256 前缀确定性生成（见 UpsertNoticeInput），天然唯一且稳定。
  */
 const AGGREGATION_ORDER = [
   sql`case when ${notices.status} = 'open' then 0 else 1 end`,
   sql`case when ${notices.deadlineAt} is null then 1 else 0 end`,
   asc(notices.deadlineAt),
   desc(notices.fetchedAt),
+  asc(notices.id),
 ];
 
 export async function listNotices(options: ListNoticesOptions = {}): Promise<NoticeRecord[]> {

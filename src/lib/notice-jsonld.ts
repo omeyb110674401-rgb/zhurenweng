@@ -107,21 +107,30 @@ export function buildNoticeJsonLd({
  *
  * 与详情页同一套自律：只描述页面上**真实可见**的那批条目（`notices` 就是渲染用的那一份），
  * 序列化仍走 `serializeJsonLd`（转义 `<`）。
+ *
+ * `numberOfItems` 是**整份列表的总数**而不是本页条数（issue #54）：`position` 已经按整份
+ * 列表连续编号（第 2 页从 51 起），声明的总数却写本页的 50，等于在同一段结构化数据里
+ * 说「这份列表有 50 件、其中第 51 件的位置是 51」——自相矛盾，且与页面可见的「共 N 条」
+ * 冲突（线上实测 numberOfItems=50 对 共 185 条）。缺省回落到本页条数，保证不传时
+ * 仍然自包含（单页列表两者本就相等）。
  */
 export function buildNoticeListJsonLd({
   notices,
   siteUrl,
   startPosition = 1,
+  totalItems,
 }: {
   notices: NoticeRecord[];
   siteUrl: string;
   /** 本页第一条在整份列表中的位置（分页用；默认 1） */
   startPosition?: number;
+  /** 整份列表的总条数（分页时用 count 查询的真实值；默认取本页条数） */
+  totalItems?: number;
 }): Record<string, unknown> {
   return {
     '@context': 'https://schema.org',
     '@type': 'ItemList',
-    numberOfItems: notices.length,
+    numberOfItems: totalItems ?? notices.length,
     itemListElement: notices.map((notice, index) => ({
       '@type': 'ListItem',
       position: startPosition + index,

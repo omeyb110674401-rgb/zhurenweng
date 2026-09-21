@@ -1,11 +1,22 @@
 import type { Metadata, Viewport } from 'next';
 import type { ReactNode } from 'react';
 import { siteUrl } from '@/lib/site-url';
+import { llmReady } from '@/lib/llm-availability';
 import { OG_IMAGE } from '@/lib/page-metadata';
 import './globals.css';
 
 // metadataBase：canonical 与分享链接需要绝对地址（生产由 compose 注入 SITE_URL）
 const base = siteUrl();
+
+/**
+ * 站点描述的两个版本（issue #54）：AI 那版只在端口真的可用时才说。
+ *
+ * 与 `siteUrl()` 一样在模块作用域求值 —— 换配置需要重启容器，届时本行会重新执行，
+ * 所以取到的一定是进程实际生效的那份环境（详情页的 AI 摘要门控同理）。
+ */
+const SITE_DESCRIPTION = llmReady()
+  ? '聚合国家级政府公示与征求意见稿，用 AI 摘要帮你发现、读懂、参与：发现 · 读懂 · 行动。'
+  : '聚合国家级政府公示与征求意见稿：按征求意见截止日期倒计时排列，速读与提交方式逐字摘自官方原文，并给出官方提交入口。';
 
 /**
  * 移动端浏览器界面色（issue #53）：地址栏/状态栏跟随品牌琥珀色，与
@@ -18,8 +29,11 @@ export const viewport: Viewport = {
 export const metadata: Metadata = {
   metadataBase: new URL(base),
   title: '主人翁 —— 政府公示与征求意见信息聚合',
-  description:
-    '聚合国家级政府公示与征求意见稿，用 AI 摘要帮你发现、读懂、参与：发现 · 读懂 · 行动。',
+  // 描述按 `llmReady()` 取版本（issue #54）：这句是搜索引擎结果里对本站的**对外承诺**，
+  // 而详情页的 AI 摘要区块由同一个门控决定显不显示。线上出现过描述写着「用 AI 摘要」、
+  // 实际抽样 20/20 的条目都显示「AI 结构化解读尚未启用」的错配。未启用时改为陈述
+  // 站点真实在做的事（官方原文聚合 + 程序摘录 + 截止日期倒计时）。
+  description: SITE_DESCRIPTION,
   // 分享元数据（条目详情页各自覆盖 title / description / og:url）
   openGraph: {
     type: 'website',

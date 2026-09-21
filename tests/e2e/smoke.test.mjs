@@ -38,6 +38,9 @@ before(async () => {
       FIXTURES_DIR: fixturesDir,
       // 站点对外地址：robots / sitemap / canonical / og:url 都基于它（生产由 compose 注入）
       SITE_URL: 'https://zw.test',
+      // ICP 备案号（issue #54）：由运行时环境注入，用于钉住 404 页不得被构建期预渲染
+      // （构建发生在 `next build` 阶段、与本变量无关，见下方 404 用例的说明）
+      ICP_NUMBER: '湘ICP备2026000000号',
     },
   });
 });
@@ -122,6 +125,30 @@ describe('冒烟：脚手架与端到端骨架', () => {
     const detail = await fetch(`${app.url}/notices/0000000000000000`);
     assert.equal(detail.status, 404);
     assert.match(await detail.text(), /没找到这个页面/);
+  });
+
+  /**
+   * 404 页必须逐请求渲染，页脚取的是**运行时**环境（issue #54）。
+   *
+   * 线上事故：根 `not-found.tsx` 此前没有声明 `dynamic`，被 Next 在构建期预渲染成静态
+   * HTML，于是页脚里两处运行时判断固化成了构建期的值 ——
+   * - `IcpFiling` 读 `process.env.ICP_NUMBER`，构建环境没有它 → 404 页对外显示
+   *   「ICP 备案：待备案（占位）」，同域其它页显示真实备案号；
+   * - `SiteFooter` 的 `mailerReady()` 在构建期取到默认 `stub` → 404 页挂着「订阅提醒」
+   *   入口，而生产按真实配置把它隐藏了。
+   *
+   * 本用例能区分两种情况：`next build` 在注入 `ICP_NUMBER` **之前**就已跑完，
+   * 所以一旦本页退回预渲染，服务出去的就是构建产物里那份占位文案，断言必然失败。
+   * 备案号与订阅门控出自同一次渲染，守住这一个即守住了机制。
+   */
+  it('404 页页脚取运行时环境变量，不得固化构建期的占位值（issue #54）', async () => {
+    const html = await (await fetch(`${app.url}/no-such-page`)).text();
+    assert.match(html, /湘ICP备2026000000号/, '404 页应显示运行时注入的备案号');
+    assert.ok(!html.includes('待备案（占位）'), '404 页不得停留在构建期算出的占位文案');
+
+    // 对照：正常页面本来就是运行时渲染，这里一并钉住，避免两端口径分叉
+    const home = await (await fetch(`${app.url}/`)).text();
+    assert.match(home, /湘ICP备2026000000号/, '首页显示同一个备案号');
   });
 
   it('fixture 源站按目录提供快照页面，并对缺失与穿越请求返回错误', async () => {

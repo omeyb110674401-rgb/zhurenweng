@@ -1,4 +1,9 @@
 import type { MetadataRoute } from 'next';
+import { llmReady } from '@/lib/llm-availability';
+
+// 描述要按运行时环境取（issue #54）：本文件此前没有声明 dynamic，一旦引入 `llmReady()`
+// 就会重演 not-found 的坑 —— 构建期算出的值被固化（见 src/app/not-found.tsx 的说明）。
+export const dynamic = 'force-dynamic';
 
 /**
  * Web App Manifest（issue #53）：此前没有 manifest，「添加到主屏」在安卓上得到
@@ -12,7 +17,10 @@ export default function manifest(): MetadataRoute.Manifest {
   return {
     name: '主人翁 —— 政府公示与征求意见信息聚合',
     short_name: '主人翁',
-    description: '聚合国家级政府公示与征求意见稿，用 AI 摘要帮你发现、读懂、参与。',
+    // AI 那半句只在端口真的可用时说（issue #54），与 layout 的 description 同门控
+    description: llmReady()
+      ? '聚合国家级政府公示与征求意见稿，用 AI 摘要帮你发现、读懂、参与。'
+      : '聚合国家级政府公示与征求意见稿，按截止日期倒计时排列，速读摘自官方原文并给出提交入口。',
     start_url: '/',
     display: 'standalone',
     background_color: '#f8fafc',

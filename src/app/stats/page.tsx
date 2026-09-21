@@ -147,6 +147,14 @@ export default async function StatsPage() {
             aria-label="各部门公示量表（窄屏可横向滚动）"
           >
           <table className="stat-table" data-testid="agency-totals-table">
+            {/* 表格的可访问名称（issue #54）：读屏进到表格里只会念「表格」，说不清这
+                是哪张表。上面那行 h2 不在表格的无障碍关系里（h2 只给 section 命名），
+                所以要一份 caption。用 .sr-only 藏着：文案与紧邻的 h2 + 说明段重复，
+                再显式渲染一遍是占位的噪声。口径按「牵头机关 / 全部收录历史」自包含地
+                写清楚，读者从表格里跳出来也知道数字是什么。 */}
+            <caption className="sr-only">
+              各部门公示量：按牵头机关聚合的公示条目数，覆盖全部收录历史
+            </caption>
             <thead>
               <tr>
                 <th scope="col">发布机关</th>
@@ -215,6 +223,13 @@ export default async function StatsPage() {
             aria-label="公示量月度趋势表（窄屏可横向滚动）"
           >
           <table className="stat-table" data-testid="trend-table">
+            {/* 同上（issue #54）。这张表的口径和上面那张不一样（近 6 个月 × 按月、
+                行小计是区间和），所以 caption 要把窗口与聚合方式一起说清，
+                不能只写「月度趋势」。 */}
+            <caption className="sr-only">
+              公示量月度趋势：按发布月份聚合的公示条目数，窗口为 {months[0]} 至{' '}
+              {months[months.length - 1]}
+            </caption>
             <thead>
               <tr>
                 <th scope="col">发布机关</th>

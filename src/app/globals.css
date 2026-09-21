@@ -3,7 +3,16 @@
   --ink: #1f2937;
   --ink-soft: #4b5563;
   --accent: #b45309;
+  /* 装饰性边框与分隔线：卡片、表格线、页眉页脚分隔、领域 chip、进度条。
+     WCAG 1.4.11 的 3:1 只约束「识别控件所必需的边界」，这些都不在其列 —— 它们靠
+     圆角、留白与相邻文字即可被识别，加深只会让整站每个表面都描一圈中灰。 */
   --line: #e5e7eb;
+  /* 表单控件的边框（issue #54）：输入框的可识别性**只**靠这条边框（无底色差、
+     无前置图标），因此必须满足 1.4.11 的 3:1。取「两种底色上都过 3:1 的最浅中性灰」：
+     #919191 = 3.15:1（对 #fff）/ 3.01:1（对 --paper），再浅一档 #929292 只有 2.97。
+     直觉上的 gray-300 #d1d5db 实测仅 1.41:1，不够。
+     刻意与 --line 拆成两个 token：合并成一个会把 19 处装饰性边框一起拖深。 */
+  --line-control: #919191;
   --paper: #f8fafc;
 }
 
@@ -50,6 +59,21 @@ body {
 
 .skip-link:focus {
   left: 0;
+}
+
+/* 只给读屏的文本（issue #54）：表格 <caption> 这类「结构上必须存在、视觉上却是
+   重复」的说明文案用它。此前全站没有这个工具类，而 display:none / visibility:hidden
+   会把内容连同无障碍树一起摘掉，等于没写 —— 用 1px 裁剪盒子的标准做法。 */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
 }
 
 .site-header {
@@ -609,7 +633,7 @@ body {
 .form-field input[type='email'],
 .form-field input[type='text'] {
   width: 100%;
-  border: 1px solid var(--line);
+  border: 1px solid var(--line-control);
   border-radius: 6px;
   padding: 8px 10px;
   font-size: 14px;
@@ -656,7 +680,7 @@ body {
   font-family: inherit;
   color: var(--ink);
   background: #fff;
-  border: 1px solid var(--line);
+  border: 1px solid var(--line-control);
   border-radius: 8px;
 }
 
@@ -1113,7 +1137,7 @@ body {
   font-family: inherit;
   color: var(--ink);
   background: var(--paper);
-  border: 1px solid var(--line);
+  border: 1px solid var(--line-control);
   border-radius: 6px;
 }
 
@@ -1124,7 +1148,7 @@ body {
   font-family: inherit;
   color: var(--ink);
   background: var(--paper);
-  border: 1px solid var(--line);
+  border: 1px solid var(--line-control);
   border-radius: 6px;
 }
 
@@ -1390,6 +1414,26 @@ body {
     display: inline-flex;
     align-items: center;
     min-height: 40px;
+  }
+
+  /* 页脚与站内导航里的纯文字内联链接（issue #54）：上面那批放大了，但触屏上实测
+     页脚「数据统计」的点击区只有 18px 高、「RSS 订阅」17px —— 手指点这种目标全靠猜。
+     min-height 对 display: inline 不生效，所以先转 inline-block，再用上下 padding 把
+     命中区摊到约 40px（10×2 + 约 20px 行高），与同一块里 chip / 翻页的口径一致。
+     刻意只列页脚与站内导航这一层：
+       - 正文句子中间的内联链接（详情页说明文字里的「官方原文页面」、`.section-hint a`）
+         不动 —— 它们和文字共排行盒，撑高会把整行行距拉乱；
+       - 统计表格里的钻取数字（`.stat-drill`、表内机关名链接）不动 —— 趋势表靠固定
+         列宽工作，格子长高会连带把横滚容器撑出更高的空行。 */
+  .footer-nav a,
+  .site-nav a,
+  .rss-link {
+    display: inline-block;
+    min-height: 40px;
+    padding: 10px 6px;
+    /* .rss-link 夹在 p.list-actions 的句子中间：inline-block 默认基线对齐，
+       40px 高的盒子会把同排文字拽到下沿，改居中才不会错位。 */
+    vertical-align: middle;
   }
 }
 
