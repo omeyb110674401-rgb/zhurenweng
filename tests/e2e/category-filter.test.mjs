@@ -372,6 +372,40 @@ describe('issue #9：领域标签自动打标与分类浏览筛选', () => {
     assert.match(combinedNone, /data-testid="filter-clear-empty"/, '空态应提供清除全部筛选入口');
   });
 
+  it('关键词多词输入：拆词后逐词 AND（issue #33）', async () => {
+    // 旧实现把整串当一个子串匹配，于是**任何多词输入都必然零命中**
+    // （线上实测：首页「未成年 网络」0 条、搜索页 12 条）
+    const bothWords = await fetchHome(`/?q=${encodeURIComponent('道路交通安全 征求意见')}`);
+    assert.deepEqual(listOrder(bothWords), [TITLES.npc2], '两个词都在该条目标题里，应命中');
+    assert.match(bothWords, /data-testid="filter-result-count"[^>]*>筛选后共 1 条/);
+
+    // 两个词各自都有命中，但没有一条同时含两词 → AND 语义下应为空（不是 OR）
+    const splitAcross = await fetchHome(`/?q=${encodeURIComponent('道路交通安全 核动力厂')}`);
+    assert.match(splitAcross, /data-testid="notice-empty-state"/, 'AND 语义：跨条目的两个词不应命中');
+    assert.match(splitAcross, /data-testid="filter-result-count"[^>]*>筛选后共 0 条/);
+
+    // 全角空格同样分词（用户从别处粘贴常见）
+    const ideographicSpace = await fetchHome(
+      `/?q=${encodeURIComponent('道路交通安全\u3000征求意见')}`,
+    );
+    assert.deepEqual(listOrder(ideographicSpace), [TITLES.npc2], '全角空格也要分词');
+  });
+
+  it('关键词里的 LIKE 通配符按字面处理（issue #33）', async () => {
+    // 旧实现把用户输入直接拼进 LIKE 模式串：`%` / `_` 是通配符，
+    // 线上实测 `?q=%` 返回全部 178 条、`?q=50%` 返回 12 条
+    for (const wildcard of ['%', '_', '征求意见%', '道路交通_法']) {
+      const html = await fetchHome(`/?q=${encodeURIComponent(wildcard)}`);
+      assert.match(
+        html,
+        /data-testid="notice-empty-state"/,
+        `「${wildcard}」应作为字面量匹配（fixture 里没有这种字面量，故为空）`,
+      );
+      assert.match(html, /data-testid="filter-result-count"[^>]*>筛选后共 0 条/);
+      assert.equal(extractNoticeItems(html).length, 0);
+    }
+  });
+
   it('关键词无结果：空态 + 计数为 0 + 清除筛选入口', async () => {
     const html = await fetchHome(`/?q=${encodeURIComponent('区块链')}`);
     assert.match(html, /data-testid="notice-empty-state"/);

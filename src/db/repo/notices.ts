@@ -84,12 +84,57 @@ export interface ListNoticesFilteredOptions {
   category?: string;
   /** 发布机关精确值 */
   agency?: string;
-  /** 标题 / 正文包含匹配的关键词 */
+  /**
+   * 标题 / 正文包含匹配的关键词；**空白分隔的多个词 = 都要命中**（子串、忽略大小写）。
+   * 通配符按字面处理（issue #33：`%` / `_` 不再被当成 LIKE 通配）。
+   */
   keyword?: string;
   limit?: number;
   /** 分页偏移（首页分页用；默认 0）。排序是确定性的（见 AGGREGATION_ORDER），
    *  故同一查询条件下 offset 分页不会重复或漏行。 */
   offset?: number;
+}
+
+/**
+ * 关键词最多取前 N 个词：粘贴整段话时不必生成几十个 LIKE 条件（超出部分忽略）。
+ */
+const KEYWORD_TERM_LIMIT = 10;
+
+/** LIKE 模式串里的字面量：转义 `\` `%` `_`（配合 SQL 侧的 `escape '\'`）。 */
+function likeLiteral(term: string): string {
+  return term.replaceAll('\\', '\\\\').replaceAll('%', '\\%').replaceAll('_', '\\_');
+}
+
+/**
+ * 关键词条件（issue #33）：按空白拆词，逐词做「标题或正文包含」的**子串**匹配，词之间 AND。
+ *
+ * 为什么必须拆词：此前把整串当一个子串匹配，于是**任何多词输入都必然零命中** ——
+ * 线上实测首页「未成年 网络」0 条（搜索页 12 条）、「医疗保障 监督检查」0 条（搜索页 4 条）。
+ * 筛选框的提示语是「标题 / 正文关键词」，用户输入两个词是常态；「筛选后共 0 条」把
+ * 「库里没有」和「筛选写错了」混成了同一种表现。
+ *
+ * 为什么必须转义 LIKE 通配符：`%` 与 `_` 在 LIKE 模式串里是通配符，用户输入会被当成通配 ——
+ * 线上实测 `?q=%` 返回全部 178 条、`?q=50%` 返回 12 条（都含「50」）。逐词转义并显式
+ * `escape '\'` 后，两种方言（SQLite / PostgreSQL）行为一致。
+ *
+ * 与搜索页（/search）的口径差异（刻意保留，各有用途）：本函数是子串匹配、不依赖检索索引、
+ * 不改变列表的截止日期排序 —— 检索服务不可用时首页筛选照样可用；搜索页走索引（中文按词
+ * 切分、英文前缀匹配、按相关度排序，并额外匹配 AI 摘要文本），多词查询会带上只命中部分词
+ * 的条目并排在后面。中文**单词**查询两边结果一致。
+ */
+function keywordCondition(keyword: string) {
+  const terms = keyword
+    .split(/\s+/)
+    .map((term) => term.toLowerCase())
+    .filter((term) => term.length > 0)
+    .slice(0, KEYWORD_TERM_LIMIT);
+  if (terms.length === 0) return undefined;
+  return and(
+    ...terms.map(
+      (term) =>
+        sql`(lower(${notices.title}) like ${`%${likeLiteral(term)}%`} escape '\\' or lower(${notices.bodyText}) like ${`%${likeLiteral(term)}%`} escape '\\')`,
+    ),
+  );
 }
 
 /**
@@ -117,10 +162,8 @@ function filterConditions(options: ListNoticesFilteredOptions) {
     );
   }
   if (options.keyword) {
-    const needle = `%${options.keyword.toLowerCase()}%`;
-    conditions.push(
-      sql`(lower(${notices.title}) like ${needle} or lower(${notices.bodyText}) like ${needle})`,
-    );
+    const keyword = keywordCondition(options.keyword);
+    if (keyword) conditions.push(keyword);
   }
   return conditions;
 }
