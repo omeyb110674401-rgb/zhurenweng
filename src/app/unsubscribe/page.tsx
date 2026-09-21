@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import type { Metadata } from 'next';
 import { unsubscribeTokenStatus } from '@/db/repo/subscriptions';
 
 /**
@@ -17,6 +18,12 @@ import { unsubscribeTokenStatus } from '@/db/repo/subscriptions';
  * `List-Unsubscribe-Post: List-Unsubscribe=One-Click` 后，邮件客户端自己的
  * 「退订」按钮会 POST 到同一地址，立即生效（见 lib/mail.ts）。
  */
+
+/**
+ * 不进索引（issue #38）：地址里带退订 token，一旦被收录，任何人都能拿索引里的
+ * URL 退掉别人的订阅。noindex + nofollow（这里没有需要爬虫跟随的链接）。
+ */
+export const metadata: Metadata = { robots: { index: false, follow: false } };
 
 // token 状态随退订实时变化，禁止静态预渲染。
 export const dynamic = 'force-dynamic';

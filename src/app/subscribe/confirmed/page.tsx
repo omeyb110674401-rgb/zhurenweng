@@ -1,9 +1,13 @@
 import Link from 'next/link';
+import type { Metadata } from 'next';
 
 /**
  * 订阅确认结果页（issue #7）：由 /subscribe/confirm 的 303 重定向进入，
  * 经查询参数 state 区分成功 / 链接无效 / 已退订三种结果。
  */
+
+/** 事务结果页，不进索引（issue #38）。 */
+export const metadata: Metadata = { robots: { index: false, follow: true } };
 
 export const dynamic = 'force-dynamic';
 
@@ -21,7 +25,7 @@ export default async function SubscribeConfirmedPage({ searchParams }: Subscribe
       ? '确认链接不存在或已失效（重新提交订阅会生成新链接）。请回到订阅页重新提交，获取新的确认邮件。'
       : state === 'unsubscribed'
         ? '该邮箱此前已一键退订，确认链接随之失效；如需继续接收提醒，请回到订阅页重新提交订阅。'
-        : '订阅已生效：之后每当你订阅的关键词 / 领域有新的征求意见公示，我们会在截止前 7 天、3 天各发送一封提醒邮件。每封邮件底部都可一键退订。';
+        : '订阅已生效：之后每当你订阅的关键词 / 领域有新的征求意见公示，我们会在截止前 7 天、3 天各发送一封提醒邮件。每封邮件底部都有退订入口（邮件客户端的「退订」按钮可直接退订）。';
 
   return (
     <main>

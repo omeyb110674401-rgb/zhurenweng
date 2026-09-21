@@ -1,9 +1,13 @@
 import Link from 'next/link';
+import type { Metadata } from 'next';
 
 /**
  * 退订结果页（issue #7）：由 /unsubscribe 的 303 重定向进入，
  * ok=0 表示退订链接无效，其余展示退订成功。
  */
+
+/** 事务结果页，不进索引（issue #38）。 */
+export const metadata: Metadata = { robots: { index: false, follow: false } };
 
 export const dynamic = 'force-dynamic';
 

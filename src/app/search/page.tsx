@@ -1,11 +1,22 @@
 import Link from 'next/link';
 import { redirect } from 'next/navigation';
+import type { Metadata } from 'next';
 import { getNoticesByIds } from '@/db/repo/notices';
 import { createSearchPort } from '@/lib/ports';
 import { hasSearchableQuery } from '@/lib/search/search-text';
 import { NoticeItem } from '@/app/_lib/notice-item';
 import { SearchForm } from '@/app/_lib/search-form';
 import { IcpFiling } from '@/app/_lib/icp-filing';
+
+/**
+ * 不进索引（issue #38）：搜索结果页的 URL 是 `?q=…` 的无界变体（每个关键词一个地址），
+ * 内容随查询变化且高度重复，收录它等于往索引里灌薄页。
+ *
+ * 可发现性审计发现：全站没有任何 robots meta，而 robots.txt 只挡了 /admin、/go/、/api/ ——
+ * 搜索结果页因此是可收录的，且它出现在每个页面的头部表单里（爬虫必然发现）。
+ * `follow: true` 保留链接发现：爬虫仍会顺着结果里的条目链接抓到正文页。
+ */
+export const metadata: Metadata = { robots: { index: false, follow: true } };
 
 // 搜索结果随索引持续更新，服务端实时渲染，不做静态预渲染。
 export const dynamic = 'force-dynamic';

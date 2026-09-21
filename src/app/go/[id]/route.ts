@@ -17,6 +17,22 @@ import { localDateIso } from '@/lib/dates';
 // 每次请求都要实时读库与计数，禁止静态优化与缓存。
 export const dynamic = 'force-dynamic';
 
+/**
+ * 响应头（issue #38）：
+ * - `cache-control: no-store`：这是计数端点，被任何中间层缓存都会漏计点击
+ *   （302 本身不在可启发式缓存的集合里，显式声明更稳妥）；
+ * - `x-robots-tag: noindex`：robots.txt 已 Disallow 了 /go/，这里再加一道 ——
+ *   302 响应带不了 meta 标签，只能走响应头；万一有爬虫忽略 robots.txt，
+ *   至少不会把跳转端点收录进索引。
+ */
+const REDIRECT_HEADERS = {
+  'cache-control': 'no-store',
+  'x-robots-tag': 'noindex',
+} as const;
+
+/** 错误响应同样不该被缓存。 */
+const NO_STORE = { 'cache-control': 'no-store' } as const;
+
 /** 爬虫 / 机器人 UA 特征（不区分大小写）：搜索引擎、AI 爬虫、站点扫描器、监控探针。 */
 const BOT_UA_PATTERN =
   /bot|crawler|spider|slurp|scrapy|headless|lighthouse|monitor|uptime|facebookexternalhit|semrush|ahrefs|mj12|dotbot|yandex|petal|bytespider|gptbot|claudebot|anthropic|perplexity/i;
@@ -41,14 +57,14 @@ export async function GET(
   const { id } = await params;
   const notice = await getNoticeById(id);
   if (!notice) {
-    return NextResponse.json({ error: '未找到该公示条目' }, { status: 404 });
+    return NextResponse.json({ error: '未找到该公示条目' }, { status: 404, headers: NO_STORE });
   }
 
   let target: URL;
   try {
     target = new URL(notice.url);
   } catch {
-    return NextResponse.json({ error: '该条目缺少有效的官方原文链接' }, { status: 500 });
+    return NextResponse.json({ error: '该条目缺少有效的官方原文链接' }, { status: 500, headers: NO_STORE });
   }
 
   if (isMachineRequest(request)) {
@@ -58,12 +74,12 @@ export async function GET(
     console.log(
       `[go] date=${localDateIso(new Date())} noticeId=${id} counted=false ua=${ua.slice(0, 120) || '(empty)'}`,
     );
-    return NextResponse.redirect(target, 302);
+    return NextResponse.redirect(target, { status: 302, headers: REDIRECT_HEADERS });
   }
 
   const clicks = await recordOutboundClick(id);
   if (clicks === null) {
-    return NextResponse.json({ error: '未找到该公示条目' }, { status: 404 });
+    return NextResponse.json({ error: '未找到该公示条目' }, { status: 404, headers: NO_STORE });
   }
 
   // 非个人身份的访问日志：仅条目 ID 与日期（不带 UA）
@@ -71,5 +87,5 @@ export async function GET(
     `[go] date=${localDateIso(new Date())} noticeId=${id} outboundClicks=${clicks}`,
   );
 
-  return NextResponse.redirect(target, 302);
+  return NextResponse.redirect(target, { status: 302, headers: REDIRECT_HEADERS });
 }

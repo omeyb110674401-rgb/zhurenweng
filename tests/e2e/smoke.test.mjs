@@ -75,6 +75,38 @@ describe('冒烟：脚手架与端到端骨架', () => {
     assert.ok(!sitemap.includes('/go/'), '302 跳转端点不该进 sitemap');
   });
 
+  it('薄页与事务页不进索引，正文页保持可索引（issue #38）', async () => {
+    const robotsMeta = async (path) => {
+      const response = await fetch(`${app.url}${path}`, { redirect: 'manual' });
+      assert.equal(response.status, 200, `${path} 应 200`);
+      const html = await response.text();
+      return (
+        /<meta name="robots" content="([^"]*)"/.exec(html.slice(0, html.indexOf('</head>')))?.[1] ??
+        null
+      );
+    };
+
+    // 搜索结果页：`?q=…` 是无界变体（每个关键词一个地址），收录等于往索引里灌薄页；
+    // follow 保留链接发现，爬虫仍能顺结果抓到正文页
+    assert.match(
+      (await robotsMeta('/search?q=%E5%BE%81%E6%B1%82')) ?? '',
+      /noindex/,
+      '搜索结果页应 noindex',
+    );
+    assert.match((await robotsMeta('/search?q=%E5%BE%81%E6%B1%82')) ?? '', /follow/);
+
+    // 退订确认页地址里带退订 token：一旦被收录，任何人都能用索引里的 URL 退掉别人的订阅
+    for (const path of ['/unsubscribe?token=x', '/unsubscribe/done?ok=1', '/subscribe/confirmed']) {
+      assert.match((await robotsMeta(path)) ?? '', /noindex/, `${path} 应 noindex`);
+    }
+
+    // 反向断言：正文页 / 首页 / 统计页必须保持可索引（noindex 不能误伤内容页）
+    for (const path of ['/', '/stats', '/notices/nonexistent-but-head-still-renders']) {
+      const meta = await robotsMeta(path).catch(() => null);
+      if (meta !== null) assert.doesNotMatch(meta, /noindex/, `${path} 不应 noindex`);
+    }
+  });
+
   it('404 页是中文说明并给回站入口（不是 Next 默认英文页）', async () => {
     const response = await fetch(`${app.url}/no-such-page`);
     assert.equal(response.status, 404);

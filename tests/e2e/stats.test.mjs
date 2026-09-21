@@ -447,6 +447,17 @@ describe('issue #11：数据统计页与出站点击聚合', () => {
       });
       assert.equal(response.status, 302, `点击 ${key} 应 302`);
       assert.equal(response.headers.get('set-cookie'), null, '不记录任何个人身份（无 Cookie）');
+      // 计数端点不该被任何中间层缓存，也不该被收录（issue #38）
+      assert.match(
+        response.headers.get('cache-control') ?? '',
+        /no-store/,
+        '/go 是计数端点，必须 no-store（被缓存会漏计点击）',
+      );
+      assert.match(
+        response.headers.get('x-robots-tag') ?? '',
+        /noindex/,
+        '302 带不了 meta 标签，只能靠响应头声明 noindex',
+      );
       if (isFirstClick) {
         isFirstClick = false;
         assert.equal(
