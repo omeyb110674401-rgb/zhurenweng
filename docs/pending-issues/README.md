@@ -18,7 +18,7 @@ codeload 404），**无法创建 issue**。停用期间新工作的 issue 正文
 | `44-sitemap-lastmod.md` | sitemap 的 lastmod 写成了抓取时间：178 条全部声称「今天改过」 | `3817eed` |
 | `45-trend-month-drilldown.md` | 统计页月度趋势表的数字全是死文本：缺的是「按月份」筛选口径 | `2c896f6` |
 | `46-period-bucket-label-and-gap.md` | 公示期分布的桶标签重叠，且「少掉的那几条」不给数字 | `743ce98` |
-| `47-period-bucket-drilldown.md` | 公示期分布的桶不可钻取（页面上最后一处点不开的数字） | `（见下条提交）` |
+| `47-period-bucket-drilldown.md` | 公示期分布的桶不可钻取（页面上最后一处点不开的数字） | `b37b20c` |
 
 同时 `origin/main` 之后的全部提交（issue #33 起，含 #39）都已提交但未推送 —— 恢复
 推送通道后一并推送（数量随迭代增长，当前值看 `git rev-list --count origin/main..HEAD`）。
