@@ -7,6 +7,12 @@ import { fileURLToPath } from 'node:url';
 import { after, before, describe, it } from 'node:test';
 import { startAppServer } from './helpers/app-server.mjs';
 import { createFixtureServer } from './helpers/fixture-server.mjs';
+import {
+  canonicalHref,
+  headOf,
+  robotsMeta,
+  stripSsrComments as stripComments,
+} from './helpers/html.mjs';
 
 /**
  * E2E（issue #19）：首页分页与真实合计。
@@ -69,7 +75,7 @@ function runWorkerOnce() {
 }
 
 function stripSsrComments(html) {
-  return html.replaceAll('<!-- -->', '');
+  return stripComments(html);
 }
 
 /** 按 <li class="notice-item"> 分块取标题（页面展示顺序）。 */
@@ -226,12 +232,49 @@ describe('issue #19：首页分页与真实合计', () => {
     assert.ok(!/data-testid="notice-range"/.test(html), '单页时不渲染页码区间文案');
   });
 
+  it('首页 ItemList 结构化数据：条目与可见列表一一对应，分页位置连续（issue #49）', async () => {
+    const parseList = (html) => {
+      const raw = /<script[^>]*type="application\/ld\+json"[^>]*data-testid="notice-list-jsonld"[^>]*>([\s\S]*?)<\/script>/.exec(
+        html,
+      );
+      assert.ok(raw, '首页应输出 ItemList 脚本块');
+      return JSON.parse(raw[1]);
+    };
+    const visibleIds = (html) =>
+      [...html.matchAll(/data-testid="notice-title-link"[^>]*href="\/notices\/([0-9a-f]+)"/g)].map(
+        (match) => match[1],
+      );
+
+    const page1 = await fetchHome();
+    const doc1 = parseList(page1);
+    const ids1 = visibleIds(page1);
+    assert.equal(doc1['@type'], 'ItemList');
+    assert.equal(doc1.numberOfItems, ids1.length, 'numberOfItems 必须等于本页可见条数');
+    assert.deepEqual(
+      doc1.itemListElement.map((item) => item.url.split('/').pop()),
+      ids1,
+      'ItemList 的条目顺序必须与页面可见顺序一致（机器读到的 = 读者看到的）',
+    );
+    assert.deepEqual(
+      doc1.itemListElement.map((item) => item.position),
+      ids1.map((_, index) => index + 1),
+      '第 1 页位置从 1 起连续编号',
+    );
+
+    // 第 2 页：位置接着上一页排（每页 PAGE_SIZE 条），不撞位
+    const page2 = await fetchHome('?page=2');
+    const doc2 = parseList(page2);
+    const ids2 = visibleIds(page2);
+    assert.equal(doc2.numberOfItems, ids2.length);
+    assert.deepEqual(
+      doc2.itemListElement.map((item) => item.position),
+      ids2.map((_, index) => PAGE_SIZE + index + 1),
+      '第 2 页位置应从 PAGE_SIZE + 1 起',
+    );
+    assert.deepEqual(doc2.itemListElement.map((item) => item.url.split('/').pop()), ids2);
+  });
+
   it('索引口径：筛选视图 noindex、分页视图自指 canonical、首页可收录（issue #41）', async () => {
-    const head = (html) => html.slice(0, html.indexOf('</head>'));
-    const robotsMeta = (html) =>
-      /<meta name="robots" content="([^"]*)"/.exec(head(html))?.[1] ?? null;
-    const canonicalHref = (html) =>
-      /<link rel="canonical" href="([^"]*)"/.exec(head(html))?.[1]?.replaceAll('&amp;', '&') ?? null;
 
     // 第 1 页：可收录（noindex 不能误伤首页），canonical 指根地址
     // （Next 会把根地址规范化为不带尾斜杠的 origin —— `https://zw.test` 与
@@ -247,7 +290,7 @@ describe('issue #19：首页分页与真实合计', () => {
     // 分页视图也要保留 RSS 自动发现：子路由导出 alternates 会整块覆盖父级 layout 的
     // 同名字段，这一页是本 issue 里唯一重新声明 alternates 的分支，必须守住
     assert.ok(
-      /<link[^>]*rel="alternate"[^>]*type="application\/rss\+xml"[^>]*>/.test(head(page2)),
+      /<link[^>]*rel="alternate"[^>]*type="application\/rss\+xml"[^>]*>/.test(headOf(page2)),
       '分页视图仍应含 RSS 自动发现',
     );
 

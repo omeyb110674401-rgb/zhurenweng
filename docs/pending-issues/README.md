@@ -20,6 +20,7 @@ codeload 404），**无法创建 issue**。停用期间新工作的 issue 正文
 | `46-period-bucket-label-and-gap.md` | 公示期分布的桶标签重叠，且「少掉的那几条」不给数字 | `743ce98` |
 | `47-period-bucket-drilldown.md` | 公示期分布的桶不可钻取（页面上最后一处点不开的数字） | `b37b20c` |
 | `48-trend-range-drilldown.md` | 趋势表的小计与总计点不开（求和结果缺区间口径） | `03cedd9` |
+| `49-e2e-html-helper-and-itemlist.md` | e2e 解析器收成共享工具 + 首页 ItemList 结构化数据 | `（见下条提交）` |
 
 同时 `origin/main` 之后的全部提交（issue #33 起，含 #39）都已提交但未推送 —— 恢复
 推送通道后一并推送（数量随迭代增长，当前值看 `git rev-list --count origin/main..HEAD`）。

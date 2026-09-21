@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { after, before, describe, it } from 'node:test';
 import { startAppServer } from './helpers/app-server.mjs';
 import { createFixtureServer } from './helpers/fixture-server.mjs';
+import { cellNumber, hrefOf, stripSsrComments as stripComments } from './helpers/html.mjs';
 // 期望值计算复用入库 / 统计同一套机关规则（issue #21）：归一 + 按牵头机关归并。
 // 规则本身由 tests/unit/agencies.test.mjs 钉死，这里只保证聚合口径一致。
 import { canonicalAgency, leadAgencyOf } from '../../src/lib/agencies.ts';
@@ -125,7 +126,7 @@ function runWorkerOnce() {
 }
 
 function stripSsrComments(html) {
-  return html.replaceAll('<!-- -->', '');
+  return stripComments(html);
 }
 
 /** 站点日历日 ISO 与月份窗口：直接复用应用同一份实现（issue #40）。
@@ -314,16 +315,12 @@ function parseTrendRows(html) {
   return [...html.matchAll(/data-testid="trend-row">([\s\S]*?)<\/tr>/g)].map((match) => {
     const block = match[1];
     const agency = /<th scope="row">([^<]+)<\/th>/.exec(block)[1];
-    // 格子内容自 issue #45 起可能是钻取链接（非零格子），数字要从链接文本里取
+    // 格子与行小计都可能是钻取链接 —— 数字统一用 cellNumber（先剥标签）取，
+    // 否则裸 \d+ 会先命中 href 里的 `month=2026-08`
     const cells = [
       ...block.matchAll(/<td class="stat-num" data-month="([^"]*)">([\s\S]*?)<\/td>/g),
-    ].map((cell) => Number(/(\d+)/.exec(cell[2].replace(/<[^>]*>/g, ''))?.[1] ?? 0));
-    // 行小计自 issue #48 起是区间钻取链接 —— 取数字前先剥标签
-    const total = Number(
-      /(\d+)/.exec(
-        /<td class="stat-num stat-total">([\s\S]*?)<\/td>/.exec(block)[1].replace(/<[^>]*>/g, ''),
-      )[1],
-    );
+    ].map((cell) => cellNumber(cell[2]));
+    const total = cellNumber(/<td class="stat-num stat-total">([\s\S]*?)<\/td>/.exec(block)[1]);
     return { agency, cells, total };
   });
 }
@@ -333,7 +330,7 @@ function parseTrendTotals(html) {
   const block = /data-testid="trend-total-row">([\s\S]*?)<\/tr>/.exec(html)[1];
   const cells = [
     ...block.matchAll(/<td class="stat-num stat-total">([\s\S]*?)<\/td>/g),
-  ].map((cell) => Number(/(\d+)/.exec(cell[1].replace(/<[^>]*>/g, ''))?.[1] ?? 0));
+  ].map((cell) => cellNumber(cell[1]));
   return { monthTotals: cells.slice(0, 6), grand: cells[cells.length - 1] };
 }
 
@@ -353,7 +350,7 @@ function parseTrendDrills(html) {
           agency,
           month: cell[1],
           count: Number(link[1]),
-          href: (/href="([^"]*)"/.exec(link[0])?.[1] ?? '').replaceAll('&amp;', '&'),
+          href: hrefOf(link[0]),
         });
       }
     }
@@ -373,7 +370,7 @@ function parseTrendRowTotalDrills(html) {
       result.push({
         agency,
         count: Number(link[1]),
-        href: (/href="([^"]*)"/.exec(link[0])?.[1] ?? '').replaceAll('&amp;', '&'),
+        href: hrefOf(link[0]),
       });
     }
   }
@@ -386,7 +383,7 @@ function parseTrendGrandTotalDrill(html) {
   if (!link) return null;
   return {
     count: Number(link[1]),
-    href: (/href="([^"]*)"/.exec(link[0])?.[1] ?? '').replaceAll('&amp;', '&'),
+    href: hrefOf(link[0]),
   };
 }
 
@@ -399,7 +396,7 @@ function parseTrendMonthDrills(html) {
     ),
   ].map((match) => ({
     count: Number(match[2]),
-    href: (/href="([^"]*)"/.exec(match[1])?.[1] ?? '').replaceAll('&amp;', '&'),
+    href: hrefOf(match[1]),
   }));
 }
 
@@ -412,7 +409,7 @@ function parsePeriodDrills(html) {
   ].map((match) => ({
     key: match[1],
     count: Number(match[2]),
-    href: (/href="([^"]*)"/.exec(match[0])?.[1] ?? '').replaceAll('&amp;', '&'),
+    href: hrefOf(match[0]),
   }));
 }
 
@@ -422,9 +419,8 @@ function parsePeriodBuckets(html) {
   for (const match of html.matchAll(
     /data-bucket="([^"]+)"[\s\S]*?<span class="period-count">([\s\S]*?)<\/span>/g,
   )) {
-    // 非零桶的计数自 issue #47 起是钻取链接 —— 取数字前先剥标签
-    // （否则 \d+ 会先命中 href 里的 `period=b16_30` 这类片段）
-    result[match[1]] = Number(/(\d+)/.exec(match[2].replace(/<[^>]*>/g, ''))?.[1] ?? 0);
+    // 非零桶的计数是钻取链接 —— 统一走 cellNumber
+    result[match[1]] = cellNumber(match[2]);
   }
   return result;
 }

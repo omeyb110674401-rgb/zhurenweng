@@ -1,6 +1,10 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { buildNoticeJsonLd, serializeJsonLd } from '../../src/lib/notice-jsonld.ts';
+import {
+  buildNoticeJsonLd,
+  buildNoticeListJsonLd,
+  serializeJsonLd,
+} from '../../src/lib/notice-jsonld.ts';
 
 /**
  * 单元：详情页 schema.org JSON-LD（issue #39）。
@@ -133,6 +137,40 @@ describe('issue #39：详情页 JSON-LD', () => {
       { '@type': 'Legislation', name: '《中华人民共和国邮政法（修订草案征求意见稿）》' },
       { '@type': 'Legislation', name: '《邮政法修订起草说明》' },
     ]);
+  });
+
+  it('列表页 ItemList：条目与位置一一对应，分页时位置从本页首条起（issue #49）', () => {
+    const notices = [
+      noticeRecord({ id: 'aaa', title: '第一条' }),
+      noticeRecord({ id: 'bbb', title: '第二条' }),
+    ];
+    const doc = buildNoticeListJsonLd({ notices, siteUrl: SITE });
+
+    assert.equal(doc['@context'], 'https://schema.org');
+    assert.equal(doc['@type'], 'ItemList');
+    assert.equal(doc.numberOfItems, 2);
+    assert.deepEqual(doc.itemListElement, [
+      { '@type': 'ListItem', position: 1, url: `${SITE}/notices/aaa`, name: '第一条' },
+      { '@type': 'ListItem', position: 2, url: `${SITE}/notices/bbb`, name: '第二条' },
+    ]);
+
+    // 分页：第 2 页（每页 3 条）从位置 4 起 —— 写死 1..N 会与上一页撞位
+    const secondPage = buildNoticeListJsonLd({ notices, siteUrl: SITE, startPosition: 4 });
+    assert.deepEqual(
+      secondPage.itemListElement.map((item) => item.position),
+      [4, 5],
+    );
+  });
+
+  it('列表页 ItemList 同样转义 `<`（标题来自源站页面）', () => {
+    const json = serializeJsonLd(
+      buildNoticeListJsonLd({
+        notices: [noticeRecord({ title: '关于《测试法》</script><script>alert(1)</script>' })],
+        siteUrl: SITE,
+      }),
+    );
+    assert.equal(json.includes('<'), false, '所有 `<` 都应写成 \u003c');
+    assert.equal(JSON.parse(json).itemListElement[0].name.includes('</script>'), true);
   });
 
   it('序列化转义 `<`：标题里的 </script> 不能提前闭合脚本块', () => {

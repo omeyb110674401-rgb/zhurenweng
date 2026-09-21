@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { after, before, describe, it } from 'node:test';
 import { startAppServer } from './helpers/app-server.mjs';
 import { createFixtureServer } from './helpers/fixture-server.mjs';
+import { cellNumber, stripSsrComments as stripComments } from './helpers/html.mjs';
 
 /**
  * E2E（issue #27）：详情页的「结构化速读」与「意见提交方式」。
@@ -68,7 +69,7 @@ function runWorkerOnce() {
 
 /** React SSR 在「文本 + 表达式」混排处插入 <!-- --> 注释，文本断言前剥掉。 */
 function stripSsrComments(html) {
-  return html.replaceAll('<!-- -->', '');
+  return stripComments(html);
 }
 
 /** 取指定标题条目的详情页 HTML。 */
@@ -264,10 +265,10 @@ describe('issue #46：统计页把「未参与统计的条数」说清楚', () =
   it('公示期分布：差额按条数说出，且与「收录总数 − 四桶之和」一致', async () => {
     const html = stripSsrComments(await (await fetch(`${app.url}/stats`)).text());
     const total = Number(/data-testid="stats-total-notices">(\d+)</.exec(html)[1]);
-    // 非零桶的计数自 issue #47 起是钻取链接 —— 取数字前先剥标签
+    // 非零桶的计数是钻取链接 —— 统一走 cellNumber（先剥标签）
     const buckets = [
       ...html.matchAll(/data-bucket="[^"]+"[\s\S]{0,400}?period-count">([\s\S]*?)<\/span>/g),
-    ].map((match) => Number(/(\d+)/.exec(match[1].replace(/<[^>]*>/g, ''))?.[1] ?? 0));
+    ].map((match) => cellNumber(match[1]));
     assert.equal(buckets.length, 4, '应有四个分布桶');
 
     const sum = buckets.reduce((acc, n) => acc + n, 0);

@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { after, before, describe, it } from 'node:test';
 import { startAppServer } from './helpers/app-server.mjs';
 import { createFixtureServer } from './helpers/fixture-server.mjs';
+import { robotsMeta as robotsMetaOfHtml } from './helpers/html.mjs';
 
 /**
  * 冒烟 E2E（issue #2）：从 HTTP 层驱动整个应用，全程零外部依赖（ADR-0001）。
@@ -79,11 +80,8 @@ describe('冒烟：脚手架与端到端骨架', () => {
     const robotsMeta = async (path) => {
       const response = await fetch(`${app.url}${path}`, { redirect: 'manual' });
       assert.equal(response.status, 200, `${path} 应 200`);
-      const html = await response.text();
-      return (
-        /<meta name="robots" content="([^"]*)"/.exec(html.slice(0, html.indexOf('</head>')))?.[1] ??
-        null
-      );
+      // robots 只在 head 里找（正文里可能出现同名文本）—— 统一用 helpers/html.mjs
+      return robotsMetaOfHtml(await response.text());
     };
 
     // 搜索结果页：`?q=…` 是无界变体（每个关键词一个地址），收录等于往索引里灌薄页；

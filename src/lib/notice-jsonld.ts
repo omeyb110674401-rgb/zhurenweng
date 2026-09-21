@@ -100,6 +100,44 @@ export function buildNoticeJsonLd({
 }
 
 /**
+ * 列表页的结构化数据（issue #49）：`ItemList`。
+ *
+ * 为什么是 ItemList 而不是 CollectionPage：本页就是「一串条目」的清单，ItemList 正是
+ * 它的机器可读形状；CollectionPage 描述的是「某个集合的落地页」，会把页面语义说成
+ * 集合本身（我们并没有把集合当成一件作品来维护）。详情页用 Article（issue #39），
+ * 两者合起来才是「列表 → 条目」的完整声明。
+ *
+ * `position` 从 `startPosition` 起连续编号（分页时第 2 页从 51 开始）：schema.org 要求
+ * 位置在列表内唯一有序，写死 1..N 会让第 2 页与第 1 页撞位。刻意不写 `itemListOrder`：
+ * 本列表按「征求意见中在前、截止日期升序」排，那不是任何单一字段的升序，写了反而误导。
+ *
+ * 与详情页同一套自律：只描述页面上**真实可见**的那批条目（`notices` 就是渲染用的那一份），
+ * 序列化仍走 `serializeJsonLd`（转义 `<`）。
+ */
+export function buildNoticeListJsonLd({
+  notices,
+  siteUrl,
+  startPosition = 1,
+}: {
+  notices: NoticeRecord[];
+  siteUrl: string;
+  /** 本页第一条在整份列表中的位置（分页用；默认 1） */
+  startPosition?: number;
+}): Record<string, unknown> {
+  return {
+    '@context': 'https://schema.org',
+    '@type': 'ItemList',
+    numberOfItems: notices.length,
+    itemListElement: notices.map((notice, index) => ({
+      '@type': 'ListItem',
+      position: startPosition + index,
+      url: `${siteUrl}/notices/${notice.id}`,
+      name: notice.title,
+    })),
+  };
+}
+
+/**
  * 序列化为可嵌进 <script type="application/ld+json"> 的字符串。
  *
  * 必须转义 `<`：标题与正文摘自政府页面，只要出现 `</script>` 就会提前闭合脚本块

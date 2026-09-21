@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { after, before, describe, it } from 'node:test';
 import { startAppServer } from './helpers/app-server.mjs';
 import { createFixtureServer } from './helpers/fixture-server.mjs';
+import { stripSsrComments as stripComments } from './helpers/html.mjs';
 
 /**
  * E2E（issue #9）：领域标签自动打标 + 列表页分类/机关/关键词筛选。
@@ -126,7 +127,7 @@ function runWorkerOnce() {
 
 /** React SSR 会在文本 + 表达式混排处插入 <!-- --> 注释，文本断言前剥掉。 */
 function stripSsrComments(html) {
-  return html.replaceAll('<!-- -->', '');
+  return stripComments(html);
 }
 
 /** 从结果页 HTML 提取条目块（<li data-testid="notice-item">…</li>）。 */

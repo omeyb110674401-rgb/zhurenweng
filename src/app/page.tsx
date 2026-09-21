@@ -6,6 +6,7 @@ import { SearchForm } from '@/app/_lib/search-form';
 import { IcpFiling } from '@/app/_lib/icp-filing';
 import { parseHomeQuery, type HomeSearchParams } from '@/app/_lib/home-query';
 import { periodBucketLabel, type PeriodBucketKey } from '@/lib/notice-period';
+import { buildNoticeListJsonLd, serializeJsonLd } from '@/lib/notice-jsonld';
 import { DOMAIN_CATEGORIES } from '@/lib/categories';
 import { siteUrl } from '@/lib/site-url';
 import { mailerReady } from '@/lib/mailer-availability';
@@ -182,8 +183,25 @@ export default async function HomePage({ searchParams }: HomePageProps) {
     .filter(Boolean)
     .join(' · ');
 
+  // 列表页结构化数据（issue #49）：描述**本页真实渲染**的那批条目，位置从本页首条起
+  // 连续编号（分页时不会与上一页撞位）。
+  const listJsonLd = serializeJsonLd(
+    buildNoticeListJsonLd({
+      notices,
+      siteUrl: siteUrl(),
+      startPosition: (page - 1) * size + 1,
+    }),
+  );
+
   return (
     <main>
+      {/* schema.org ItemList（issue #49）：给搜索引擎/聚合器读的机器可读清单；
+          用户可见内容全在下方，此处不重复渲染 */}
+      <script
+        type="application/ld+json"
+        data-testid="notice-list-jsonld"
+        dangerouslySetInnerHTML={{ __html: listJsonLd }}
+      />
       <header className="site-header">
         <h1 className="brand">
           主人<span className="brand-accent">翁</span>
