@@ -24,6 +24,7 @@ codeload 404），**无法创建 issue**。停用期间新工作的 issue 正文
 | `50-code-review-and-fixes.md` | 全量代码评审（规范 + 规格两轴）与 11 项修复：牵头口径在筛选表单里丢失、邮件 href 未转义、stats.ts 的裸 NUL 字节让文件不可评审、多词搜索三路径三语义 | `b92493c` |
 | `51-code-health-and-robustness.md` | 代码健康与健壮性审计（第二轮）与 13 项修复：.env 曾烘进 web 镜像层、PG 连接池无超时、worker 重入与优雅退出、源数据质量降级不再静默 | `7261aa2` |
 | `52-security-review.md` | 安全与滥用面审计（第三轮）与 11 项修复：抓取器可被源站指挥去打内网（详情 URL 与重定向目标无约束）、订阅端点无限流且确认链接 GET 即写库、后台会话 Cookie 无 Secure 且全站无安全头、`?token=` 长期留在 URL 里 | `c82fc6b` |
+| `53-frontend-ux.md` | 前端体验（第四轮）与 8 组改进：全站零媒体查询与零图标资产、备案号只在 3 个页面（合规缺口）、零 skip link、订阅表单失败丢已填内容、`/go` 死路回裸 JSON；顺带抓到「文件约定的 og:image 会被页面级 openGraph 覆盖」与「同步脚本静默改坏二进制」 | `e8da8d5` |
 
 **另有 `FOLLOWUPS.md`（durable，不随本目录删除）**：各 issue 的「未做（有意）」小节里
 既有真实待办也有有意取舍，都登记在那里 —— 本目录按约定会在补录 tracker 后删除，删文件

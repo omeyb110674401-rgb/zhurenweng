@@ -26,8 +26,9 @@ src/lib/        端口接口（ports.ts）、日期工具（dates.ts）与适配
 src/sources/    源适配器注册表 + adapters/（数据接入唯一扩展点）
 worker/         worker 进程：registry.ts（任务注册表）+ index.ts（主循环）+ jobs/（抓取等任务）
 fixtures/       各源页面快照，fixtures/<source>/list.{html,json} 与详情快照
+public/         静态资源（og-image.png；favicon / icon.svg / apple-icon.png 走 src/app 的文件约定）
 tests/e2e/      端到端测试（node:test）与 fixture 源站 helper
-scripts/        fixture 源站 CLI、迁移 CLI
+scripts/        fixture 源站 CLI、迁移 CLI、品牌资产生成（gen-brand-assets.mjs）
 drizzle/        按方言生成的迁移（sqlite/、pg/）
 ```
 
@@ -208,8 +209,37 @@ lint 与 e2e 两个 job，同样只依赖 npm。
   条目详情页各自生成 `title`（公示标题）、`description`（状态 · 截止日期 ·
   机关 + 正文首段）、`canonical` 与 `og:url` —— 转发到社交平台或出现在搜索
   结果里时，展示的是这条公示本身而不是站点通用标题。
+- **图标与分享图**（issue #53）：`src/app/icon.svg`（浏览器标签页主源）、
+  `src/app/favicon.ico`（16/32/48 三尺寸，`/favicon.ico` 此前 404 —— Next 不会把
+  该地址映射到 `icon.svg`）、`src/app/apple-icon.png`（iOS 主屏）、
+  `public/og-image.png`（1200×630 分享卡）、`src/app/manifest.ts` 与
+  `viewport.themeColor`。**改设计就重跑** `node scripts/gen-brand-assets.mjs`
+  （产物提交；脚本用仓库已有的 `next/og` 光栅化，无新增依赖、无构建期 wasm）。
+- **分享图必须显式声明**：`OG_IMAGE`（`src/lib/page-metadata.ts`）要在每一处
+  自定义了 `openGraph` 的页面里带上 —— **Next 的文件约定 `opengraph-image.tsx`
+  产出的图会被页面自己的 `openGraph` 整块覆盖**，统计页与详情页曾因此完全没有
+  分享图（e2e 的 `brand-assets` 场景钉住了这条）。
 - **自定义 404**（`src/app/not-found.tsx`）：中文说明 + 站内检索 + 回列表入口
   （Next 默认 404 是英文且没有回站路径）。
+
+## 前端呈现层（issue #53）
+
+- **零客户端 JS 是设计前提**：全站 `'use client'` 计数为 0，所有交互经 URL 与
+  服务端渲染（筛选是 GET 表单、翻页是链接、倒计时在渲染期算一次）。因此站点没有
+  loading 态与防重复提交，倒计时是快照 —— 页面同时展示确切截止日期作为兜底。
+- **样式**：单一 `src/app/globals.css`，设计令牌只有 5 个颜色变量；断点集中在文件
+  末尾的「响应式」一节（`max-width: 560px` 详情字段单列、`max-width: 420px` 公示期
+  分布换行、`pointer: coarse` 把触控目标提到 40px）。**触控目标只在手指设备上放大**，
+  鼠标环境保持紧凑外观。
+- **无障碍约定**：`layout.tsx` 输出跳转主内容链接，每个页面的 `<main>`（含后台的
+  自包含文档）都带 `id="main-content"`；每页恰好一个 `h1`；禁用态分页带
+  `aria-disabled`；表单错误横幅在页面级可见。新增页面时请照抄这三条。
+- **页脚统一**：`src/app/_lib/site-footer.tsx` —— 免责声明 + 页内导航 + 备案号。
+  备案号要**全站可见**（此前只有 3 个页面有，属合规缺口）；订阅入口与首页导航同门控
+  （`mailerReady()`），邮件端口未配置时不渲染指向 `/subscribe` 的链接。
+- **表单失败回填**（`src/lib/subscribe-draft.ts`）：校验失败时把已填内容放进短命
+  HttpOnly cookie（120 秒、`Path=/subscribe`、不带 Secure —— 本地与 e2e 跑在 http 上），
+  页面读它做默认值。**邮箱绝不进 URL**（地址栏、历史、访问日志与 Referer 都会留痕）。
 
 ## AI 摘要器（issue #4）
 

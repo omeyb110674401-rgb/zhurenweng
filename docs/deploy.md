@@ -144,6 +144,10 @@ docker compose run --rm -e WORKER_ONCE=1 worker npm run worker
   `docker compose build web worker && docker compose up -d web worker`
   - 注意：**删掉的路由文件要手工删**（同步脚本只传文件、不删文件）——App Router 里
     同一段同时存在 `page.tsx` 与 `route.ts` 会直接构建失败
+  - 二进制资产（`public/og-image.png`、`favicon.ico`、`apple-icon.png`）由脚本按
+    **原始字节**传输与校验（2026-09-21 修：压缩数据里可能恰好出现 `0x0D 0x0A` 字节对，
+    先前的 CRLF 归一化会静默改坏内容 —— 而校验用的是同一套变换，所以还会「通过」）。
+    传二进制时脚本会打印「二进制文件，按原始字节传输与校验」，没看到这句就要留神
 - **限流阈值**（issue #52）：`SUBSCRIBE_RATE_LIMIT_PER_HOUR`（缺省 10）、
   `ADMIN_LOGIN_RATE_LIMIT_PER_HOUR`（缺省 30），单位次/小时，按客户端 IP 的固定窗口；
   计数在**进程内存**里，只对单实例部署有效（多副本时实际阈值 = 设定值 × 副本数）
