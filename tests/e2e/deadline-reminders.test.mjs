@@ -417,18 +417,76 @@ describe('issue #7：订阅 double opt-in → 截止提醒 → 一键退订', ()
     assert.equal(readOutbox().length, before);
   });
 
-  it('一键退订立即生效；无效退订链接展示失败态', async () => {
+  it('退订链接是只读确认页（issue #34）：打开不退订，点确认才退订；无效链接展示失败态', async () => {
     const aliceMail = assertOneMail(ALICE, TITLES.noiseD7);
     const unsubscribeLink = extractLink(aliceMail.text, '/unsubscribe');
 
-    const result = await followGet(unsubscribeLink);
-    assert.match(result.response.url, /\/unsubscribe\/done\?ok=1/);
-    assert.match(result.html, /已退订/);
-    assert.match(result.html, /退订已立即生效/);
+    // ① 邮件正文里的链接指向**只读**确认页：GET 不改状态（邮件网关会预取这个链接，
+    //    旧实现是 GET 直接退订 —— 用户会在毫不知情的情况下被退订）
+    const confirmPage = await followGet(unsubscribeLink);
+    assert.equal(confirmPage.response.status, 200, '确认页应是 200（不是 303 直跳结果页）');
+    assert.match(confirmPage.html, /data-testid="unsubscribe-confirm"/);
+    assert.match(confirmPage.html, /data-testid="unsubscribe-submit"/);
+    assert.match(confirmPage.html, /action="\/unsubscribe\/one-click"/);
+    assert.match(confirmPage.html, /method="post"/i);
+    assert.ok(
+      !/data-testid="unsubscribe-status"/.test(confirmPage.html),
+      '此时应仍是「可退订」状态（GET 没有退订）',
+    );
 
+    // ② 提交确认按钮（POST）才真的退订
+    const token = new URL(unsubscribeLink).searchParams.get('token');
+    const posted = await fetch(`${app.url}/unsubscribe/one-click`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({ token }).toString(),
+      redirect: 'follow',
+    });
+    assert.match(posted.url, /\/unsubscribe\/done\?ok=1/);
+    assert.match(await posted.text(), /退订已立即生效/);
+
+    // ③ 退订后同一链接的确认页显示「已退订」，不再提供按钮（同时反证 ① 的 GET 无副作用）
+    const afterUnsubscribe = await followGet(unsubscribeLink);
+    assert.match(afterUnsubscribe.html, /data-testid="unsubscribe-status"/);
+    assert.match(afterUnsubscribe.html, /已经退订过/);
+
+    // ④ 无效 token：确认页与动作端点都如实报错
     const invalid = await followGet(`${app.url}/unsubscribe?token=bogus-token`);
-    assert.match(invalid.response.url, /ok=0/);
+    assert.equal(invalid.response.status, 200);
     assert.match(invalid.html, /退订链接无效/);
+    const invalidPost = await fetch(`${app.url}/unsubscribe/one-click?token=bogus-token`, {
+      method: 'POST',
+      redirect: 'follow',
+    });
+    assert.match(invalidPost.url, /ok=0/);
+    assert.match(await invalidPost.text(), /退订链接无效/);
+  });
+
+  it('邮件头带 RFC 8058 一键退订（List-Unsubscribe / -Post），客户端退订按钮走 POST', async () => {
+    const aliceMail = assertOneMail(ALICE, TITLES.noiseD7);
+    const headers = aliceMail.headers ?? {};
+    assert.match(
+      headers['List-Unsubscribe'] ?? '',
+      /^<https?:\/\/[^>]+\/unsubscribe\/one-click\?token=[A-Za-z0-9_-]+>$/,
+      `List-Unsubscribe 应指向动作端点，实际：${headers['List-Unsubscribe']}`,
+    );
+    assert.equal(headers['List-Unsubscribe-Post'], 'List-Unsubscribe=One-Click');
+
+    // 客户端按 RFC 8058 用 POST + 该请求体调用（token 在查询串里）—— 立即生效
+    const oneClickUrl = headers['List-Unsubscribe'].slice(1, -1);
+    const response = await fetch(oneClickUrl, {
+      method: 'POST',
+      headers: { 'content-type': 'application/x-www-form-urlencoded' },
+      body: 'List-Unsubscribe=One-Click',
+      redirect: 'manual',
+    });
+    assert.equal(response.status, 303, '一键退订应 303 到结果页');
+    assert.match(response.headers.get('location') ?? '', /\/unsubscribe\/done\?ok=1/);
+
+    // 一键退订地址被「人」用 GET 打开时落到确认页，而不是 405 或直接退订
+    const asGet = await fetch(oneClickUrl, { redirect: 'manual' });
+    assert.equal(asGet.status, 303);
+    assert.match(asGet.headers.get('location') ?? '', /^\/unsubscribe\?token=/);
   });
 
   it('退订后新条目不再发送：关键词命中的新提醒只发给未退订的订阅者', async () => {

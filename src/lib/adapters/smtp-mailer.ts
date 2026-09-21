@@ -50,6 +50,8 @@ export class SmtpMailer implements MailerPort {
       subject: message.subject,
       text: message.text,
       html: message.html,
+      // 附加邮件头（issue #34）：List-Unsubscribe 等；缺省时不传
+      headers: message.headers,
     });
   }
 }

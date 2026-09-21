@@ -172,6 +172,24 @@ export async function confirmSubscriptionByToken(token: string): Promise<Confirm
   return 'confirmed';
 }
 
+/**
+ * 退订 token 的**只读**状态（issue #34）：确认页据此决定渲染确认表单还是「已退订」，
+ * 不改任何数据 —— 退订必须由用户显式提交 POST 完成（见 /unsubscribe/one-click 的注释）。
+ */
+export async function unsubscribeTokenStatus(
+  token: string,
+): Promise<'confirmable' | 'unsubscribed' | 'invalid'> {
+  if (token.length === 0) return 'invalid';
+  const db = await getDb();
+  const rows = await db
+    .select({ unsubscribedAt: subscriptions.unsubscribedAt })
+    .from(subscriptions)
+    .where(eq(subscriptions.unsubscribeToken, token))
+    .limit(1);
+  if (rows.length === 0) return 'invalid';
+  return rows[0].unsubscribedAt === null ? 'confirmable' : 'unsubscribed';
+}
+
 /** 按退订 token 一键退订（幂等，立即生效）；token 不存在返回 invalid。 */
 export async function unsubscribeByToken(token: string): Promise<'done' | 'invalid'> {
   if (token.length === 0) return 'invalid';

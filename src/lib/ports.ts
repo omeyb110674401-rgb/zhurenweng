@@ -47,6 +47,12 @@ export interface MailMessage {
   subject: string;
   text: string;
   html?: string;
+  /**
+   * 附加邮件头（issue #34）：目前用于 `List-Unsubscribe` / `List-Unsubscribe-Post`
+   * —— 让邮件客户端自带的「退订」按钮走 RFC 8058 一键退订（POST），
+   * 而不是把用户丢到网页上找入口。
+   */
+  headers?: Record<string, string>;
 }
 
 export interface MailerPort {

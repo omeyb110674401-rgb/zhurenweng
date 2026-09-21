@@ -6,8 +6,16 @@ import type { RuleMatchableSubscription } from './subscription.ts';
  * 邮件内容构建（issue #7）：确认邮件与截止提醒邮件。
  *
  * 链接基于 APP_BASE_URL（生产为站点对外地址，E2E 注入应用服务器地址）。
- * 合规要求：确认邮件与提醒邮件底部都带一键退订链接；提醒邮件必须含
+ * 合规要求：确认邮件与提醒邮件底部都带退订链接；提醒邮件必须含
  * 截止日期与官方原文（提意）链接 —— 只引流，不代替官方受理意见。
+ *
+ * 退订与「一键退订」头（issue #34）：
+ * - 正文里的链接指向**只读的确认页** `/unsubscribe?token=…`（打开不会退订），
+ *   真正的退订由页面按钮 POST 到 `/unsubscribe/one-click` 完成；
+ * - 同时带上 `List-Unsubscribe`（指向动作端点）与
+ *   `List-Unsubscribe-Post: List-Unsubscribe=One-Click`（RFC 8058）：邮件客户端
+ *   自带的「退订」按钮会直接 POST，立即生效。
+ * 这样邮件网关预取正文链接（GET）不会静默退订，而用户想退订时反而更省事。
  */
 
 /** 站点对外基础地址（去掉末尾斜杠）。 */
@@ -21,8 +29,25 @@ function confirmUrl(confirmToken: string): string {
   return `${appBaseUrl()}/subscribe/confirm?token=${encodeURIComponent(confirmToken)}`;
 }
 
+/** 退订确认页（只读，打开不退订）——正文里的链接用这个。 */
 export function unsubscribeUrl(unsubscribeToken: string): string {
   return `${appBaseUrl()}/unsubscribe?token=${encodeURIComponent(unsubscribeToken)}`;
+}
+
+/** 退订动作端点（POST）——邮件头 List-Unsubscribe 用这个。 */
+export function unsubscribeOneClickUrl(unsubscribeToken: string): string {
+  return `${appBaseUrl()}/unsubscribe/one-click?token=${encodeURIComponent(unsubscribeToken)}`;
+}
+
+/**
+ * RFC 8058 一键退订头：客户端点「退订」时 POST 到动作端点，立即生效。
+ * 附带 `List-Unsubscribe-Post` 才表示「支持一键退订」。
+ */
+function unsubscribeHeaders(unsubscribeToken: string): Record<string, string> {
+  return {
+    'List-Unsubscribe': `<${unsubscribeOneClickUrl(unsubscribeToken)}>`,
+    'List-Unsubscribe-Post': 'List-Unsubscribe=One-Click',
+  };
 }
 
 export function noticeDetailUrl(noticeId: string): string {
@@ -56,8 +81,8 @@ export function buildConfirmationEmail(input: {
       `请点击下面的链接确认订阅，确认后订阅才生效：`,
       confirm,
       '',
-      `确认前你不会收到任何提醒邮件。如非本人操作，可忽略本邮件或通过下方链接一键退订。`,
-      `一键退订（拒收全部邮件）：`,
+      `确认前你不会收到任何提醒邮件。如非本人操作，可忽略本邮件或通过下方链接退订。`,
+      `退订（打开页面后点确认）：`,
       unsubscribe,
       '',
       `——`,
@@ -67,9 +92,10 @@ export function buildConfirmationEmail(input: {
       '<p>你（或他人）使用本邮箱在「主人翁」提交了公示提醒订阅：</p>',
       `<p>${rulesText(input.rules).replaceAll('\n', '<br>')}</p>`,
       `<p>请<a href="${confirm}">点击这里确认订阅</a>，确认后订阅才生效；确认前你不会收到任何提醒邮件。</p>`,
-      `<p>如非本人操作，可忽略本邮件，或<a href="${unsubscribe}">一键退订（拒收全部邮件）</a>。</p>`,
+      `<p>如非本人操作，可忽略本邮件，或<a href="${unsubscribe}">退订（打开页面后点确认）</a>。</p>`,
       `<p>——<br>${SITE_FOOTER}</p>`,
     ].join('\n'),
+    headers: unsubscribeHeaders(input.unsubscribeToken),
   };
 }
 
@@ -158,7 +184,7 @@ export function buildReminderEmail(input: {
       notice.url,
       '',
       `本提醒按你的订阅规则发送，每条公示截止前 7 天、3 天各提醒一次。`,
-      `不想再收到提醒？一键退订：`,
+      `不想再收到提醒？退订（打开页面后点确认）：`,
       unsubscribe,
       '',
       `——`,
@@ -169,8 +195,9 @@ export function buildReminderEmail(input: {
       `<p>截止日期：<strong>${notice.deadlineAt ?? '未标注'}</strong>（还剩 ${days} 天，${STAGE_LABELS[stage]}提醒）</p>`,
       `<p><a href="${detail}">站内详情（含 AI 摘要与提意指引）</a></p>`,
       `<p><a href="${notice.url}">官方原文（请前往官方渠道提交意见）</a></p>`,
-      `<p>本提醒按你的订阅规则发送，每条公示截止前 7 天、3 天各提醒一次。不想再收到提醒？<a href="${unsubscribe}">一键退订</a>。</p>`,
+      `<p>本提醒按你的订阅规则发送，每条公示截止前 7 天、3 天各提醒一次。不想再收到提醒？<a href="${unsubscribe}">退订（打开页面后点确认）</a>。</p>`,
       `<p>——<br>${SITE_FOOTER}</p>`,
     ].join('\n'),
+    headers: unsubscribeHeaders(input.unsubscribeToken),
   };
 }
