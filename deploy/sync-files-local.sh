@@ -9,36 +9,77 @@
 # 用法（在开发机仓库根目录）：
 #   bash deploy/sync-files-local.sh src/db/repo/notices.ts tests/e2e/category-filter.test.mjs
 #
+# 传输编码：默认「文件 → gzip -9 → base64」，远端 `base64 -d | gzip -d` 还原。
+# 为什么要压缩：单条 workbench exec 命令受 Windows 命令行长度上限（约 32KB）约束，
+# base64 又放大 4/3 —— 源码超过约 24KB 就传不上去，且失败表现是 **exit 126 且无任何
+# 输出**（2026-09-21 传 tests/e2e/category-filter.test.mjs 时踩到，白白怀疑了半天网络）。
+# 文本文件 gzip 后通常缩到 1/4 上下，因此单条命令就够；万一压缩后仍超限，退化为
+# 「原始 base64 分块 append」（每块独立可解码，最后一次性校验 sha256）。
+#
 # 注意：本脚本只负责传文件；传完仍需在服务器上重建镜像并重启：
 #   workbench exec -i <实例> --timeout 600 -c "cd /opt/zhurenweng && nohup docker compose build web worker > /tmp/build.log 2>&1 &"
 set -euo pipefail
 
 INSTANCE="REDACTED_INSTANCE_ID"
 REMOTE_ROOT="/opt/zhurenweng"
+# 单条命令里 base64 载荷的字符上限（给命令模板与路径留余量）
+MAX_CMD_CHARS=20000
+# 分块大小（仅退化路径使用）
+CHUNK_CHARS=8000
 
 if [ "$#" -eq 0 ]; then
   echo "用法：bash deploy/sync-files-local.sh <相对路径> [<相对路径> …]" >&2
   exit 1
 fi
 
+# 在服务器上执行一条命令，输出落到 /tmp/zw-sync-out.txt（workbench 会吞掉开头若干行，故取末尾）
+run_remote() {
+  workbench exec -i "$INSTANCE" --timeout 300 -c "$1" > /tmp/zw-sync-out.txt 2>&1
+}
+
 for file in "$@"; do
   if [ ! -f "$file" ]; then
     echo "文件不存在：$file" >&2
     exit 1
   fi
+  # 换行归一（CRLF → LF）后取哈希：与远端 `tr -d '\r'` 的落地结果对齐
   local_sum=$(python -c "
 import hashlib,sys
 print(hashlib.sha256(open(sys.argv[1],'rb').read().replace(b'\r\n',b'\n')).hexdigest())
 " "$file")
-  b64=$(python -c "
+  b64gz=$(python -c "
+import base64,gzip,sys
+data=open(sys.argv[1],'rb').read().replace(b'\r\n',b'\n')
+print(base64.b64encode(gzip.compress(data,9)).decode())
+" "$file")
+
+  if [ "${#b64gz}" -le "$MAX_CMD_CHARS" ]; then
+    run_remote "mkdir -p \"\$(dirname '$REMOTE_ROOT/$file')\" && echo $b64gz | base64 -d | gzip -d > '$REMOTE_ROOT/$file'"
+  else
+    echo "载荷压缩后仍为 ${#b64gz} 字符，退化为分块传输：$file" >&2
+    b64raw=$(python -c "
 import base64,sys
 data=open(sys.argv[1],'rb').read().replace(b'\r\n',b'\n')
 print(base64.b64encode(data).decode())
 " "$file")
+    total=${#b64raw}
+    offset=0
+    first=1
+    while [ "$offset" -lt "$total" ]; do
+      part=${b64raw:$offset:$CHUNK_CHARS}
+      offset=$((offset + CHUNK_CHARS))
+      if [ "$first" -eq 1 ]; then
+        redirect='>'
+        first=0
+      else
+        redirect='>>'
+      fi
+      run_remote "mkdir -p \"\$(dirname '$REMOTE_ROOT/$file')\" && echo $part | base64 -d | tr -d '\r' $redirect '$REMOTE_ROOT/$file'"
+      echo "  …已传 $offset/$total 字符" >&2
+    done
+  fi
 
-  workbench exec -i "$INSTANCE" --timeout 300 -c \
-    "mkdir -p \"\$(dirname '$REMOTE_ROOT/$file')\" && echo $b64 | base64 -d | tr -d '\r' > '$REMOTE_ROOT/$file' && sha256sum '$REMOTE_ROOT/$file' | cut -d' ' -f1" \
-    > /tmp/zw-sync-out.txt 2>&1
+  run_remote "sha256sum '$REMOTE_ROOT/$file' | cut -d' ' -f1"
   remote_sum=$(tail -1 /tmp/zw-sync-out.txt | tr -d '\r')
 
   if [ "$local_sum" != "$remote_sum" ]; then
