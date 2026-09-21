@@ -12,7 +12,7 @@ codeload 404），**无法创建 issue**。停用期间新工作的 issue 正文
 | `38-indexability-and-go-headers.md` | 搜索结果页与退订页可被收录；/go 端点缺缓存与索引声明 | `4ea2004` |
 | `39-jsonld-and-filter-interaction.md` | 详情页加 JSON-LD 结构化数据；首页机关下拉与筛选值不一致 | `2386082` |
 | `40-site-calendar-timezone.md` | 「今天」按进程时区算：容器跑 UTC，北京时间凌晨 8 小时里倒计时/状态/点击日归属全错一天 | `b1035d5` |
-| `41-list-view-indexability.md` | 列表页的 URL 变体没有索引口径：首页可被无界 querystring 灌薄页（分页也无 canonical） | `（见下条提交）` |
+| `41-list-view-indexability.md` | 列表页的 URL 变体没有索引口径：首页可被无界 querystring 灌薄页（分页也无 canonical） | `648cf09` |
 
 同时 `origin/main` 之后的全部提交（issue #33 起，含 #39）都已提交但未推送 —— 恢复
 推送通道后一并推送（数量随迭代增长，当前值看 `git rev-list --count origin/main..HEAD`）。
