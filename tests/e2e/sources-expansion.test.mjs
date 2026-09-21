@@ -190,7 +190,10 @@ describe('issue #18：M2 扩源（交通运输部 / 市场监管总局 / 工业�
     assert.match(run.output, /源 moe 抓取完成：列表 3 条，新增 3，更新 0/);
     assert.match(run.output, /源 ndrc 抓取完成：列表 5 条，新增 5，更新 0/);
     // 链式跳转断裂的那条：记日志降级、不中断整源（条目仍以列表层数据入库）
-    assert.match(run.output, /详情页抓取失败（保留列表层数据）[^\n]*access-url 响应缺少 articleId/);
+    assert.match(
+      run.output,
+      /详情页抓取失败（本轮沿用已入库的详情数据）[^\n]*access-url 响应缺少 articleId/,
+    );
   });
 
   it('首页：24 条新源条目全部呈现，非征求意见条目被过滤', async () => {

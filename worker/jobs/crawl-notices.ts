@@ -1,7 +1,7 @@
 import type { NoticeStatus } from '../../src/db/types.ts';
 import { sendTaskFailureAlert } from '../../src/lib/alerts.ts';
 import { noticeIdForUrl } from '../../src/lib/notice-id.ts';
-import { upsertNotice } from '../../src/db/repo/notices.ts';
+import { getNoticeById, upsertNotice } from '../../src/db/repo/notices.ts';
 import { getSourceById, recordSourceFailure, upsertSource } from '../../src/db/repo/sources.ts';
 import { syncNoticesToSearchIndex } from '../../src/lib/search/sync.ts';
 import { localDateIso } from '../../src/lib/dates.ts';
@@ -32,6 +32,11 @@ import type { Job, JobContext } from '../registry.ts';
  *
  * 健康与告警（issue #12）：失败登记源的错误列（健康看板展示）并发送告警邮件
  * （收件人 ALERT_EMAIL；同日 × 任务 × 源去重）；管理后台停用的源整轮跳过。
+ *
+ * 失败降级（issue #30）：单条详情抓取失败只记日志、不中断整轮，且**不覆盖已入库的
+ * 详情层字段**（正文 / 截止日期 / 发布日期 / 附件）—— 入库是整行覆盖写，一次网络抖动
+ * 会把上一轮抓到的正文抹成 null，并让已截止条目因截止日期丢失翻回「征求意见中」。
+ * 取舍见 preserveStoredDetail。
  *
  * 领域标签（issue #9）：入库路径（upsertNotice）自动按关键词规则打标；
  * 适配器可通过 NormalizedNotice.categoryTags 直接给出权威领域（优先采用）。
@@ -193,26 +198,66 @@ async function fetchDetailBody(adapter: SourceAdapter, firstUrl: string): Promis
   throw new Error(`详情地址链式跳转超过 ${MAX_DETAIL_HOPS} 跳仍未取到正文：${firstUrl}`);
 }
 
-/** 抓取并解析详情页；单条详情失败只降级保留列表层数据，不中断整轮抓取。 */
+/**
+ * 详情抓取结果：`detailLoaded=false` 表示这一轮**没拿到详情内容**，两种情形都算 ——
+ * 传输失败（fetch 抛错）与解析落空（parseDetail 返回 null，站点改版时会这样）。
+ * 此时列表层数据仍然有效，但详情层字段必须沿用已入库的值（见 preserveStoredDetail）。
+ */
+interface DetailEnrichment {
+  notice: NormalizedNotice;
+  detailLoaded: boolean;
+}
+
+/** 抓取并解析详情页；单条详情失败只降级、不中断整轮抓取。 */
 async function enrichWithDetail(
   adapter: SourceAdapter,
   notice: NormalizedNotice,
   ctx: JobContext,
-): Promise<NormalizedNotice> {
-  if (!adapter.parseDetail) return notice;
+): Promise<DetailEnrichment> {
+  // 没有详情解析器的源没有「详情层」，列表层就是全部（不涉及沿用旧值）
+  if (!adapter.parseDetail) return { notice, detailLoaded: true };
   // 详情内容默认取原文 URL；前端渲染型详情页由适配器指向数据接口（见 SourceAdapter）
   const contentUrl = adapter.detailContentUrl?.(notice) ?? notice.url;
   try {
     const detailBody = await fetchDetailBody(adapter, contentUrl);
     // 第二参始终传人工页 URL：详情解析器用它解析相对链接（附件等）
     const detail = await adapter.parseDetail(detailBody, notice.url);
-    return detail ? mergeDetail(notice, detail) : notice;
+    return { notice: detail ? mergeDetail(notice, detail) : notice, detailLoaded: detail !== null };
   } catch (error) {
     ctx.logger(
-      `详情页抓取失败（保留列表层数据）url=${contentUrl}：${errorMessage(error)}`,
+      `详情页抓取失败（本轮沿用已入库的详情数据）url=${contentUrl}：${errorMessage(error)}`,
     );
-    return notice;
+    return { notice, detailLoaded: false };
   }
+}
+
+/**
+ * 详情抓取失败时的字段保全（issue #30）：列表层字段照常刷新，**详情层字段沿用已入库的值**。
+ *
+ * 为什么必须这么做：`upsertNotice` 是整行覆盖写。一次网络抖动（线上实测：中国民航局
+ * 站点从服务器不可达）会把 bodyText / deadlineAt / publishedAt / attachments 全写成
+ * null —— 正文、倒计时、附件凭空消失，而且**已截止条目会因为截止日期丢失退回
+ * 「征求意见中」**（deriveStatus 在 deadlineAt 为空时用源标注、再兜底 open）。
+ * 抓取是每天一轮的常态动作，详情失败是偶发事件，不能让偶发覆盖常态。
+ *
+ * 只补「本轮拿不到的」：列表层给出值的字段（部分源的列表就带正文 / 截止日期）以本轮为准。
+ * 代价：源站若真的删掉了附件，旧附件清单会保留到下一轮详情抓取成功 —— 相比一次抖动
+ * 抹掉全部内容，这个方向更安全。
+ */
+async function preserveStoredDetail(
+  id: string,
+  notice: NormalizedNotice,
+): Promise<NormalizedNotice> {
+  // 已入库行读失败（如库连接抖动）不阻断本轮：退回列表层数据，与旧行为一致
+  const stored = await getNoticeById(id).catch(() => null);
+  if (!stored) return notice;
+  return {
+    ...notice,
+    publishedAt: notice.publishedAt ?? stored.publishedAt,
+    deadlineAt: notice.deadlineAt ?? stored.deadlineAt,
+    bodyText: notice.bodyText ?? stored.bodyText,
+    attachments: notice.attachments.length > 0 ? notice.attachments : stored.attachments,
+  };
 }
 
 function errorMessage(error: unknown): string {
@@ -252,7 +297,11 @@ export const crawlNoticesJob: Job = {
         // 本轮新增 / 更新的条目 id：入库与更新时同步检索索引（issue #8）
         const changedNoticeIds: string[] = [];
         for (const notice of listItems) {
-          const normalized = await enrichWithDetail(adapter, notice, ctx);
+          const enriched = await enrichWithDetail(adapter, notice, ctx);
+          // 详情没抓到（失败或解析落空）时沿用已入库的详情层字段，避免偶发失败抹掉常态数据
+          const normalized = enriched.detailLoaded
+            ? enriched.notice
+            : await preserveStoredDetail(noticeIdForUrl(enriched.notice.url), enriched.notice);
           // 对源站礼貌、避免触发限流（issue #14）：三源都是政府站点，串行连发
           // 上百个详情请求容易被 WAF 判定为爬虫而封 IP，整条数据管线会直接断掉。
           // 取值依据：单轮最大约 100 条 × 400ms ≈ 40s 额外耗时（可接受），
