@@ -22,6 +22,7 @@ codeload 404），**无法创建 issue**。停用期间新工作的 issue 正文
 | `48-trend-range-drilldown.md` | 趋势表的小计与总计点不开（求和结果缺区间口径） | `03cedd9` |
 | `49-e2e-html-helper-and-itemlist.md` | e2e 解析器收成共享工具 + 首页 ItemList 结构化数据 | `17e6314` |
 | `50-code-review-and-fixes.md` | 全量代码评审（规范 + 规格两轴）与 11 项修复：牵头口径在筛选表单里丢失、邮件 href 未转义、stats.ts 的裸 NUL 字节让文件不可评审、多词搜索三路径三语义 | `b92493c` |
+| `51-code-health-and-robustness.md` | 代码健康与健壮性审计（第二轮）与 13 项修复：.env 曾烘进 web 镜像层、PG 连接池无超时、worker 重入与优雅退出、源数据质量降级不再静默 | `7261aa2` |
 
 **另有 `FOLLOWUPS.md`（durable，不随本目录删除）**：各 issue 的「未做（有意）」小节里
 既有真实待办也有有意取舍，都登记在那里 —— 本目录按约定会在补录 tracker 后删除，删文件

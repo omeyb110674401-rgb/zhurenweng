@@ -28,6 +28,12 @@
 | #49 | 把 `stripSsrComments` 的局部 wrapper 从各 e2e 彻底删掉 | 部分完成：#50 删掉了 `status-freshness` 里那处重复 wrapper；其余文件仍保留同名局部函数（改动面 vs 收益不划算） |
 | #50 | 复合机关 + 空 `agency_keys` 的钻取兜底 | 未做：线上 16 行机关全部满足「点进去的条数 = 表格数字」（合计 178），不存在此类行。**触发条件**：若表格数字比点进去多 1，按 `agency LIKE '牵头机关、%'` 补一条兜底 |
 | #50 | `?period=` 在 PG 侧遇坏日期会抛 500（SQLite 侧静默 0 行） | 已收口：所有适配器与后台写入路径的日期都过 `normalizeDateText`（回读校验），坏日期进不了库，因此不加方言专属形状守卫 |
+| #51 | **Dockerfile 单阶段 + 以 root 运行**：web 镜像里同时装着 devDependencies（tsc / eslint / drizzle-kit），容器进程是 root | 未做：瘦身与降权是真实收益，但改动面与部署风险不成比例。要做就一起做（多阶段 + `USER node` + 只在最终层装生产依赖） |
+| #51 | **健康检查缺失**：`docs/deploy.md` 让操作者「五服务应为 healthy」，实际只有 db 有 healthcheck，也没有 `/api/health` 端点；`web.depends_on.meilisearch` 用的是 `service_started` | 未做：加它要先定「健康」的判据（库可写？检索可达？）—— 定下来之后是十几行的事 |
+| #51 | **表增长无上限**：`outbound_click_daily` / `alert_sends` / `reminder_sends` 只增不删；`sitemap.ts` 与 `reindexAllNotices` 一次性载入全表（含正文）并整表推给 Meilisearch | 未做：184 条量级无碍。量级变大时先做「点击按日聚合保留 N 天」与 reindex 分批 |
+| #51 | **npm audit 4 个 moderate** | 不修：全部来自 `drizzle-kit → @esbuild-kit/esm-loader → esbuild`（dev-only，容器内不可达），`fixAvailable` 是降级到 `drizzle-kit@0.18`（会破坏配置）。等上游升级 |
+| #51 | **tsconfig 严格度**：`noUncheckedIndexedAccess` / `exactOptionalPropertyTypes` / `noImplicitOverride` / `noFallthroughCasesInSwitch` / `noUnusedLocals` 均未开 | 未做：审计未发现现存缺陷（现有索引访问都有守卫），开启需要成片改动。值得单开一轮做 |
+| #51 | **提醒邮件「先发后记」的跨进程双发窗口** | 有意保留：at-least-once（重复提醒比漏提醒可接受），跨进程由「单实例部署 + worker 重入保护」覆盖。若将来要多副本，改成 claim-first（先占位再发） |
 
 ## 三、有意不做（by design，别当成遗漏）
 
