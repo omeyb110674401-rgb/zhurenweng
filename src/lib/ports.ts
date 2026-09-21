@@ -67,6 +67,21 @@ export interface SearchHit {
   title: string;
 }
 
+/** 检索默认每页条数（两个实现共用同一缺省值，避免 provider 之间口径不一） */
+export const SEARCH_DEFAULT_PER_PAGE = 20;
+
+/** 一页检索结果：`total` 是**命中总数**（≥ hits.length），结果页据此如实展示与分页。 */
+export interface SearchResult {
+  total: number;
+  hits: SearchHit[];
+}
+
+/** 检索分页参数（页码从 1 起；缺省由实现取 SEARCH_DEFAULT_PER_PAGE）。 */
+export interface SearchOptions {
+  page?: number;
+  perPage?: number;
+}
+
 /**
  * SearchPort：生产实现为 Meilisearch 适配器，开发 / 测试为本地实现（检索切片交付）。
  * `index()` 为幂等 upsert（同 id 先删后写）；`remove()` 在条目从库中删除时同步
@@ -76,7 +91,7 @@ export interface SearchPort {
   readonly provider: string;
   index(documents: SearchDocument[]): Promise<void>;
   remove(ids: string[]): Promise<void>;
-  search(query: string, limit?: number): Promise<SearchHit[]>;
+  search(query: string, options?: SearchOptions): Promise<SearchResult>;
 }
 
 /** 按环境变量创建 LLM 端口。真实 GLM 适配器由 AI 摘要切片在此注册。 */

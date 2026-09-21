@@ -1,7 +1,13 @@
 import { ilike, inArray, or, sql } from 'drizzle-orm';
 import { currentDriver, getDb } from '../../db/client.ts';
 import { notices } from '../../db/schema/sqlite.ts';
-import type { SearchDocument, SearchHit, SearchPort } from '../ports.ts';
+import {
+  SEARCH_DEFAULT_PER_PAGE,
+  type SearchDocument,
+  type SearchOptions,
+  type SearchPort,
+  type SearchResult,
+} from '../ports.ts';
 import { buildFts5MatchQuery, summarySearchText, toCjkSpacedText } from './search-text.ts';
 
 /**
@@ -23,14 +29,27 @@ import { buildFts5MatchQuery, summarySearchText, toCjkSpacedText } from './searc
  * 相关语句经 drizzle 原生 SQL 执行，值一律走参数绑定。
  */
 
-/** 检索默认返回条数（结果页与 SearchPort.search 的缺省 limit） */
-export const SEARCH_DEFAULT_LIMIT = 20;
 /** PG ILIKE 退化路径的候选行上限（应用层复核后再截断到 limit） */
 const PG_CANDIDATE_LIMIT = 500;
 
 /** FTS5 单行形状 */
 interface FtsRow {
   notice_id: string;
+}
+
+/** 计数查询单行形状 */
+interface CountRow {
+  total: number;
+}
+
+/** 页码归一：非正整数一律当第 1 页（与结果页的 URL 参数口径一致）。 */
+function normalizePage(page: number | undefined): number {
+  return Number.isInteger(page) && (page ?? 0) > 0 ? (page as number) : 1;
+}
+
+/** 每页条数归一：非正数退回缺省值。 */
+function normalizePerPage(perPage: number | undefined): number {
+  return Number.isInteger(perPage) && (perPage ?? 0) > 0 ? (perPage as number) : SEARCH_DEFAULT_PER_PAGE;
 }
 
 export class LocalSearch implements SearchPort {
@@ -62,22 +81,41 @@ export class LocalSearch implements SearchPort {
     });
   }
 
-  async search(query: string, limit: number = SEARCH_DEFAULT_LIMIT): Promise<SearchHit[]> {
+  async search(query: string, options: SearchOptions = {}): Promise<SearchResult> {
     const trimmed = query.trim();
-    if (trimmed === '' || limit <= 0) return [];
-    if (currentDriver() === 'postgres') return this.searchPostgres(trimmed, limit);
-    return this.searchSqlite(trimmed, limit);
+    const perPage = normalizePerPage(options.perPage);
+    const page = normalizePage(options.page);
+    if (trimmed === '') return { total: 0, hits: [] };
+    if (currentDriver() === 'postgres') return this.searchPostgres(trimmed, page, perPage);
+    return this.searchSqlite(trimmed, page, perPage);
   }
 
-  /** SQLite：FTS5 短语查询 → 按相关性（rank）取 id → 联库补标题并保持排序。 */
-  private async searchSqlite(query: string, limit: number): Promise<SearchHit[]> {
+  /**
+   * SQLite：FTS5 短语查询 → 计数 + 按相关性（rank）取当前页 id → 联库补标题并保持排序。
+   *
+   * 计数单独查一次：结果页要如实说「共 N 条」，而 N 与当前页条数是两件事
+   * （issue #31 —— 此前结果页把「本页条数」当总数，176 条命中显示成 50 条）。
+   * 计数同样排除索引孤儿行（条目已从 notices 删除）：页面上的数字必须等于
+   * 用户实际能点开的条目数，否则分页的末页会短一截且总数对不上。
+   */
+  private async searchSqlite(query: string, page: number, perPage: number): Promise<SearchResult> {
     const matchQuery = buildFts5MatchQuery(query);
-    if (matchQuery === null) return [];
+    if (matchQuery === null) return { total: 0, hits: [] };
     const db = await getDb();
+    const countRows = (await db.all<CountRow>(
+      sql`SELECT count(*) AS total FROM notices_fts
+          WHERE notices_fts MATCH ${matchQuery}
+            AND EXISTS (SELECT 1 FROM notices WHERE notices.id = notices_fts.notice_id)`,
+    )) as CountRow[];
+    const total = Number(countRows[0]?.total ?? 0);
+    if (total === 0) return { total: 0, hits: [] };
+
+    const offset = (page - 1) * perPage;
     const rows = (await db.all<FtsRow>(
-      sql`SELECT notice_id FROM notices_fts WHERE notices_fts MATCH ${matchQuery} ORDER BY rank LIMIT ${limit}`,
+      sql`SELECT notice_id FROM notices_fts WHERE notices_fts MATCH ${matchQuery}
+          ORDER BY rank LIMIT ${perPage} OFFSET ${offset}`,
     )) as FtsRow[];
-    if (rows.length === 0) return [];
+    if (rows.length === 0) return { total, hits: [] };
 
     // 索引孤儿行兜底：只保留库中仍存在的条目，并按 FTS 相关性顺序输出
     const ids = rows.map((row) => row.notice_id);
@@ -86,17 +124,28 @@ export class LocalSearch implements SearchPort {
       .from(notices)
       .where(inArray(notices.id, ids));
     const titleById = new Map(dbRows.map((row) => [row.id, row.title]));
-    return ids
-      .filter((id) => titleById.has(id))
-      .map((id) => ({ id, title: titleById.get(id) ?? '' }));
+    return {
+      total,
+      hits: ids
+        .filter((id) => titleById.has(id))
+        .map((id) => ({ id, title: titleById.get(id) ?? '' })),
+    };
   }
 
   /**
    * PostgreSQL：ILIKE 退化查询（标题 / 正文 / AI 摘要 JSON 粗筛）→
-   * 应用层按 FTS 同款字段语义复核（摘要只计各段 text，不计原文引用）→
-   * 截断到 limit。无相关性排序，按主键稳定输出。
+   * 应用层按 FTS 同款字段语义复核（摘要只计各段 text，不计原文引用）→ 取当前页。
+   * 无相关性排序，按主键稳定输出。
+   *
+   * `total` 取复核后的命中数；候选行触及 PG_CANDIDATE_LIMIT 时它是**下界**
+   * （复核无法在 SQL 里表达，只能在候选集上做）—— 本部署规模（数百条）不会触及，
+   * 且生产走 Meilisearch（精确 totalHits），此路径只在无 Meilisearch 的 PG 部署上生效。
    */
-  private async searchPostgres(query: string, limit: number): Promise<SearchHit[]> {
+  private async searchPostgres(
+    query: string,
+    page: number,
+    perPage: number,
+  ): Promise<SearchResult> {
     const db = await getDb();
     const pattern = likePattern(query);
     const rows = await db
@@ -115,17 +164,21 @@ export class LocalSearch implements SearchPort {
         ),
       )
       .limit(PG_CANDIDATE_LIMIT);
-    return rows
-      .filter((row) => {
-        const summary = summarySearchText(safeParse(row.aiSummaryJson));
-        return (
-          row.title.includes(query) ||
-          (row.bodyText ?? '').includes(query) ||
-          summary.includes(query)
-        );
-      })
-      .slice(0, limit)
-      .map((row) => ({ id: row.id, title: row.title }));
+    const matched = rows.filter((row) => {
+      const summary = summarySearchText(safeParse(row.aiSummaryJson));
+      return (
+        row.title.includes(query) ||
+        (row.bodyText ?? '').includes(query) ||
+        summary.includes(query)
+      );
+    });
+    const offset = (page - 1) * perPage;
+    return {
+      total: matched.length,
+      hits: matched
+        .slice(offset, offset + perPage)
+        .map((row) => ({ id: row.id, title: row.title })),
+    };
   }
 }
 

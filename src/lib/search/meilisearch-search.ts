@@ -1,4 +1,11 @@
-import type { SearchDocument, SearchHit, SearchPort } from '../ports.ts';
+import {
+  SEARCH_DEFAULT_PER_PAGE,
+  type SearchDocument,
+  type SearchHit,
+  type SearchOptions,
+  type SearchPort,
+  type SearchResult,
+} from '../ports.ts';
 
 /**
  * SearchPort 生产适配器：Meilisearch（issue #8，PRD 技术栈决策）。
@@ -74,16 +81,26 @@ export class MeilisearchSearch implements SearchPort {
     });
   }
 
-  async search(query: string, limit?: number): Promise<SearchHit[]> {
+  /**
+   * 检索当前页。用 `page` / `hitsPerPage` 而不是 `offset` / `limit`：前者返回**精确**
+   * `totalHits`，后者只有 `estimatedTotalHits` 估算值 —— 结果页要如实说「共 N 条」
+   * （issue #31），估算值不能拿来当总数。
+   */
+  async search(query: string, options: SearchOptions = {}): Promise<SearchResult> {
     const trimmed = query.trim();
-    if (trimmed === '') return [];
+    if (trimmed === '') return { total: 0, hits: [] };
+    const page = Number.isInteger(options.page) && (options.page ?? 0) > 0 ? options.page : 1;
+    const perPage =
+      Number.isInteger(options.perPage) && (options.perPage ?? 0) > 0
+        ? options.perPage
+        : SEARCH_DEFAULT_PER_PAGE;
     const response = await this.request(`/indexes/${this.indexUid}/search`, {
       method: 'POST',
-      body: JSON.stringify({ q: trimmed, limit: limit ?? 20 }),
+      body: JSON.stringify({ q: trimmed, page, hitsPerPage: perPage }),
     });
-    const payload = (await response.json()) as { hits?: unknown };
-    if (!Array.isArray(payload.hits)) return [];
-    return payload.hits
+    const payload = (await response.json()) as { hits?: unknown; totalHits?: unknown };
+    if (!Array.isArray(payload.hits)) return { total: 0, hits: [] };
+    const hits = payload.hits
       .map((hit): SearchHit | null => {
         if (typeof hit !== 'object' || hit === null) return null;
         const record = hit as Record<string, unknown>;
@@ -91,6 +108,8 @@ export class MeilisearchSearch implements SearchPort {
         return { id: record.id, title: typeof record.title === 'string' ? record.title : '' };
       })
       .filter((hit): hit is SearchHit => hit !== null);
+    const total = typeof payload.totalHits === 'number' ? payload.totalHits : hits.length;
+    return { total, hits };
   }
 
   /** 确保索引存在且可搜索属性顺序正确（title > summary > body）；结果幂等缓存。 */
