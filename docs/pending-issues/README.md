@@ -15,6 +15,7 @@ codeload 404），**无法创建 issue**。停用期间新工作的 issue 正文
 | `41-list-view-indexability.md` | 列表页的 URL 变体没有索引口径：首页可被无界 querystring 灌薄页（分页也无 canonical） | `648cf09` |
 | `42-diff-incomplete-body.md` | 版本对比在单侧缺正文时把上一版整篇报成「删除」 | `3017a5d` |
 | `43-stale-status-badge.md` | 状态列每日一轮，过期条目在下一轮抓取前仍显示「征求意见中」 | `49e3b83` |
+| `44-sitemap-lastmod.md` | sitemap 的 lastmod 写成了抓取时间：178 条全部声称「今天改过」 | `（见下条提交）` |
 
 同时 `origin/main` 之后的全部提交（issue #33 起，含 #39）都已提交但未推送 —— 恢复
 推送通道后一并推送（数量随迭代增长，当前值看 `git rev-list --count origin/main..HEAD`）。

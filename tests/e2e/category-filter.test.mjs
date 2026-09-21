@@ -506,4 +506,45 @@ describe('issue #9：领域标签自动打标与分类浏览筛选', () => {
       assertSubsequence(listOrder(await fetchHome(query)), EXPECTED_FULL_ORDER, `筛选 ${query} 后`);
     }
   });
+
+  it('sitemap：lastmod 是内容时间（发布日期），不是我们的抓取时间（issue #44）', async () => {
+    const home = await fetchHome();
+    const publishedById = new Map(
+      extractNoticeItems(home).map((item) => [
+        /href="(\/notices\/[0-9a-f]+)"/.exec(item)[1],
+        /发布：(\d{4}-\d{2}-\d{2}|未标注)/.exec(item)?.[1] ?? null,
+      ]),
+    );
+    assert.ok(publishedById.size > 0, '首页应有条目');
+
+    const sitemap = await (await fetch(`${app.url}/sitemap.xml`)).text();
+    const lastmodByLoc = new Map(
+      [
+        ...sitemap.matchAll(/<url>\s*<loc>([^<]+)<\/loc>\s*<lastmod>([^<]+)<\/lastmod>/g),
+      ].map((match) => [match[1], match[2]]),
+    );
+    // 站点对外地址从 sitemap 自身推导（本场景未注入 SITE_URL，不能写死）
+    const base = (/<loc>([^<]+)<\/loc>/.exec(sitemap)?.[1] ?? '').replace(/\/$/, '');
+    assert.ok(base.length > 0, 'sitemap 应含站点地址');
+
+    for (const [href, published] of publishedById) {
+      const lastmod = lastmodByLoc.get(`${base}${href}`);
+      assert.ok(lastmod !== undefined, `${href} 应在 sitemap 内且带 lastmod`);
+      assert.equal(
+        lastmod,
+        published,
+        `${href} 的 lastmod 应等于站点上显示的发布日期（内容时间），而不是抓取时间`,
+      );
+    }
+
+    // 反向断言：抓取就发生在测试当天 —— 只要有一条 lastmod 不是今天，
+    // 就证明写进去的不是 fetchedAt（全部条目都是今天 = 抓取时间的老行为）
+    const today = new Date().toISOString().slice(0, 10);
+    const lastmods = [...lastmodByLoc.values()];
+    assert.ok(lastmods.length > 0, 'sitemap 应含条目级 lastmod');
+    assert.ok(
+      lastmods.some((value) => value !== today),
+      `lastmod 不该全是「今天」（那是抓取时间），实际：${JSON.stringify(lastmods.slice(0, 3))}`,
+    );
+  });
 });
