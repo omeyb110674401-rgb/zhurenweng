@@ -1,8 +1,9 @@
 import { and, asc, desc, eq, inArray, or, sql } from 'drizzle-orm';
-import { getDb } from '../client.ts';
+import { currentDriver, getDb } from '../client.ts';
 import { notices, outboundClickDaily } from '../schema/sqlite.ts';
 import { syncNoticeVersionLinks } from './versions.ts';
 import { siteDateIso } from '../../lib/dates.ts';
+import { PERIOD_BUCKETS, type PeriodBucketKey } from '../../lib/notice-period.ts';
 import { deriveCategoryTags } from '../../lib/categories.ts';
 import { agencyKeysOf, canonicalAgency, splitAgencies } from '../../lib/agencies.ts';
 import {
@@ -105,6 +106,12 @@ export interface ListNoticesFilteredOptions {
    * 调用方保证格式合法（见 app/_lib/home-query.ts 的 monthParam）。
    */
   publishedMonth?: string;
+  /**
+   * 公示期分桶（issue #47）：统计页「公示期长度分布」的钻取链接用。
+   * 桶边界与文案统一在 `src/lib/notice-period.ts`，这里的 SQL 条件由同一份
+   * 定义推导（不另写一套边界）。
+   */
+  periodBucket?: PeriodBucketKey;
   limit?: number;
   /** 分页偏移（首页分页用；默认 0）。排序是确定性的（见 AGGREGATION_ORDER），
    *  故同一查询条件下 offset 分页不会重复或漏行。 */
@@ -157,6 +164,37 @@ function keywordCondition(keyword: string) {
  * 筛选条件（listNoticesFiltered 与 countNoticesFiltered 共用）：
  * 两处的 WHERE 必须完全一致，否则「共 N 条」与实际能翻到的行数会打架。
  */
+/**
+ * 公示期天数表达式（截止 − 发布，按日历日）。
+ *
+ * 这是本项目里**唯一**一处按驱动分支的 SQL：桶边界是派生值，而双方言交集里没有
+ * 可移植的天数差函数（SQLite 只有 julianday，PostgreSQL 直接对 date 相减）。
+ * 取舍：宁可写这一处显式分支，也不新增一列存储值 —— 新增列要给存量条目回填，
+ * 还要让每条入库路径都维护它（issue #30 的教训：多一个需要维护的字段，就多一处
+ * 会与真相脱节的地方）。
+ *
+ * 两侧都先把字符串截到日期部分（substr 1..10）：与统计页应用层的日历日差口径
+ * 完全一致，带时分的时间戳不会造成跨界漂移（线上实测两个日期列 100% 是
+ * YYYY-MM-DD，这层截断是保险）。任一日期为空 → 表达式为 NULL → 该行不被任何桶
+ * 选中，与「缺日期不参与分布」同一口径。
+ */
+function periodDaysExpr() {
+  return currentDriver() === 'postgres'
+    ? sql`(substr(${notices.deadlineAt}, 1, 10)::date - substr(${notices.publishedAt}, 1, 10)::date)`
+    : sql`(julianday(substr(${notices.deadlineAt}, 1, 10)) - julianday(substr(${notices.publishedAt}, 1, 10)))`;
+}
+
+/** 桶条件：由 `PERIOD_BUCKETS` 的 min/max 推导，边界只定义一处。 */
+function periodBucketCondition(key: PeriodBucketKey) {
+  const bucket = PERIOD_BUCKETS.find((candidate) => candidate.key === key);
+  if (bucket === undefined) throw new Error(`未知的公示期桶：${key}`);
+  const days = periodDaysExpr();
+  const parts = [];
+  if (bucket.minDays !== null) parts.push(sql`${days} >= ${bucket.minDays}`);
+  if (bucket.maxDays !== null) parts.push(sql`${days} <= ${bucket.maxDays}`);
+  return and(...parts);
+}
+
 function filterConditions(options: ListNoticesFilteredOptions) {
   const conditions = [];
   if (options.category) {
@@ -185,6 +223,9 @@ function filterConditions(options: ListNoticesFilteredOptions) {
         sql`${notices.agencyKeys} like ${options.leadAgencyOnly ? `${agencyPattern}%` : `%${agencyPattern}%`} escape '\\'`,
       ),
     );
+  }
+  if (options.periodBucket) {
+    conditions.push(periodBucketCondition(options.periodBucket));
   }
   if (options.publishedMonth) {
     // 月份前缀匹配：published_at 是 ISO 日期字符串，取前 7 位即月份。

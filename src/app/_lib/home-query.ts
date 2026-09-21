@@ -7,6 +7,7 @@
  */
 
 import { isKnownCategory } from '../../lib/categories.ts';
+import { isPeriodBucketKey, type PeriodBucketKey } from '../../lib/notice-period.ts';
 
 /** 首页接受的 querystring 参数（Next 的 searchParams 形状：值可能是数组）。 */
 export interface HomeSearchParams {
@@ -16,6 +17,7 @@ export interface HomeSearchParams {
   lead?: string | string[];
   page?: string | string[];
   month?: string | string[];
+  period?: string | string[];
 }
 
 /** 取 querystring 参数首值并去空白；空串视为未传。 */
@@ -45,6 +47,17 @@ export function monthParam(value: string | string[] | undefined): string | undef
   return /^\d{4}-(0[1-9]|1[0-2])$/.test(raw) ? raw : undefined;
 }
 
+/**
+ * 取 querystring 里的公示期分桶（issue #47）：只认 `notice-period.ts` 里定义的
+ * 桶 key（`lte7` / `b8_15` / `b16_30` / `gt30`），其余一律不生效 —— 与未知领域值
+ * 同一处理。桶的边界与文案也来自那份定义，这里不重复一套。
+ */
+export function periodParam(value: string | string[] | undefined): PeriodBucketKey | undefined {
+  const raw = firstParam(value);
+  if (raw === undefined) return undefined;
+  return isPeriodBucketKey(raw) ? raw : undefined;
+}
+
 /** 首页当前生效的查询状态 */
 export interface HomeQuery {
   /** 领域标签（未知值不生效：避免任意 querystring 触发无效筛选） */
@@ -55,6 +68,8 @@ export interface HomeQuery {
   leadAgencyOnly: boolean;
   /** 发布月份（YYYY-MM，issue #45：统计页趋势表钻取用） */
   month?: string;
+  /** 公示期分桶 key（issue #47：统计页公示期分布钻取用） */
+  period?: PeriodBucketKey;
   /** 请求的页码（已夹到正整数；实际页码还要按总数夹一次） */
   page: number;
   /** 是否带了筛选维度（领域 / 机关 / 关键词 / 月份）—— 决定「筛选后共 N 条」与索引口径 */
@@ -68,17 +83,20 @@ export function parseHomeQuery(params: HomeSearchParams): HomeQuery {
   const agency = firstParam(params.agency);
   const keyword = firstParam(params.q);
   const month = monthParam(params.month);
+  const period = periodParam(params.period);
   return {
     category,
     agency,
     keyword,
     month,
+    period,
     leadAgencyOnly: firstParam(params.lead) === '1',
     page: pageParam(params.page),
     hasFilter:
       category !== undefined ||
       agency !== undefined ||
       keyword !== undefined ||
-      month !== undefined,
+      month !== undefined ||
+      period !== undefined,
   };
 }

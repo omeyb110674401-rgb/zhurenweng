@@ -10,6 +10,7 @@ import {
   type AgencyTotal,
 } from '@/db/repo/stats';
 import { lastSiteMonths } from '@/lib/dates';
+import { PERIOD_BUCKETS } from '@/lib/notice-period';
 
 // 统计随抓取管线与点击实时变化，服务端实时渲染，不做静态预渲染。
 export const dynamic = 'force-dynamic';
@@ -22,14 +23,13 @@ export const metadata = {
 const TREND_MONTHS = 6;
 
 /** 公示期分布桶的页面文案（与 repo 层桶 key 一一对应，顺序固定）。 */
-const PERIOD_LABELS: Record<string, string> = {
-  lte7: '7 天以内（含 7 天）',
-  b8_15: '8-15 天',
-  b16_30: '16-30 天',
-  // 桶边界是「> 30」（见 repo 的 getPeriodLengthDistribution）：标签必须写「31 天及以上」——
-  // 原先写「30 天以上」，与上一桶「16-30 天」在 30 这个数上重叠，读者无法判断 30 天算哪一桶
-  gt30: '31 天及以上',
-};
+// 桶标签与边界统一在 lib/notice-period.ts（issue #47）：标签从那份定义取，
+// 不再在页面里另写一份 —— issue #46 的缺陷正是两份定义漂移（标签说「30 天以上」、
+// 边界其实是 > 30）。
+const PERIOD_LABELS: Record<string, string> = Object.fromEntries(
+  PERIOD_BUCKETS.map((bucket) => [bucket.key, bucket.label]),
+);
+
 
 export default async function StatsPage() {
   const now = new Date();
@@ -244,7 +244,20 @@ export default async function StatsPage() {
                     style={{ width: `${Math.round((bucket.count / periodMax) * 100)}%` }}
                   />
                 </span>
-                <span className="period-count">{bucket.count} 条</span>
+                <span className="period-count">
+                  {bucket.count > 0 ? (
+                    <Link
+                      className="stat-drill"
+                      href={`/?period=${bucket.key}`}
+                      data-testid="period-bucket-link"
+                      aria-label={`查看公示期${PERIOD_LABELS[bucket.key]}的 ${bucket.count} 条公示`}
+                    >
+                      {bucket.count} 条
+                    </Link>
+                  ) : (
+                    `${bucket.count} 条`
+                  )}
+                </span>
               </li>
             ))}
           </ul>

@@ -264,9 +264,10 @@ describe('issue #46：统计页把「未参与统计的条数」说清楚', () =
   it('公示期分布：差额按条数说出，且与「收录总数 − 四桶之和」一致', async () => {
     const html = stripSsrComments(await (await fetch(`${app.url}/stats`)).text());
     const total = Number(/data-testid="stats-total-notices">(\d+)</.exec(html)[1]);
+    // 非零桶的计数自 issue #47 起是钻取链接 —— 取数字前先剥标签
     const buckets = [
-      ...html.matchAll(/data-bucket="[^"]+"[\s\S]{0,200}?period-count">(\d+) 条</g),
-    ].map((match) => Number(match[1]));
+      ...html.matchAll(/data-bucket="[^"]+"[\s\S]{0,400}?period-count">([\s\S]*?)<\/span>/g),
+    ].map((match) => Number(/(\d+)/.exec(match[1].replace(/<[^>]*>/g, ''))?.[1] ?? 0));
     assert.equal(buckets.length, 4, '应有四个分布桶');
 
     const sum = buckets.reduce((acc, n) => acc + n, 0);

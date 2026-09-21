@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { firstParam, monthParam, pageParam, parseHomeQuery } from '../../src/app/_lib/home-query.ts';
+import { firstParam, monthParam, pageParam, parseHomeQuery, periodParam } from '../../src/app/_lib/home-query.ts';
 
 /**
  * 单元：首页 querystring 解析（issue #41）。
@@ -51,6 +51,20 @@ describe('monthParam：发布月份（issue #45）', () => {
   });
 });
 
+describe('periodParam：公示期分桶（issue #47）', () => {
+  it('只认 notice-period.ts 定义过的桶 key', () => {
+    for (const key of ['lte7', 'b8_15', 'b16_30', 'gt30']) {
+      assert.equal(periodParam(key), key);
+    }
+  });
+
+  it('非法值一律不生效（与未知领域值同一处理）', () => {
+    for (const bad of ['lte8', 'gt31', '7', 'LTE7', 'b8-15', 'unknown', '', '   ', undefined]) {
+      assert.equal(periodParam(bad), undefined, `period=${JSON.stringify(bad)} 应不生效`);
+    }
+  });
+});
+
 describe('parseHomeQuery：筛选状态与索引口径', () => {
   it('未知领域值不生效（避免任意 querystring 触发无效筛选）', () => {
     assert.equal(parseHomeQuery({ category: '生态环境' }).category, '生态环境');
@@ -66,6 +80,8 @@ describe('parseHomeQuery：筛选状态与索引口径', () => {
     assert.equal(parseHomeQuery({ agency: '司法部' }).hasFilter, true);
     assert.equal(parseHomeQuery({ month: '2026-08' }).hasFilter, true, '月份是筛选维度（issue #45）');
     assert.equal(parseHomeQuery({ month: '2026-13' }).hasFilter, false, '非法月份不生效');
+    assert.equal(parseHomeQuery({ period: 'b16_30' }).hasFilter, true, '公示期是筛选维度（issue #47）');
+    assert.equal(parseHomeQuery({ period: 'nope' }).hasFilter, false, '非法桶 key 不生效');
   });
 
   it('lead=1 只在显式传 1 时为真，其余值一律假', () => {
@@ -81,6 +97,7 @@ describe('parseHomeQuery：筛选状态与索引口径', () => {
       agency: undefined,
       keyword: '意见',
       month: undefined,
+      period: undefined,
       leadAgencyOnly: false,
       page: 3,
       hasFilter: true,

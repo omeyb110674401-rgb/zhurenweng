@@ -5,6 +5,7 @@ import { NoticeItem } from '@/app/_lib/notice-item';
 import { SearchForm } from '@/app/_lib/search-form';
 import { IcpFiling } from '@/app/_lib/icp-filing';
 import { parseHomeQuery, type HomeSearchParams } from '@/app/_lib/home-query';
+import { periodBucketLabel, type PeriodBucketKey } from '@/lib/notice-period';
 import { DOMAIN_CATEGORIES } from '@/lib/categories';
 import { siteUrl } from '@/lib/site-url';
 import { mailerReady } from '@/lib/mailer-availability';
@@ -70,6 +71,11 @@ interface FilterState {
    */
   month?: string;
   /**
+   * 公示期分桶（issue #47）：统计页「公示期长度分布」的钻取口径。
+   * 桶边界与文案统一在 lib/notice-period.ts，SQL 条件由同一份定义推导。
+   */
+  period?: PeriodBucketKey;
+  /**
    * 机关筛选只算牵头机关（issue #36）：统计页的钻取链接带 `lead=1` 进来，
    * 与「各部门公示量」同一口径（联合发文只归牵头机关，否则各部门之和会超过总数）。
    * 从下拉框自己选的机关不带这个参数 —— 那时是「任一参与机关」（issue #21）。
@@ -93,6 +99,7 @@ function buildFilterHref(current: FilterState, next: Partial<FilterState>): stri
   if (merged.agency && merged.leadAgencyOnly) search.set('lead', '1');
   if (merged.keyword) search.set('q', merged.keyword);
   if (merged.month) search.set('month', merged.month);
+  if (merged.period) search.set('period', merged.period);
   if (merged.page !== undefined && merged.page > 1) search.set('page', String(merged.page));
   const qs = search.toString();
   return qs.length > 0 ? `/?${qs}` : '/';
@@ -107,10 +114,11 @@ export default async function HomePage({ searchParams }: HomePageProps) {
     agency: query.agency,
     keyword: query.keyword,
     month: query.month,
+    period: query.period,
     // 只有「带了机关 + lead=1」才算牵头口径；裸 lead=1 不改变任何结果
     leadAgencyOnly: query.leadAgencyOnly,
   };
-  const { category, agency, keyword, month } = current;
+  const { category, agency, keyword, month, period } = current;
   const hasFilter = query.hasFilter;
 
   const size = pageSize();
@@ -121,6 +129,7 @@ export default async function HomePage({ searchParams }: HomePageProps) {
     agency,
     keyword,
     publishedMonth: month,
+    periodBucket: period,
     leadAgencyOnly: current.leadAgencyOnly && agency !== undefined,
   };
 
@@ -155,6 +164,7 @@ export default async function HomePage({ searchParams }: HomePageProps) {
     agency ? (current.leadAgencyOnly ? `机关（牵头）：${agency}` : `机关：${agency}`) : '',
     keyword ? `关键词：${keyword}` : '',
     month ? `发布月份：${month}` : '',
+    period ? `公示期：${periodBucketLabel(period) ?? period}` : '',
   ]
     .filter(Boolean)
     .join(' · ');
@@ -247,6 +257,7 @@ export default async function HomePage({ searchParams }: HomePageProps) {
           <form className="filter-form" action="/" method="get" data-testid="filter-form">
             {category !== undefined && <input type="hidden" name="category" value={category} />}
             {month !== undefined && <input type="hidden" name="month" value={month} />}
+            {period !== undefined && <input type="hidden" name="period" value={period} />}
             <input
               className="filter-keyword"
               type="search"

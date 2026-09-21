@@ -369,13 +369,28 @@ function parseTrendMonthDrills(html) {
   }));
 }
 
+/** 解析公示期分布的桶钻取链接（→ [{ key, count, href }]；只含非零桶）。 */
+function parsePeriodDrills(html) {
+  return [
+    ...html.matchAll(
+      /data-bucket="([^"]+)"[\s\S]{0,400}?<a[^>]*data-testid="period-bucket-link"[^>]*>(\d+) 条<\/a>/g,
+    ),
+  ].map((match) => ({
+    key: match[1],
+    count: Number(match[2]),
+    href: (/href="([^"]*)"/.exec(match[0])?.[1] ?? '').replaceAll('&amp;', '&'),
+  }));
+}
+
 /** 解析公示期分布行（→ { bucketKey: count }）。 */
 function parsePeriodBuckets(html) {
   const result = {};
   for (const match of html.matchAll(
-    /data-bucket="([^"]+)"[\s\S]*?<span class="period-count">(\d+) 条<\/span>/g,
+    /data-bucket="([^"]+)"[\s\S]*?<span class="period-count">([\s\S]*?)<\/span>/g,
   )) {
-    result[match[1]] = Number(match[2]);
+    // 非零桶的计数自 issue #47 起是钻取链接 —— 取数字前先剥标签
+    // （否则 \d+ 会先命中 href 里的 `period=b16_30` 这类片段）
+    result[match[1]] = Number(/(\d+)/.exec(match[2].replace(/<[^>]*>/g, ''))?.[1] ?? 0);
   }
   return result;
 }
@@ -654,6 +669,32 @@ describe('issue #11：数据统计页与出站点击聚合', () => {
       html,
       /全部条目都已标注截止日期，四桶之和等于收录总数/,
       '差额为 0 时也要把口径说清楚',
+    );
+  });
+
+  it('公示期分布每个非零桶都能钻取，且点进去的条数 = 桶数字（issue #47）', async () => {
+    const html = stripSsrComments(await (await fetch(`${app.url}/stats`)).text());
+
+    const drills = parsePeriodDrills(html);
+    assert.ok(drills.length >= 2, `应有可钻取的桶，实际 ${drills.length}`);
+
+    for (const drill of drills) {
+      assert.match(
+        drill.href,
+        /^\/\?period=[a-z0-9_]+$/,
+        `桶链接只带桶 key，实际：${drill.href}`,
+      );
+      const list = stripSsrComments(await (await fetch(`${app.url}${drill.href}`)).text());
+      const got = Number(/筛选后共 (\d+) 条/.exec(list)?.[1] ?? -1);
+      assert.equal(got, drill.count, `${drill.href} 点进去应恰好 ${drill.count} 条`);
+      // 筛选状态要看得见（文案取自共享的桶定义，不是页面另写一份）
+      assert.match(list, /公示期：/, '列表页应显示公示期筛选摘要');
+    }
+
+    // 未标注截止日期的条目不属于任何桶（本 fixture 全都有 → 差额为 0 已在上一用例断言）
+    assert.ok(
+      !/data-bucket="[^"]+"[\s\S]{0,400}?<a[^>]*period-bucket-link[^>]*>0 条<\/a>/.test(html),
+      '零桶不该是链接',
     );
   });
 
