@@ -127,6 +127,12 @@ WAF 分支手动跟随同样不校验。源站被挂马 / 改版返回 `http://1
   交通运输部的跨域详情（caac / nra）、发改委的链式接口跳转全部照常。
 - 全站页面（首页 / feed / sitemap / robots / search / stats / subscribe / unsubscribe）
   全部 200。
+- **一个操作细节（本轮踩到）**：会话 Cookie 加了 `Secure` 之后，服务器上本地排障用的
+  `http://127.0.0.1:3000/admin` **不再能用 cookie jar 驱动** —— curl 不会把 `Secure`
+  Cookie 发到 http 连接（实测拿到 401，一度以为是换取逻辑坏了）。排障要么走
+  `https://<域名>`（真实路径，已验证换取 → 看板 200），要么直接用 `?token=` 换取一次
+  再手工带 Cookie 头。`curl -I http://127.0.0.1:3000/` 这种「确认应用活着」的探针不受影响
+  （不需要鉴权）。
 
 ## 六、一个过程观察
 
