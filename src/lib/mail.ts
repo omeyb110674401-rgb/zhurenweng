@@ -25,6 +25,24 @@ export function appBaseUrl(): string {
 
 const SITE_FOOTER = '主人翁 · 政府公示与征求意见信息聚合（发现 · 读懂 · 行动）';
 
+/**
+ * HTML 转义（issue #37）：**凡是插进 html 正文的动态值都必须过这一层**。
+ *
+ * 为什么必须做：邮件正文是手工拼的 HTML 字符串，此前把用户输入与库内数据直接插值 ——
+ * 订阅关键词来自表单（`关键词：<b>x</b>` 会被当标签渲染）、错误摘要来自抓取失败的
+ * 原始报文、条目标题来自源站。后果不只是排版乱：任何人可以用**别人的邮箱**提交带
+ * HTML 的订阅规则，收件人收到的确认邮件里就会渲染攻击者控制的标签与链接（钓鱼面）。
+ * 纯文本部分（text）不需要转义，用户看到的就是字面内容。
+ */
+function escapeHtml(value: string): string {
+  return value
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+    .replaceAll("'", '&#39;');
+}
+
 function confirmUrl(confirmToken: string): string {
   return `${appBaseUrl()}/subscribe/confirm?token=${encodeURIComponent(confirmToken)}`;
 }
@@ -90,7 +108,7 @@ export function buildConfirmationEmail(input: {
     ].join('\n'),
     html: [
       '<p>你（或他人）使用本邮箱在「主人翁」提交了公示提醒订阅：</p>',
-      `<p>${rulesText(input.rules).replaceAll('\n', '<br>')}</p>`,
+      `<p>${escapeHtml(rulesText(input.rules)).replaceAll('\n', '<br>')}</p>`,
       `<p>请<a href="${confirm}">点击这里确认订阅</a>，确认后订阅才生效；确认前你不会收到任何提醒邮件。</p>`,
       `<p>如非本人操作，可忽略本邮件，或<a href="${unsubscribe}">退订（打开页面后点确认）</a>。</p>`,
       `<p>——<br>${SITE_FOOTER}</p>`,
@@ -149,8 +167,8 @@ export function buildTaskFailureAlertEmail(input: {
     ].join('\n'),
     html: [
       '<p>主人翁数据管线任务失败：</p>',
-      `<p>任务：<strong>${input.jobName}</strong><br>源：<strong>${sourceLabel}</strong><br>时间：${occurredAt}</p>`,
-      `<pre>${errorSummary}</pre>`,
+      `<p>任务：<strong>${escapeHtml(input.jobName)}</strong><br>源：<strong>${escapeHtml(sourceLabel)}</strong><br>时间：${escapeHtml(occurredAt)}</p>`,
+      `<pre>${escapeHtml(errorSummary)}</pre>`,
       '<p>同一任务同一源同一天只发送一封告警；修复后下一轮调度会自动重试。</p>',
       `<p>——<br>${SITE_FOOTER}</p>`,
     ].join('\n'),
@@ -191,8 +209,8 @@ export function buildReminderEmail(input: {
       SITE_FOOTER,
     ].join('\n'),
     html: [
-      `<p>你订阅的公示「${notice.title}」征求意见即将截止：</p>`,
-      `<p>截止日期：<strong>${notice.deadlineAt ?? '未标注'}</strong>（还剩 ${days} 天，${STAGE_LABELS[stage]}提醒）</p>`,
+      `<p>你订阅的公示「${escapeHtml(notice.title)}」征求意见即将截止：</p>`,
+      `<p>截止日期：<strong>${escapeHtml(notice.deadlineAt ?? '未标注')}</strong>（还剩 ${days} 天，${STAGE_LABELS[stage]}提醒）</p>`,
       `<p><a href="${detail}">站内详情（含 AI 摘要与提意指引）</a></p>`,
       `<p><a href="${notice.url}">官方原文（请前往官方渠道提交意见）</a></p>`,
       `<p>本提醒按你的订阅规则发送，每条公示截止前 7 天、3 天各提醒一次。不想再收到提醒？<a href="${unsubscribe}">退订（打开页面后点确认）</a>。</p>`,

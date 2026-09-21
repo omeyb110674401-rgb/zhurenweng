@@ -92,6 +92,13 @@ export default async function StatsPage() {
         {agencyTotals.length === 0 ? (
           <EmptyBlock testId="stats-agency-empty" text="暂无公示数据，抓取管线收录后这里将按部门聚合展示。" />
         ) : (
+          <div
+            className="stat-table-wrap"
+            data-testid="stat-table-wrap"
+            role="region"
+            tabIndex={0}
+            aria-label="各部门公示量表（窄屏可横向滚动）"
+          >
           <table className="stat-table" data-testid="agency-totals-table">
             <thead>
               <tr>
@@ -124,6 +131,7 @@ export default async function StatsPage() {
               ))}
             </tbody>
           </table>
+          </div>
         )}
       </section>
 
@@ -136,6 +144,13 @@ export default async function StatsPage() {
             text={`最近 ${TREND_MONTHS} 个月内暂无公示发布，趋势将随数据收录逐步呈现。`}
           />
         ) : (
+          <div
+            className="stat-table-wrap"
+            data-testid="stat-table-wrap"
+            role="region"
+            tabIndex={0}
+            aria-label="公示量月度趋势表（窄屏可横向滚动）"
+          >
           <table className="stat-table" data-testid="trend-table">
             <thead>
               <tr>
@@ -175,6 +190,7 @@ export default async function StatsPage() {
               </tr>
             </tbody>
           </table>
+          </div>
         )}
       </section>
 

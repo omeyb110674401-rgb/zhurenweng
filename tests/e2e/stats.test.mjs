@@ -481,6 +481,31 @@ describe('issue #11：数据统计页与出站点击聚合', () => {
     clickDates = { today, yesterday };
   });
 
+  it('统计页：两张宽表都包在可横向滚动的容器里（issue #37，窄屏不撑破整页）', async () => {
+    const html = stripSsrComments(await (await fetch(`${app.url}/stats`)).text());
+
+    // 趋势表 8 列，min-content 宽度远超手机视口：没有滚动容器时**整页**会出现横向
+    // 滚动条（页头页脚跟着被拖走）。容器还要能聚焦，否则键盘用户滚不动这块区域。
+    for (const testId of ['agency-totals-table', 'trend-table']) {
+      const tableIndex = html.indexOf(`data-testid="${testId}"`);
+      assert.ok(tableIndex > 0, `统计页应有 ${testId}`);
+      const before = html.slice(Math.max(0, tableIndex - 400), tableIndex);
+      const wrapIndex = before.lastIndexOf('data-testid="stat-table-wrap"');
+      assert.ok(wrapIndex >= 0, `${testId} 应包在 stat-table-wrap 里`);
+      const wrapTag = before.slice(wrapIndex, before.indexOf('>', wrapIndex) + 1);
+      assert.match(wrapTag, /role="region"/, '滚动容器应是可聚焦的 region');
+      assert.match(wrapTag, /tabindex="0"/i, '滚动容器要能被键盘聚焦');
+    }
+
+    // CSS 规则本身才是修复：容器没有 overflow-x 时这层 div 不起作用
+    const css = fs.readFileSync(path.join(repoRoot, 'src', 'app', 'globals.css'), 'utf8');
+    assert.match(
+      css,
+      /\.stat-table-wrap \{[^}]*overflow-x: auto/s,
+      'stat-table-wrap 必须有 overflow-x: auto',
+    );
+  });
+
   it('统计页：概览与各部门公示量聚合正确', async () => {
     const expected = await expectedStats();
     const html = stripSsrComments(await (await fetch(`${app.url}/stats`)).text());

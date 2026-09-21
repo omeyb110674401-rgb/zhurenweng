@@ -725,6 +725,20 @@ body {
   margin: 16px 0 8px;
 }
 
+/* 窄屏横向滚动（issue #37）：趋势表 8 列，min-content 宽度远超手机视口；
+   没有这层容器时表格会把**整页**撑出横向滚动条（页头页脚跟着被拖走）。
+   role=region + tabIndex=0 让键盘也能滚动这块区域（纯 overflow 容器不可聚焦）。 */
+.stat-table-wrap {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  border-radius: 8px;
+}
+
+.stat-table-wrap:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
 .stat-table {
   width: 100%;
   border-collapse: collapse;
