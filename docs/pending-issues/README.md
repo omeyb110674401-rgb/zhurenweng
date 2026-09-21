@@ -8,6 +8,7 @@ codeload 404），**无法创建 issue**。停用期间新工作的 issue 正文
 | --- | --- | --- |
 | `35-attachment-and-timeline-audit.md` | 审计：附件链接有效性与发稿时间线（含附件块出路提示） | `f3e6787` |
 | `36-stats-drilldown-and-lead-agency.md` | 统计页缺钻取入口，且机关口径与筛选不一致 | `5739d2c` |
+| `37-mail-escaping-and-mobile-tables.md` | 邮件 HTML 未转义 + 统计页宽表在窄屏撑破整页 | `a31025c` |
 
 同时还有三个已提交但未推送的提交（`dd87b10` #33 筛选、`dea8ca5` UA + 增量同步脚本、
 `029ce13` #34 退订）——恢复推送通道后一并推送。
