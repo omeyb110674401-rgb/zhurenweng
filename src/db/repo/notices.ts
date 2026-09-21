@@ -75,15 +75,24 @@ export async function listNotices(options: ListNoticesOptions = {}): Promise<Not
  * 过滤语义：
  * - category：领域标签精确命中（categoryTagsJson 存 JSON 数组文本，用带引号
  *   的整词匹配，避免子串误命中——查「数据」不会命中「数据与网络安全」）；
- * - agency：发布机关精确相等；
+ * - agency：发布机关精确相等（默认按**任一参与机关**命中，见 leadAgencyOnly）；
  * - keyword：标题或正文包含匹配（lower() 后比对，Latin 不区分大小写；
- *   关键词中的 % / _ 按 LIKE 通配符解释，参数化绑定无注入面）。
+ *   关键词中的 % / _ 按字面处理，见 keywordCondition）。
  */
 export interface ListNoticesFilteredOptions {
   /** 领域标签精确值（应为 src/lib/categories.ts 词表内的标签） */
   category?: string;
-  /** 发布机关精确值 */
+  /**
+   * 发布机关精确值。默认按**任一参与机关**命中（issue #21：联合发文
+   * 「司法部 国家发展改革委」选任一方都能筛到）；设 leadAgencyOnly 后只算牵头机关。
+   */
   agency?: string;
+  /**
+   * 机关筛选只算**牵头机关**（issue #36）：与统计页「各部门公示量」同一口径
+   * （统计按牵头机关归并，联合发文只记一次，否则各部门之和会超过条目总数）。
+   * 由统计页的钻取链接带 `?agency=X&lead=1` 使用；不带时是「任一参与机关」。
+   */
+  leadAgencyOnly?: boolean;
   /**
    * 标题 / 正文包含匹配的关键词；**空白分隔的多个词 = 都要命中**（子串、忽略大小写）。
    * 通配符按字面处理（issue #33：`%` / `_` 不再被当成 LIKE 通配）。
@@ -154,10 +163,19 @@ function filterConditions(options: ListNoticesFilteredOptions) {
     // 按任一参与机关命中（issue #21）：联合发文（「司法部、中国人民银行…」）在
     // agency 列是复合串，靠 agency_keys 的竖线包夹串才能被任一参与机关筛到。
     // 同时保留 agency 精确相等 —— 旧行（迁移前入库、尚未重抓）agency_keys 为空。
+    //
+    // leadAgencyOnly（issue #36）把口径收紧到**牵头机关**：agency_keys 是
+    // 「|牵头|参与…|」，牵头机关即第一个竖线段，故模式串是 `|X|%` 而非 `%|X|%`。
+    // 统计页「各部门公示量」按牵头机关归并（联合发文只记一次），钻取链接必须带
+    // 这个模式才能做到「点进去的条数 = 表格上的数字」。
+    //
+    // 机关名里的 % / _ 同样按字面处理（与 issue #33 的关键词一致）：不转义的话
+    // `?agency=%` 会命中所有联合发文行。
+    const agencyPattern = `|${likeLiteral(options.agency)}|`;
     conditions.push(
       or(
         eq(notices.agency, options.agency),
-        sql`${notices.agencyKeys} like ${`%|${options.agency}|%`}`,
+        sql`${notices.agencyKeys} like ${options.leadAgencyOnly ? `${agencyPattern}%` : `%${agencyPattern}%`} escape '\\'`,
       ),
     );
   }

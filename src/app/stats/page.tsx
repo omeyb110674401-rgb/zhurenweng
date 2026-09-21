@@ -85,7 +85,10 @@ export default async function StatsPage() {
 
       <section className="stats-section" aria-labelledby="stats-agency-title">
         <h2 id="stats-agency-title">各部门公示量</h2>
-        <p className="section-hint">按发布机关聚合的公示条目数（全部收录历史）。</p>
+        <p className="section-hint">
+          按<strong>牵头机关</strong>聚合的公示条目数（全部收录历史）；联合发文只记在牵头机关名下，
+          因此各部门之和等于条目总数。点击机关名可查看该机关牵头的条目（issue #36）。
+        </p>
         {agencyTotals.length === 0 ? (
           <EmptyBlock testId="stats-agency-empty" text="暂无公示数据，抓取管线收录后这里将按部门聚合展示。" />
         ) : (
@@ -101,7 +104,21 @@ export default async function StatsPage() {
             <tbody>
               {agencyTotals.map((row: AgencyTotal) => (
                 <tr key={row.agency} data-testid="agency-total-row">
-                  <th scope="row">{row.agency}</th>
+                  <th scope="row">
+                    {/*
+                      钻取链接（issue #36）：带 lead=1 走**牵头机关**口径 ——
+                      与这张表的口径一致，所以「点进去的条数 = 表格上的数字」。
+                      不带 lead 的话是「任一参与机关」（issue #21），联合发文会让
+                      条数比表格多（实测发改委 25 → 26），看起来像统计出错。
+                    */}
+                    <Link
+                      href={`/?agency=${encodeURIComponent(row.agency)}&lead=1`}
+                      data-testid="agency-total-link"
+                      aria-label={`查看${row.agency}牵头的 ${row.count} 条公示`}
+                    >
+                      {row.agency}
+                    </Link>
+                  </th>
                   <td className="stat-num">{row.count}</td>
                 </tr>
               ))}

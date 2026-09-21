@@ -26,6 +26,7 @@ interface HomePageProps {
     category?: string | string[];
     agency?: string | string[];
     q?: string | string[];
+    lead?: string | string[];
     page?: string | string[];
   }>;
 }
@@ -48,6 +49,12 @@ interface FilterState {
   category?: string;
   agency?: string;
   keyword?: string;
+  /**
+   * 机关筛选只算牵头机关（issue #36）：统计页的钻取链接带 `lead=1` 进来，
+   * 与「各部门公示量」同一口径（联合发文只归牵头机关，否则各部门之和会超过总数）。
+   * 从下拉框自己选的机关不带这个参数 —— 那时是「任一参与机关」（issue #21）。
+   */
+  leadAgencyOnly?: boolean;
   /** 页码；1 为默认，不写入链接（保持首页地址干净） */
   page?: number;
 }
@@ -62,6 +69,8 @@ function buildFilterHref(current: FilterState, next: Partial<FilterState>): stri
   const search = new URLSearchParams();
   if (merged.category) search.set('category', merged.category);
   if (merged.agency) search.set('agency', merged.agency);
+  // lead 只在有机关筛选时才有意义（无机关时它不改变任何结果）
+  if (merged.agency && merged.leadAgencyOnly) search.set('lead', '1');
   if (merged.keyword) search.set('q', merged.keyword);
   if (merged.page !== undefined && merged.page > 1) search.set('page', String(merged.page));
   const qs = search.toString();
@@ -76,6 +85,8 @@ export default async function HomePage({ searchParams }: HomePageProps) {
     category: categoryParam && isKnownCategory(categoryParam) ? categoryParam : undefined,
     agency: firstParam(params.agency),
     keyword: firstParam(params.q),
+    // 只有「带了机关 + lead=1」才算牵头口径；裸 lead=1 不改变任何结果
+    leadAgencyOnly: firstParam(params.lead) === '1',
   };
   const { category, agency, keyword } = current;
   const hasFilter = category !== undefined || agency !== undefined || keyword !== undefined;
@@ -83,7 +94,7 @@ export default async function HomePage({ searchParams }: HomePageProps) {
   const size = pageSize();
   // 页码先按请求值算偏移；总数拿到后再夹到有效范围（?page=999 落到末页而不是空页）
   const requestedPage = pageParam(params.page);
-  const filter = { category, agency, keyword };
+  const filter = { category, agency, keyword, leadAgencyOnly: current.leadAgencyOnly && agency !== undefined };
 
   // 仓库层排序：征求意见中在前、截止日期升序（即将截止在前）、无截止日期靠后；
   // 筛选（issue #9）只过滤行、不改变该顺序。合计与列表共用同一组筛选条件。
@@ -103,7 +114,7 @@ export default async function HomePage({ searchParams }: HomePageProps) {
 
   const filterSummary = [
     category,
-    agency ? `机关：${agency}` : '',
+    agency ? (current.leadAgencyOnly ? `机关（牵头）：${agency}` : `机关：${agency}`) : '',
     keyword ? `关键词：${keyword}` : '',
   ]
     .filter(Boolean)
@@ -142,6 +153,20 @@ export default async function HomePage({ searchParams }: HomePageProps) {
               {`当前第 ${page} / ${totalPages} 页（第 ${rangeStart}–${rangeEnd} 条）。`}
             </span>
           )}
+          {/* 牵头口径说明（issue #36）：统计页钻取进来的窄口径要说清「为什么条数比参与口径少」，
+              并给一键切回「任一参与机关」的入口 */}
+          {filter.leadAgencyOnly ? (
+            <span data-testid="lead-mode-hint">
+              {`口径：只含${agency}牵头的条目（联合发文按牵头机关归并）。`}
+              <Link
+                className="search-back-link"
+                href={buildFilterHref({ ...current, leadAgencyOnly: false }, {})}
+                data-testid="lead-mode-switch"
+              >
+                改看含该机关参与的全部条目
+              </Link>
+            </span>
+          ) : null}
           按征求意见截止日期排序，即将截止的排在最前。
           {/* RSS 订阅入口（issue #6）：页面可见入口，配合 head 内的自动发现链接 */}
           <a className="rss-link" href="/feed.xml" data-testid="rss-feed-link">

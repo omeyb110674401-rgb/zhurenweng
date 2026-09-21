@@ -299,13 +299,22 @@ function parseOverview(html) {
   };
 }
 
-/** 解析各部门公示量表行（→ [{ agency, count }]）。 */
+/**
+ * 解析各部门公示量表行（→ [{ agency, count, href }]）。
+ *
+ * 机关名自 issue #36 起包在钻取链接里（`<th scope="row"><a href="/?agency=…&lead=1">机关名</a></th>`），
+ * 因此名字要允许标签包裹；href 一并取出来，供「点进去条数 = 表格数字」的不变式断言用。
+ */
 function parseAgencyTotals(html) {
   return [
     ...html.matchAll(
-      /data-testid="agency-total-row">\s*<th scope="row">([^<]+)<\/th>\s*<td class="stat-num">(\d+)<\/td>/g,
+      /data-testid="agency-total-row">\s*<th scope="row">(?:<a [^>]*href="([^"]*)"[^>]*>)?([^<]+)(?:<\/a>)?<\/th>\s*<td class="stat-num">(\d+)<\/td>/g,
     ),
-  ].map((match) => ({ agency: match[1], count: Number(match[2]) }));
+  ].map((match) => ({
+    agency: match[2],
+    count: Number(match[3]),
+    href: (match[1] ?? '').replaceAll('&amp;', '&'),
+  }));
 }
 
 /** 解析月度趋势矩阵行（→ [{ agency, cells: [6 个月计数], total }]）。 */

@@ -414,6 +414,56 @@ describe('issue #9：领域标签自动打标与分类浏览筛选', () => {
     assert.match(html, /data-testid="filter-clear"/);
   });
 
+  it('机关口径：任一参与机关（默认）与牵头机关（lead=1）是两套口径（issue #36）', async () => {
+    const participant = encodeURIComponent('中国人民银行');
+    // 默认口径：任一参与机关都能筛到联合发文（issue #21）
+    const anyParticipant = await fetchHome(`?agency=${participant}`);
+    assert.ok(
+      listOrder(anyParticipant).includes(TITLES.jingrong),
+      '默认口径应包含「司法部 国家发展改革委…」这类联合发文（任一参与机关）',
+    );
+
+    // lead=1：只算牵头机关 —— 中国人民银行不是牵头，故不应命中
+    const leadOnly = await fetchHome(`?agency=${participant}&lead=1`);
+    assert.ok(
+      !listOrder(leadOnly).includes(TITLES.jingrong),
+      '牵头口径不应包含「该机关只是参与方」的联合发文',
+    );
+    assert.match(leadOnly, /data-testid="lead-mode-hint"/, '牵头口径应有口径说明');
+    assert.match(leadOnly, /口径：只含中国人民银行牵头的条目/);
+    assert.match(leadOnly, /data-testid="lead-mode-switch"/, '应给一键切回参与口径的入口');
+
+    // 牵头机关自己带 lead=1 时命中；不带 lead 时也命中（两种口径都该含它）
+    for (const query of [`?agency=${encodeURIComponent('司法部')}&lead=1`, `?agency=${encodeURIComponent('司法部')}`]) {
+      assert.ok(
+        listOrder(await fetchHome(query)).includes(TITLES.jingrong),
+        `${query} 应包含该联合发文（司法部是牵头机关）`,
+      );
+    }
+  });
+
+  it('统计页每个机关数字都能钻取，且点进去的条数与表格数字一致（issue #36）', async () => {
+    const stats = stripSsrComments(await (await fetch(`${app.url}/stats`)).text());
+    const rows = [...stats.matchAll(/<tr[^>]*data-testid="agency-total-row"[^>]*>([\s\S]*?)<\/tr>/g)].map(
+      (match) => match[1],
+    );
+    assert.ok(rows.length > 0, '统计页应有「各部门公示量」表');
+
+    let checked = 0;
+    for (const row of rows) {
+      const href = /href="([^"]*\/\?agency=[^"]*)"/.exec(row)?.[1]?.replaceAll('&amp;', '&');
+      const count = Number(/class="stat-num"[^>]*>(\d+)</.exec(row)?.[1]);
+      assert.ok(href !== undefined && Number.isInteger(count), `行应含钻取链接与数字：${row.slice(0, 140)}`);
+      assert.match(href, /lead=1/, '钻取链接必须带牵头口径，否则联合发文会让条数对不上');
+
+      const list = await fetchHome(href.replace(/^\//, ''));
+      const got = Number(/筛选后共 (\d+) 条/.exec(list)?.[1] ?? -1);
+      assert.equal(got, count, `${decodeURIComponent(href)} 的条数应等于统计页数字 ${count}`);
+      checked += 1;
+    }
+    assert.ok(checked >= 3, `应至少核对 3 个机关，实际 ${checked}`);
+  });
+
   it('筛选不影响倒计时排序：过滤结果始终是未筛选倒计时顺序的子序列', async () => {
     const full = listOrder(await fetchHome('/'));
     assert.deepEqual(full, EXPECTED_FULL_ORDER, '未筛选列表应为倒计时顺序');
