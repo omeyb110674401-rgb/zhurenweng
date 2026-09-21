@@ -34,6 +34,12 @@ export interface NoticeJsonLdOptions {
   siteUrl: string;
   /** 分享摘要：传页面 metadata 用的那一份，保证两处描述一致；省略则不输出 */
   description?: string;
+  /**
+   * 展示用有效状态（见 lib/notice-status.ts）：库内 status 是每日抓取时推导的，
+   * 刚过截止的条目在下一轮前仍是 open —— 结构化数据是对页面的机器可读声明，
+   * 必须与页面徽标同一口径。省略时按库内 status 输出。
+   */
+  status?: NoticeStatus;
 }
 
 /** 构建条目页的 JSON-LD 对象（纯函数，便于单测）。 */
@@ -41,6 +47,7 @@ export function buildNoticeJsonLd({
   notice,
   siteUrl,
   description,
+  status,
 }: NoticeJsonLdOptions): Record<string, unknown> {
   const doc: Record<string, unknown> = {
     '@context': 'https://schema.org',
@@ -48,7 +55,7 @@ export function buildNoticeJsonLd({
     headline: notice.title,
     url: `${siteUrl}/notices/${notice.id}`,
     inLanguage: 'zh-CN',
-    creativeWorkStatus: STATUS_LABELS[notice.status],
+    creativeWorkStatus: STATUS_LABELS[status ?? notice.status],
     // 发布方是本站（聚合方），原文出处另由 isBasedOn 表达
     publisher: { '@type': 'Organization', name: '主人翁', url: siteUrl },
     isBasedOn: notice.url,

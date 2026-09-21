@@ -1,18 +1,23 @@
 import Link from 'next/link';
 import type { NoticeRecord } from '@/db/types';
 import { Countdown, StatusBadge, formatDate } from '@/app/_lib/notice-display';
+import { effectiveStatus } from '@/lib/notice-status';
 
 /**
  * 公示条目的列表项展示（issue #8 自列表页抽取共用）：聚合列表页与
  * 搜索结果页渲染同一组件 —— 结果项复用列表条目展示（状态徽标、截止
  * 倒计时、领域标签（issue #9）、发布机关 / 发布日期 / 截止日期与详情页链接）。
+ *
+ * 徽标取**展示用有效状态**（issue #43）：库内 status 是每日抓取时推导的，
+ * 刚过截止的条目在下一轮抓取前仍是 open —— 列表不能因此说它还能提意见。
  */
 export function NoticeItem({ notice }: { notice: NoticeRecord }) {
+  const now = new Date();
   return (
     <li className="notice-item" data-testid="notice-item">
       <div className="notice-item-head">
-        <StatusBadge status={notice.status} />
-        <Countdown notice={notice} now={new Date()} />
+        <StatusBadge status={effectiveStatus(notice, now)} />
+        <Countdown notice={notice} now={now} />
       </div>
       <Link className="notice-title" href={`/notices/${notice.id}`} data-testid="notice-title-link">
         {notice.title}

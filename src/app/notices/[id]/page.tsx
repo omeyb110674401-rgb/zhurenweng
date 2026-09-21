@@ -9,6 +9,7 @@ import { NoticeBriefView, SubmissionChannels } from '@/app/_lib/notice-brief-vie
 import { SummaryPlaceholder, SummaryUnavailable, SummaryView } from '@/app/_lib/summary-view';
 import { buildNoticeBrief } from '@/lib/notice-brief';
 import { buildNoticeJsonLd, serializeJsonLd } from '@/lib/notice-jsonld';
+import { effectiveStatus } from '@/lib/notice-status';
 import { llmReady } from '@/lib/llm-availability';
 import { mailerReady } from '@/lib/mailer-availability';
 import { siteUrl } from '@/lib/site-url';
@@ -24,11 +25,16 @@ interface NoticeDetailPageProps {
 /**
  * 条目的分享 / 检索摘要（可发现性）：状态 + 截止日期 + 机关 + 正文首段。
  * 搜索结果的描述片段直接影响点击率，「什么时候截止」放最前。
+ *
+ * 状态取**展示用有效状态**（issue #43）：摘要里写「征求意见中」是给读者看的
+ * 判断，不能沿用每日一轮的状态列 —— 刚过截止的条目在下一轮抓取前仍会写着
+ * 「征求意见中」，而分享出去以后没人会回来纠正。
  */
-function noticeDescription(notice: NoticeRecord): string {
+function noticeDescription(notice: NoticeRecord, now: Date): string {
   const head: string[] = [];
-  if (notice.status === 'open') head.push('征求意见中');
-  else if (notice.status === 'closed') head.push('已截止');
+  const status = effectiveStatus(notice, now);
+  if (status === 'open') head.push('征求意见中');
+  else if (status === 'closed') head.push('已截止');
   else head.push('已出结果');
   if (notice.deadlineAt !== null) head.push(`截止 ${notice.deadlineAt}`);
   if (notice.agency !== '') head.push(`发布机关：${notice.agency}`);
@@ -44,7 +50,7 @@ export async function generateMetadata({ params }: NoticeDetailPageProps): Promi
     return { title: '未找到该公示 —— 主人翁' };
   }
   const url = `${siteUrl()}/notices/${notice.id}`;
-  const description = noticeDescription(notice);
+  const description = noticeDescription(notice, new Date());
   return {
     title: `${notice.title} —— 主人翁`,
     description,
@@ -66,6 +72,11 @@ export default async function NoticeDetailPage({ params }: NoticeDetailPageProps
     notFound();
   }
   const source = await getSourceById(notice.sourceId);
+  // 展示用有效状态（issue #43）：库内 status 是每日抓取时推导的，刚过截止的条目
+  // 在下一轮抓取前仍是 open —— 徽标、分享摘要与结构化数据都必须按当前日期复核，
+  // 否则页面会声称一个已关闭的征集还能提意见（倒计时此时已静默消失）。
+  const now = new Date();
+  const status = effectiveStatus(notice, now);
   // 摘要列（issue #4）：done → 渲染五段式摘要；pending / failed_review → 占位
   const summaryInfo = await getNoticeSummary(notice.id);
   // 结构化速读（issue #26/#27）：纯函数、请求期算一次，对存量条目立即生效。
@@ -77,7 +88,12 @@ export default async function NoticeDetailPage({ params }: NoticeDetailPageProps
   });
   // 结构化数据（issue #39）：与 metadata 用同一份摘要，避免两处描述分叉。
   const jsonLd = serializeJsonLd(
-    buildNoticeJsonLd({ notice, siteUrl: siteUrl(), description: noticeDescription(notice) }),
+    buildNoticeJsonLd({
+      notice,
+      siteUrl: siteUrl(),
+      description: noticeDescription(notice, now),
+      status,
+    }),
   );
 
   return (
@@ -96,7 +112,7 @@ export default async function NoticeDetailPage({ params }: NoticeDetailPageProps
       <article className="notice-detail">
         <header className="detail-header">
           <div className="detail-badges">
-            <StatusBadge status={notice.status} />
+            <StatusBadge status={status} />
             <Countdown notice={notice} now={new Date()} />
           </div>
           <h1 className="detail-title">{notice.title}</h1>

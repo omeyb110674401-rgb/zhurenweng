@@ -108,6 +108,20 @@ describe('issue #39：详情页 JSON-LD', () => {
     }
   });
 
+  it('可传入展示用有效状态覆盖库内状态（issue #43：库内是每日一轮的快照）', () => {
+    // 库内仍是 open（抓取时推导），但截止日已过 —— 页面与结构化数据必须同为「已截止」
+    const doc = buildNoticeJsonLd({
+      notice: noticeRecord({ status: 'open', deadlineAt: '2026-09-20' }),
+      siteUrl: SITE,
+      status: 'closed',
+    });
+    assert.equal(doc.creativeWorkStatus, '已截止');
+    assert.equal(doc.expires, '2026-09-20', '截止日期照常给出，读者可自行核对');
+    // 不传时按库内状态输出（向后兼容）
+    const fallback = buildNoticeJsonLd({ notice: noticeRecord({ status: 'resulted' }), siteUrl: SITE });
+    assert.equal(fallback.creativeWorkStatus, '已出结果');
+  });
+
   it('标题含多个《…》时逐个列为 Legislation（草案 + 起草说明这类组合）', () => {
     const doc = buildNoticeJsonLd({
       notice: noticeRecord({
