@@ -10,6 +10,7 @@ import { createFixtureServer } from './helpers/fixture-server.mjs';
 // 期望值计算复用入库 / 统计同一套机关规则（issue #21）：归一 + 按牵头机关归并。
 // 规则本身由 tests/unit/agencies.test.mjs 钉死，这里只保证聚合口径一致。
 import { canonicalAgency, leadAgencyOf } from '../../src/lib/agencies.ts';
+import { lastSiteMonths, siteDateIso } from '../../src/lib/dates.ts';
 
 /**
  * E2E（issue #11）：数据统计页与出站点击聚合。
@@ -80,10 +81,16 @@ const ITEMS = {
 };
 
 /** 点击计划：经 /go 端点的点击次数（今天 C/A/E 各 1；昨天 C×2、A×1）。 */
-const CLICK_PLAN = { today: { C: 1, A: 1, E: 1 }, yesterday: { C: 2, A: 1 } };
-const TOTAL_CLICKS =
-  Object.values(CLICK_PLAN.today).reduce((sum, n) => sum + n, 0) +
-  Object.values(CLICK_PLAN.yesterday).reduce((sum, n) => sum + n, 0);
+const CLICK_PLAN = {
+  today: { C: 1, A: 1, E: 1 },
+  yesterday: { C: 2, A: 1 },
+  // 北京 00:00–08:00 的窗口（issue #40）：此刻 UTC 还是昨天，站点日历日已是今天
+  boundary: { A: 1, E: 1 },
+};
+const TOTAL_CLICKS = Object.values(CLICK_PLAN).reduce(
+  (sum, plan) => sum + Object.values(plan).reduce((groupSum, n) => groupSum + n, 0),
+  0,
+);
 
 /**
  * 种子点击的请求身份（issue #17）：北极星指标只计人的点击，fetch 默认 UA 是
@@ -95,7 +102,7 @@ const BROWSER_UA =
 let app;
 let fixtures;
 let fixtureUrl;
-/** 点击日期（种子构造时记录，供按日聚合断言）：{ today, yesterday } */
+/** 点击日期（种子构造时记录，供按日聚合断言）：{ today, yesterday, boundary } */
 let clickDates = {};
 
 /** 单轮运行真实 worker 子进程（与其他场景同法：继承测试进程环境）。 */
@@ -121,24 +128,9 @@ function stripSsrComments(html) {
   return html.replaceAll('<!-- -->', '');
 }
 
-/** 本地日历日 ISO（与 src/lib/dates.ts 的 localDateIso 同口径）。 */
-function localDateIso(date) {
-  const y = date.getFullYear();
-  const m = String(date.getMonth() + 1).padStart(2, '0');
-  const d = String(date.getDate()).padStart(2, '0');
-  return `${y}-${m}-${d}`;
-}
-
-/** 最近 n 个日历月窗口（含当前月），月份升序 —— 与 /stats 页面同口径。 */
-function lastMonthWindow(n, now) {
-  const months = [];
-  const cursor = new Date(now.getFullYear(), now.getMonth(), 1);
-  for (let i = 0; i < n; i += 1) {
-    months.push(`${cursor.getFullYear()}-${String(cursor.getMonth() + 1).padStart(2, '0')}`);
-    cursor.setMonth(cursor.getMonth() - 1);
-  }
-  return months.reverse();
-}
+/** 站点日历日 ISO 与月份窗口：直接复用应用同一份实现（issue #40）。
+ *  这里原先各抄了一份按进程时区取「今天 / 当前月」的副本 —— 生产容器跑 UTC、
+ *  开发机跑东八区，副本与真实现会在北京时间 00:00–08:00 分叉，而测试照样全绿。 */
 
 /** 两个 ISO 日期的日历天数差（b - a）。 */
 function daysBetween(a, b) {
@@ -252,7 +244,7 @@ async function expectedStats() {
 
   // 前置校验：fixture 设计保证所有发布月份都在最近 6 个月窗口内，
   // 月度趋势断言因此不随运行日期衰减（若失效会在这里给出明确报错）
-  const window = lastMonthWindow(6, new Date());
+  const window = lastSiteMonths(new Date(), 6);
   for (const record of records) {
     assert.ok(
       window.includes(record.month),
@@ -471,10 +463,10 @@ describe('issue #11：数据统计页与出站点击聚合', () => {
     for (const [key, times] of Object.entries(CLICK_PLAN.today)) {
       for (let i = 0; i < times; i += 1) await clickOnce(key);
     }
-    const today = localDateIso(new Date());
+    const today = siteDateIso(new Date());
 
     // 昨天：仅在回拨后的窗口内调 /go（node:test mock.timers 替换 Date，
-    // 让应用侧 localDateIso(new Date()) 落到昨天，构造跨日点击数据）。
+    // 让应用侧 siteDateIso(new Date()) 落到昨天，构造跨日点击数据）。
     // 注意：enable 后 Date.now() 即走 mock 时钟（起点 0），目标时刻须先算好。
     const yesterdayMs = Date.now() - 24 * 60 * 60 * 1000;
     t.mock.timers.enable({ apis: ['Date'] });
@@ -486,10 +478,27 @@ describe('issue #11：数据统计页与出站点击聚合', () => {
     } finally {
       t.mock.timers.reset();
     }
-    const yesterday = localDateIso(new Date(Date.now() - 24 * 60 * 60 * 1000));
+    const yesterday = siteDateIso(new Date(Date.now() - 24 * 60 * 60 * 1000));
+
+    // 北京 00:00–08:00 的 8 小时窗口（issue #40）：站点日历日已是今天、而 UTC 还在
+    // 昨天。用带 +08:00 偏移的绝对时刻构造，不受测试机时区影响；按进程时区取日期的
+    // 旧实现会在 UTC 环境（CI 与生产容器）把这些点击记到昨天那一行 —— 下面的按日
+    // 聚合断言因此会少算今天、多算昨天。
+    const boundaryMs = Date.parse(`${today}T00:30:00+08:00`); // 北京今天 00:30
+    assert.ok(Number.isFinite(boundaryMs), '北京今天 00:30 应能解析为绝对时刻');
+    assert.equal(siteDateIso(new Date(boundaryMs)), today, '该时刻的站点日历日应仍是今天');
+    t.mock.timers.enable({ apis: ['Date'] });
+    try {
+      t.mock.timers.setTime(boundaryMs);
+      for (const [key, times] of Object.entries(CLICK_PLAN.boundary)) {
+        for (let i = 0; i < times; i += 1) await clickOnce(key);
+      }
+    } finally {
+      t.mock.timers.reset();
+    }
 
     assert.notEqual(today, yesterday, '今天与昨天应是不同日历日');
-    clickDates = { today, yesterday };
+    clickDates = { today, yesterday, boundary: today };
   });
 
   it('统计页：两张宽表都包在可横向滚动的容器里（issue #37，窄屏不撑破整页）', async () => {
@@ -603,12 +612,20 @@ describe('issue #11：数据统计页与出站点击聚合', () => {
     const ids = await noticeIdsByTitle();
     const html = stripSsrComments(await (await fetch(`${app.url}/stats`)).text());
 
-    // Top 榜：C(3) > A(2) > E(1)，按点击数降序；标题与详情 ID 对应种子条目
-    const clicksOf = (key) => (CLICK_PLAN.today[key] ?? 0) + (CLICK_PLAN.yesterday[key] ?? 0);
+    // Top 榜：C(3) > A(3) > E(3)… 按点击数降序；标题与详情 ID 对应种子条目
+    const clicksOf = (key) =>
+      Object.values(CLICK_PLAN).reduce((sum, plan) => sum + (plan[key] ?? 0), 0);
     const expectedTop = expected.records
       .map((record) => ({ key: record.key, record }))
       .filter(({ key }) => clicksOf(key) > 0)
-      .sort((a, b) => clicksOf(b.key) - clicksOf(a.key) || a.key.localeCompare(b.key))
+      // 排序口径与 repo 层 `orderBy(desc(outboundClicks), asc(id))` 一致：点击数降序，
+      // **id 升序兜底**（原先这里按 fixture 的 key 兜底 —— 没有并列时恰好也对，
+      // 一旦出现并列就与实现不符）。
+      .sort(
+        (a, b) =>
+          clicksOf(b.key) - clicksOf(a.key) ||
+          ids.get(a.record.title).localeCompare(ids.get(b.record.title)),
+      )
       .map(({ record }) => ({
         id: ids.get(record.title),
         title: record.title,
@@ -622,7 +639,9 @@ describe('issue #11：数据统计页与出站点击聚合', () => {
       assert.ok(row.id, `Top 榜条目「${row.title}」应有详情页回链`);
     }
 
-    // 按日期聚合：昨天 3 次、今天 3 次，各一行
+    // 按日期聚合：昨天 3 次、今天 5 次（今天 3 次 + 北京凌晨窗口 2 次），各一行。
+    // 北京凌晨那 2 次是关键：它们证明「按日归属」用的是站点日历日而非进程时区
+    // （issue #40）—— 旧实现在 UTC 环境下会把它们算进昨天。
     const perDateTotal = (date) =>
       Object.keys(CLICK_PLAN).reduce(
         (sum, day) =>

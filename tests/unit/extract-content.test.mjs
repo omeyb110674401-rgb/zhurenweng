@@ -3,6 +3,7 @@ import { describe, it } from 'node:test';
 import * as cheerio from 'cheerio';
 import {
   blockText,
+  epochMsToIsoDate,
   extractDeadline,
   firstContentSelector,
 } from '../../src/sources/adapters/extract.ts';
@@ -131,5 +132,27 @@ describe('firstContentSelector：多模板正文容器探测', () => {
       ]),
       undefined,
     );
+  });
+});
+
+describe('epochMsToIsoDate：工信部列表的截止日期时间戳（issue #40 复核）', () => {
+  it('时间戳是「截止日次日北京 00:00」的关闭瞬间，显示日期按 UTC 切日才对', () => {
+    // 线上实测（2026-09-21）：列表 24/24 个 endtime 都落在 16:00 UTC，即北京次日 00:00
+    // ——「征集期在 10-17 当天结束时关闭」。所以人读的截止日是 **UTC 切日**的结果
+    // （10-17），不是北京切日的 10-18。下面两个值都与官方详情页正文核对过：
+    //   1792252800000 → 官方「2026年9月18日—2026年10月17日」
+    //   1792339200000 → 官方「2026年9月19日—2026年10月18日」
+    // 这条断言的作用是挡住「改成北京切日」这类看起来更正确的改法 —— 那会让全部
+    // 工信部截止日期推晚一天（连带倒计时、排序与截止提醒）。
+    assert.equal(epochMsToIsoDate('1792252800000'), '2026-10-17');
+    assert.equal(epochMsToIsoDate('1792339200000'), '2026-10-18');
+  });
+
+  it('空值 / 非数字 / 非正数返回 null（不猜、不抛）', () => {
+    assert.equal(epochMsToIsoDate(undefined), null);
+    assert.equal(epochMsToIsoDate(''), null);
+    assert.equal(epochMsToIsoDate('待定'), null);
+    assert.equal(epochMsToIsoDate('0'), null);
+    assert.equal(epochMsToIsoDate('-1'), null);
   });
 });

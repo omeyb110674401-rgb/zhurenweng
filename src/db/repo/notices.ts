@@ -2,7 +2,7 @@ import { and, asc, desc, eq, inArray, or, sql } from 'drizzle-orm';
 import { getDb } from '../client.ts';
 import { notices, outboundClickDaily } from '../schema/sqlite.ts';
 import { syncNoticeVersionLinks } from './versions.ts';
-import { localDateIso } from '../../lib/dates.ts';
+import { siteDateIso } from '../../lib/dates.ts';
 import { deriveCategoryTags } from '../../lib/categories.ts';
 import { agencyKeysOf, canonicalAgency, splitAgencies } from '../../lib/agencies.ts';
 import {
@@ -384,7 +384,7 @@ export async function recordOutboundClick(id: string): Promise<number | null> {
   // 按日聚合行 upsert：复合主键（条目 × 日期）幂等，同日重复点击按行累加
   await db
     .insert(outboundClickDaily)
-    .values({ noticeId: id, clickDate: localDateIso(new Date()), clicks: 1 })
+    .values({ noticeId: id, clickDate: siteDateIso(new Date()), clicks: 1 })
     .onConflictDoUpdate({
       target: [outboundClickDaily.noticeId, outboundClickDaily.clickDate],
       set: { clicks: sql`${outboundClickDaily.clicks} + 1` },

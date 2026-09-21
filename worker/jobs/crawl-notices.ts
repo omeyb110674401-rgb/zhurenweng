@@ -4,7 +4,7 @@ import { noticeIdForUrl } from '../../src/lib/notice-id.ts';
 import { getNoticeById, upsertNotice } from '../../src/db/repo/notices.ts';
 import { getSourceById, recordSourceFailure, upsertSource } from '../../src/db/repo/sources.ts';
 import { syncNoticesToSearchIndex } from '../../src/lib/search/sync.ts';
-import { localDateIso } from '../../src/lib/dates.ts';
+import { siteDateIso } from '../../src/lib/dates.ts';
 import {
   sourceAdapters,
   type NormalizedNotice,
@@ -101,7 +101,7 @@ function deriveStatus(
   adapterStatus: NoticeStatus | undefined,
   now: Date,
 ): NoticeStatus {
-  if (deadlineAt) return deadlineAt < localDateIso(now) ? 'closed' : 'open';
+  if (deadlineAt) return deadlineAt < siteDateIso(now) ? 'closed' : 'open';
   return adapterStatus ?? 'open';
 }
 

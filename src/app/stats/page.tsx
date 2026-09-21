@@ -9,6 +9,7 @@ import {
   type AgencyMonthCount,
   type AgencyTotal,
 } from '@/db/repo/stats';
+import { lastSiteMonths } from '@/lib/dates';
 
 // 统计随抓取管线与点击实时变化，服务端实时渲染，不做静态预渲染。
 export const dynamic = 'force-dynamic';
@@ -19,16 +20,6 @@ export const metadata = {
 
 /** 趋势窗口：最近 6 个日历月（含当前月），返回月份升序（YYYY-MM）。 */
 const TREND_MONTHS = 6;
-
-function lastMonthWindow(now: Date): string[] {
-  const months: string[] = [];
-  const cursor = new Date(now.getFullYear(), now.getMonth(), 1);
-  for (let i = 0; i < TREND_MONTHS; i += 1) {
-    months.push(`${cursor.getFullYear()}-${String(cursor.getMonth() + 1).padStart(2, '0')}`);
-    cursor.setMonth(cursor.getMonth() - 1);
-  }
-  return months.reverse();
-}
 
 /** 公示期分布桶的页面文案（与 repo 层桶 key 一一对应，顺序固定）。 */
 const PERIOD_LABELS: Record<string, string> = {
@@ -50,7 +41,7 @@ export default async function StatsPage() {
       getClicksByDate(30),
     ]);
 
-  const months = lastMonthWindow(now);
+  const months = lastSiteMonths(now, TREND_MONTHS);
   const monthSet = new Set(months);
   // 窗口内（机关 × 月）计数；窗口外的历史月份不计入趋势表
   const windowCounts = monthlyCounts.filter((row) => monthSet.has(row.month));

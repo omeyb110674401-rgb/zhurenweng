@@ -249,11 +249,17 @@ export function stripStatusMarker(title: string): { status?: NoticeStatus; text:
 }
 
 /**
- * 毫秒时间戳 → ISO 日期（YYYY-MM-DD，UTC）。
+ * 毫秒时间戳 → ISO 日期（YYYY-MM-DD，**UTC 切日**）。
  *
- * 工业和信息化部列表项用隐藏字段 `<span class="endtime">1792339200000</span>`
- * 承载截止日期（实测该值与详情正文「请于2026年10月14日前反馈意见」完全一致）。
- * 该站时间戳取当日 00:00 UTC，UTC 与东八区落在同一日期，故按 UTC 切日即可。
+ * 工业和信息化部列表项用隐藏字段 `<span class="endtime">1792252800000</span>`
+ * 承载截止日期。该站的时间戳是**征集期关闭的那一瞬间**，也就是「截止日次日
+ * 00:00（北京时间）」= 16:00 UTC —— 所以 **UTC 切日恰好等于人读的截止日**：
+ * 1792252800000 = 2026-10-17T16:00Z = 北京 2026-10-18 00:00 → 显示 2026-10-17，
+ * 与官方详情页正文「2026年9月18日—2026年10月17日」一致。
+ *
+ * 复核依据（2026-09-21，issue #40）：线上列表 **24/24** 个 endtime 都落在 16:00 UTC，
+ * 且 24/24 条库内 deadline_at 等于 UTC 切日的结果；另抽 4 条与官方详情页逐条核对一致。
+ * **不要改成北京切日** —— 那会把全部工信部截止日期推晚一天。
  */
 export function epochMsToIsoDate(value: string | undefined): string | null {
   if (!value) return null;

@@ -1,4 +1,4 @@
-import { localDateIso } from './dates.ts';
+import { siteDateIso } from './dates.ts';
 import { buildTaskFailureAlertEmail } from './mail.ts';
 import { createMailerPort } from './ports.ts';
 import { hasAlertSend, recordAlertSend } from '../db/repo/alerts.ts';
@@ -43,7 +43,7 @@ export async function sendTaskFailureAlert(input: TaskFailureAlertInput): Promis
     return false;
   }
 
-  const alertDate = localDateIso(input.now);
+  const alertDate = siteDateIso(input.now);
   const sourceId = input.sourceId ?? '';
   try {
     if (await hasAlertSend(alertDate, input.jobName, sourceId)) {

@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { getNoticeById, recordOutboundClick } from '@/db/repo/notices';
-import { localDateIso } from '@/lib/dates';
+import { siteDateIso } from '@/lib/dates';
 
 /**
  * 出站跳转端点（PRD「出站转化埋点」）：/go/<条目ID>
@@ -72,7 +72,7 @@ export async function GET(
     // 便于日后排查「北极星指标又被谁打满了」。
     const ua = (request.headers.get('user-agent') ?? '').trim();
     console.log(
-      `[go] date=${localDateIso(new Date())} noticeId=${id} counted=false ua=${ua.slice(0, 120) || '(empty)'}`,
+      `[go] date=${siteDateIso(new Date())} noticeId=${id} counted=false ua=${ua.slice(0, 120) || '(empty)'}`,
     );
     return NextResponse.redirect(target, { status: 302, headers: REDIRECT_HEADERS });
   }
@@ -84,7 +84,7 @@ export async function GET(
 
   // 非个人身份的访问日志：仅条目 ID 与日期（不带 UA）
   console.log(
-    `[go] date=${localDateIso(new Date())} noticeId=${id} outboundClicks=${clicks}`,
+    `[go] date=${siteDateIso(new Date())} noticeId=${id} outboundClicks=${clicks}`,
   );
 
   return NextResponse.redirect(target, { status: 302, headers: REDIRECT_HEADERS });
