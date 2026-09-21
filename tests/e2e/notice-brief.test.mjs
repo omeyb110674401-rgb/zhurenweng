@@ -275,3 +275,81 @@ describe('issue #27：有 AI 摘要时的分工', () => {
     assert.match(detail, /href="mailto:glfzqyj@mot\.gov\.cn"/);
   });
 });
+
+describe('issue #39：详情页结构化数据（JSON-LD）', () => {
+  /**
+   * 结构化数据最怕「机器读到的」与「读者看到的」不是一回事，所以这里的断言全部是
+   * **从页面可见内容反查 JSON-LD**：字段值必须等于同一页上渲染出来的值，而不是等于
+   * 测试里另写一遍的期望串。
+   */
+  /** 取出 JSON-LD 脚本块（解析失败即失败）。 */
+  function jsonLdOf(html) {
+    const match = /<script[^>]*type="application\/ld\+json"[^>]*>([\s\S]*?)<\/script>/.exec(html);
+    assert.ok(match, '详情页应输出 JSON-LD 脚本块');
+    return { raw: match[1], doc: JSON.parse(match[1]) };
+  }
+
+  /** 详情字段值（「发布机关 / 截止日期」等，按 dt 文本取相邻 dd）。 */
+  function fieldOf(html, label) {
+    const match = new RegExp(`<dt>${label}</dt>\\s*<dd>([^<]*)</dd>`).exec(html);
+    assert.ok(match, `详情页应有「${label}」字段`);
+    return match[1].trim();
+  }
+
+  it('JSON-LD 可解析，且每个字段都与页面上可见的内容一致', async () => {
+    useUnavailableLlm();
+    const html = await detailOf(MOT_TITLE);
+    const { doc } = jsonLdOf(html);
+
+    assert.equal(doc['@context'], 'https://schema.org');
+    assert.equal(doc['@type'], 'Article', '本页是文档页，不是 Event / GovernmentService');
+    assert.equal(doc.headline, MOT_TITLE, 'headline = 页面标题');
+    assert.equal(doc.inLanguage, 'zh-CN');
+    assert.equal(doc.publisher.name, '主人翁');
+    assert.ok(doc.description.startsWith('征求意见中 · 截止 '), 'description = 页面 meta 摘要');
+
+    assert.equal(doc.author.name, fieldOf(html, '发布机关'), 'author = 页面「发布机关」');
+    assert.equal(doc.datePublished, fieldOf(html, '发布日期'));
+    assert.equal(doc.expires, fieldOf(html, '截止日期'), 'expires = 页面「截止日期」');
+    assert.deepEqual(
+      doc.additionalProperty,
+      [{ '@type': 'PropertyValue', name: '征求意见截止日期', value: fieldOf(html, '截止日期') }],
+      '截止日期另用 additionalProperty 逐字给一份（消费方不必猜 expires 的含义）',
+    );
+
+    const badge = /data-testid="notice-status-badge"[^>]*>([^<]*)</.exec(html)?.[1];
+    assert.equal(doc.creativeWorkStatus, badge, 'creativeWorkStatus = 页面状态徽标');
+
+    const official = /data-testid="official-url"[^>]*>([^<]*)</.exec(html)?.[1];
+    assert.equal(doc.isBasedOn, official, 'isBasedOn = 页面「官方原文」链接');
+
+    assert.match(doc.url, /^https:\/\/zw\.test\/notices\/[0-9a-f]+$/);
+    assert.ok(
+      html.includes(`rel="canonical" href="${doc.url}"`),
+      'JSON-LD 的 url 应与 canonical 同一取值',
+    );
+    assert.deepEqual(doc.about, [
+      { '@type': 'Legislation', name: '《中华人民共和国公路法（修正草案征求意见稿）》' },
+    ]);
+  });
+
+  it('脚本块里没有裸 `<`（标题 / 正文里的尖括号不会提前闭合脚本）', async () => {
+    const { raw } = jsonLdOf(await detailOf(MOT_TITLE));
+    assert.ok(!raw.includes('<'), '渲染出来的 JSON-LD 必须把 `<` 写成 \\u003c');
+  });
+
+  it('取不到的字段整个省略：无截止日期的条目没有 expires，但仍给出法规与发布日期', async () => {
+    useUnavailableLlm();
+    const html = await detailOf(UNKNOWN_TEMPLATE_TITLE);
+    const { doc } = jsonLdOf(html);
+
+    assert.equal(fieldOf(html, '截止日期'), '未标注', '该条目正文未取到，没有截止日期');
+    assert.equal('expires' in doc, false, '取不到截止日期时整个属性省略（不写 null）');
+    assert.equal('additionalProperty' in doc, false);
+    // 同一份 JSON-LD 里，取到的字段照常输出
+    assert.equal(doc.datePublished, fieldOf(html, '发布日期'));
+    assert.deepEqual(doc.about, [
+      { '@type': 'Legislation', name: '《电力辅助服务市场基本规则（征求意见稿）》' },
+    ]);
+  });
+});

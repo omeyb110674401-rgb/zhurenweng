@@ -112,6 +112,16 @@ export default async function HomePage({ searchParams }: HomePageProps) {
   const rangeStart = total === 0 ? 0 : (page - 1) * size + 1;
   const rangeEnd = (page - 1) * size + notices.length;
 
+  /**
+   * 机关下拉的选项（issue #39）：当前筛选值若已不在库内机关列表里（issue #21 之前的下拉
+   * 存的是「司法部、中国人民银行…」这种复合串，老链接仍在被分享），必须把它作为选项补进去 ——
+   * 否则 <select> 的 defaultValue 匹配不到任何选项，浏览器会显示「全部机关」，
+   * 而列表其实已经按该值筛选过了：筛选控件在说谎。
+   * 补进来的选项放在最前，用户一眼能看到当前生效的是哪个值。
+   */
+  const agencyOptions =
+    agency !== undefined && !agencies.includes(agency) ? [agency, ...agencies] : agencies;
+
   const filterSummary = [
     category,
     agency ? (current.leadAgencyOnly ? `机关（牵头）：${agency}` : `机关：${agency}`) : '',
@@ -224,7 +234,7 @@ export default async function HomePage({ searchParams }: HomePageProps) {
               defaultValue={agency ?? ''}
             >
               <option value="">全部机关</option>
-              {agencies.map((name) => (
+              {agencyOptions.map((name) => (
                 <option key={name} value={name}>
                   {name}
                 </option>

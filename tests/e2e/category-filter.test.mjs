@@ -332,6 +332,35 @@ describe('issue #9：领域标签自动打标与分类浏览筛选', () => {
     assert.match(stale, /data-testid="notice-empty-state"/, '「生态环境部」不再是库内机关取值');
   });
 
+  it('筛选值不在机关下拉里时补上该选项并选中（issue #39）', async () => {
+    // issue #21 之前下拉里存的是复合串，那些链接仍在被分享。线上实测（修复前）：
+    // /?agency=司法部、中国人民银行、金融监管总局、中国证监会、国家外汇局
+    // 显示「筛选后共 1 条」，但下拉里没有这个值 → 浏览器回落到首项「全部机关」，
+    // 控件显示的和列表实际筛的互相矛盾。
+    const compound = '司法部、中国人民银行、金融监管总局、中国证监会、国家外汇局';
+    const html = await fetchHome(`/?agency=${encodeURIComponent(compound)}`);
+    assert.match(html, /data-testid="filter-result-count"[^>]*>筛选后共 1 条/);
+
+    const select = /<select[^>]*agency-filter-select[^>]*>([\s\S]*?)<\/select>/.exec(html);
+    assert.ok(select, '首页应渲染机关下拉');
+    const options = [...select[1].matchAll(/<option[^>]*>([^<]*)</g)].map((match) => match[1]);
+    assert.equal(options[0], '全部机关', '首项仍是「全部机关」占位');
+    assert.equal(options[1], compound, '当前筛选值应补为选项并排在最前（用户一眼看到生效值）');
+    assert.equal(new Set(options).size, options.length, '补进来的选项不应造成重复');
+
+    const selected = /<option value="([^"]*)"[^>]*selected/.exec(select[1]);
+    assert.ok(selected, '必须有一个选项处于选中态，否则下拉会显示「全部机关」');
+    assert.equal(selected[1], compound, '选中的应是当前筛选值');
+  });
+
+  it('机关值在库内时选项集合不变（修复不为常规筛选多造选项）', async () => {
+    const html = await fetchHome(`/?agency=${encodeURIComponent('司法部')}`);
+    const select = /<select[^>]*agency-filter-select[^>]*>([\s\S]*?)<\/select>/.exec(html);
+    const options = [...select[1].matchAll(/<option[^>]*>([^<]*)</g)].map((match) => match[1]);
+    assert.equal(options.length, AGENCIES.length + 1, '库内机关：占位项 + 库内机关，不多不少');
+    assert.equal(/<option value="([^"]*)"[^>]*selected/.exec(select[1])?.[1], '司法部');
+  });
+
   it('按关键词过滤：标题命中（道路交通安全法）与正文命中（人大正文特征串 / 海洋生态环境）', async () => {
     const titleHit = await fetchHome(`/?q=${encodeURIComponent('道路交通安全法')}`);
     assert.deepEqual(listOrder(titleHit), [TITLES.npc2], '标题包含匹配应命道路交通安全法');

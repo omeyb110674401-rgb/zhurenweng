@@ -8,6 +8,7 @@ import { Countdown, StatusBadge, formatDate } from '@/app/_lib/notice-display';
 import { NoticeBriefView, SubmissionChannels } from '@/app/_lib/notice-brief-view';
 import { SummaryPlaceholder, SummaryUnavailable, SummaryView } from '@/app/_lib/summary-view';
 import { buildNoticeBrief } from '@/lib/notice-brief';
+import { buildNoticeJsonLd, serializeJsonLd } from '@/lib/notice-jsonld';
 import { llmReady } from '@/lib/llm-availability';
 import { mailerReady } from '@/lib/mailer-availability';
 import { siteUrl } from '@/lib/site-url';
@@ -74,9 +75,20 @@ export default async function NoticeDetailPage({ params }: NoticeDetailPageProps
     bodyText: notice.bodyText,
     url: notice.url,
   });
+  // 结构化数据（issue #39）：与 metadata 用同一份摘要，避免两处描述分叉。
+  const jsonLd = serializeJsonLd(
+    buildNoticeJsonLd({ notice, siteUrl: siteUrl(), description: noticeDescription(notice) }),
+  );
 
   return (
     <main>
+      {/* schema.org 结构化数据（issue #39）：给搜索引擎/聚合器读的机器可读版本，
+          字段口径见 lib/notice-jsonld.ts；用户可见内容全在下方，此处不重复渲染 */}
+      <script
+        type="application/ld+json"
+        data-testid="notice-jsonld"
+        dangerouslySetInnerHTML={{ __html: jsonLd }}
+      />
       <nav className="breadcrumb">
         <Link href="/">← 返回公示列表</Link>
       </nav>
