@@ -1,4 +1,5 @@
 import type { NoticeAttachment, NoticeStatus } from '../db/types.ts';
+import { cacAdapter } from './adapters/cac.ts';
 import { meeAdapter } from './adapters/mee.ts';
 import { miitAdapter } from './adapters/miit.ts';
 import { mohurdAdapter } from './adapters/mohurd.ts';
@@ -125,18 +126,24 @@ export interface SourceAdapter {
 /**
  * 注册表：所有源适配器在此登记，调度器按此数组驱动。
  *
- * 当前 9 个源（PRD M2 要求的「部委直爬源扩至 8 个」已达成，issue #28 补上 PRD M1 源清单里点名却一直缺失的住房城乡建设部）：
+ * 当前 10 个源（PRD M1 源清单已全部接入：issue #28 补住房城乡建设部、issue #29 补国家网信办）：
  * 全国人大 / 司法部 / 生态环境部（M1 三源）+ 交通运输部 / 市场监管总局 /
- * 工业和信息化部 / 教育部 / 国家发展改革委（M2 扩源）+ 住房城乡建设部（issue #28）。
+ * 工业和信息化部 / 教育部 / 国家发展改革委（M2 扩源）+ 住房城乡建设部 / 国家网信办。
  *
  * ## 已评估但未接入的源（附实测依据，避免后人重复踩）
  *
- * - **国家网信办**（www.cac.gov.cn）：首页导航无「征求意见」栏目入口，
- *   常见候选路径（/zcfg/、/xxfb/、/hdjl/yjzj/ 等）实测均 404。
  * - **中国政府网「意见征集」**：栏目已下线（见 mee.ts 文件头的实测记录）。
  * - **国务院部门其它栏目**：生态环境部、交通运输部等已接入的部委，其「征求意见」
  *   栏目是各自站点里唯一在运营的征求意见入口；其余部委（如财政部、卫健委）
  *   未逐个排查，按 PRD 属后续扩展。
+ *
+ * ## 接入留档：栏目入口不在首页导航时怎么办（issue #29 网信办）
+ *
+ * 网信办的征求意见条目挂在「互动服务 → 网信@你」，首页导航里没有入口，早先按
+ * 「首页导航 + 常见路径」探测得到的是「候选路径全 404」的错误结论。教训：政府站点的
+ * 征求意见栏目常挂在**互动 / 交流类二级栏目**下（互动服务 / 政民互动 / 公众参与），
+ * 排查顺序应是「全站链接扫描（含首页各处 widget 的 href）→ 逐层进入二级栏目」，
+ * 而不是只试 /zcfg/、/xxfb/ 这类猜测路径。
  */
 export const sourceAdapters: SourceAdapter[] = [
   npcLawDraftsAdapter,
@@ -148,4 +155,5 @@ export const sourceAdapters: SourceAdapter[] = [
   moeAdapter,
   ndrcAdapter,
   mohurdAdapter,
+  cacAdapter,
 ];

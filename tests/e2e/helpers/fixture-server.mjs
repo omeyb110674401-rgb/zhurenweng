@@ -16,6 +16,9 @@ const CONTENT_TYPES = {
   // 政府 CMS 常用扩展名（如生态环境部栏目内页 …/t20260914_1166201.shtml）：
   // 与 .html 同样按文本提供并做日期令牌替换
   '.shtml': 'text/html; charset=utf-8',
+  // 同理 .htm（国家网信办详情页 …/c_1791482017777471.htm）：不按文本提供的话
+  // 日期令牌不会被替换，适配器抽到的是 {{CN_DATE+26}} 这种字面量、截止日期全丢
+  '.htm': 'text/html; charset=utf-8',
   '.json': 'application/json; charset=utf-8',
   '.txt': 'text/plain; charset=utf-8',
 };

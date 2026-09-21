@@ -30,6 +30,15 @@ fixtures/
       gongkai/zc/wjk/art/2026/*.html   # 详情：.editor-content 正文 + .editorContent-download
                              #   附件（下载接口链接无扩展名）；meta PubDate 提供发布日期，
                              #   ArticleTitle 带源站换行（适配器刻意不用它覆盖标题）
+  e2e-cac/                   # issue #29 网信办扩源场景专用（独立成 fixture 根目录）
+    cac/                     #   国家网信办「网信@你」：list.html 是栏目页裁剪，
+      list.html              #   保留 4 行 —— 3 条征求意见 + 1 条非征求意见
+                             #   （换届征集委员，验证标题过滤；刻意不给它详情快照，
+                             #   过滤一旦失效抓取条数就会变成 4）；href 改成源目录内
+                             #   相对路径；日期换成固定场景偏移的令牌
+      2026-09/18/*.htm       # 详情：h1.title / #pubtime（带时分）/ #BodyLabel 正文；
+      2026-06/26/*.htm       #   06-26 那条的附件是 downloadfile.jsp?filepath=…&fText=…
+      2026-07/29/*.htm       #   （无扩展名，名字取自 fText）；正文尾部内联脚本已剥掉
   e2e-reminders/             # issue #7 截止提醒场景专用（截止日期 = 今天 +7 / +3 天，
     npc/                     #   条目按订阅关键词 / 领域规则设计命中与不命中对照；
       list.json              #   结构与 fixtures/npc/ 同构，内容为场景合成数据）

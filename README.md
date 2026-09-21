@@ -454,7 +454,7 @@ worker 注册表中的 `summarize-notices` 任务（`worker/jobs/summarize-notic
   同一天同一源同一任务类型只发一封，worker 重启后依然有效；邮件发送失败不落
   去重标记，下一轮任务再失败时重试发送。
 
-## 接入的源（issue #14 三源 + issue #18 扩至七源 + issue #28 第九源，均对着活站校准）
+## 接入的源（issue #14 三源 + issue #18 扩至七源 + issue #28 第九源 + issue #29 第十源，均对着活站校准）
 
 | 源 ID | 栏目与真实列表地址 | 传输处置 | 列表 / 详情结构要点 |
 | --- | --- | --- | --- |
@@ -468,14 +468,20 @@ worker 注册表中的 `summarize-notices` 任务（`worker/jobs/summarize-notic
 | `ndrc` | 国家发展改革委「意见征求」<br>`https://www.ndrc.gov.cn/hdjl/yjzq/` | 无特殊要求；**正文需链式跳转**（见下方「链式跳转」） | 列表 `ul.u-list > li > a[title] + span`，标题带 `【进行中】` 前缀 / `[已结束]` 后缀（两种都剥离）；条目链接是数据服务域名下的前端渲染页 `sa.html#/<shortKey>`；正文与截止日期（「此次公开征求意见的时间为 X 至 Y」）都在 `getArticleDetail` 接口返回的 `articleContent` 里，附件是正文 HTML 内的绝对链接；接口返回的标题含 `<BR>` 换行标签，入库前剥掉 |
 
 | `mohurd` | 住房城乡建设部「征求意见」<br>`https://www.mohurd.gov.cn/gongkai/fdzdgknr/zqyj/index.html` | 无特殊要求（爬虫 UA 直接 200）；列表是站内 TRS jpaas 接口（与 samr / miit 同族，参数不同）。**中文查询参数必须用 UTF-8 百分号编码**——Windows 上用 `curl --data-urlencode "tagId=内容1"` 会编成 GBK，接口匹配不到 tag 就返回 `success:false`，曾被误判成站点加了「授权读取」校验（详见适配器文件头） | 列表行 `li.long-deta` **直接带截止日期**（`span.date-info`「截止日期 X」），本源没有状态列也没有发布日期列（发布日期由详情 `meta PubDate` 补）；正文 `.editor-content`；附件在 `.editorContent-download`，链接是下载接口 `/document/download?fileUrl=…`**没有扩展名**，故按容器 + 路径收集而非按扩展名。**只取接口第 1 页（20 条）**：分页参数只在前端脚本里消费（`pageNo`/`page`/`limit` 回传均被忽略），而列表按截止日期降序 → 新条目截止日必然更大、永远落在第 1 页顶部，掉出第 1 页的都是已入库的旧条目 |
+| `cac` | 国家网信办「网信@你」<br>`https://www.cac.gov.cn/hdfw/wxan/A093802index_1.htm` | 无特殊要求（爬虫 UA 直接 200，静态 HTML） | 栏目**不在首页导航里**（挂在「互动服务 → 网信@你」，首页那栏只是 3 条切片），单页 20 条、无第二页（`…index_2.htm` 404），覆盖最近约 9 个月。列表 `#loadingInfoPage li`（标题取 `title` 属性），**没有截止日期也没有状态列** —— 两者都从详情正文抽；详情 `h1.title` / `#pubtime`（带时分的「2026年09月18日 17:00」）/ 正文 `#BodyLabel`（尾部内联 `pagestat` 脚本由 blockText 剔除）；附件是 `downloadfile.jsp?filepath=…&fText=…`**无扩展名**下载接口（名字取 `fText`）。**栏目混排通知公告**（实测 20 条里 8 条是征求意见），适配器按标题 `征求…意见` 过滤，否则招聘公告、结果公示会混进来 |
 第三源为何不是中国政府网：原 `govcn`（中国政府网「政策 → 意见征集」）实测**已下线**
 （`/zhengce/yjzj/**` 全 404；政策频道仅剩最新政策 / 国务院公报 / 政策解读 / 图解政策，
 政策文件库路径对爬虫一律 403）。本产品承诺「聚合征求意见稿 + 截止提醒」，故换用真实
 在运营、可抓取且含截止日期的部委征求意见栏目（issue #14）。
 
-PRD M2 的「部委直爬源扩展至 8 个」**已达成**；issue #28 又补上 PRD M1 源清单里点名却
-一直缺失的住房城乡建设部，现共 **9 个源**。国家网信办首页无「征求意见」栏目入口、
-常见候选路径全 404，未接入（依据记在 `src/sources/registry.ts` 的注册表注释里）。
+PRD M2 的「部委直爬源扩展至 8 个」**已达成**；issue #28 补上住房城乡建设部、
+issue #29 补上国家网信办（PRD M1 源清单点名的最后两个），现共 **10 个源**。
+
+国家网信办的接入留档（issue #29）：它的征求意见条目挂在「互动服务 → 网信@你」，
+**首页导航里没有入口**，早先按「首页导航 + 常见路径探测」得到的是「候选路径全 404」
+的错误结论。教训写在 `src/sources/registry.ts` 的注册表注释里 —— 政府站点的征求意见
+栏目常挂在互动 / 交流类二级栏目下，排查应先做全站链接扫描（含首页各处 widget 的 href）
+再逐层进入二级栏目。
 
 **状态推导次序**（issue #18）：截止日期是事实、优先；解析不到时采用源自身标注
 （`NormalizedNotice.status`，来自列表的状态列 / 标题标注）；都取不到才兜底「征求意见中」。
