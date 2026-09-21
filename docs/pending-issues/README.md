@@ -10,6 +10,7 @@ codeload 404），**无法创建 issue**。停用期间新工作的 issue 正文
 | `36-stats-drilldown-and-lead-agency.md` | 统计页缺钻取入口，且机关口径与筛选不一致 | `5739d2c` |
 | `37-mail-escaping-and-mobile-tables.md` | 邮件 HTML 未转义 + 统计页宽表在窄屏撑破整页 | `a31025c` |
 | `38-indexability-and-go-headers.md` | 搜索结果页与退订页可被收录；/go 端点缺缓存与索引声明 | `4ea2004` |
+| `39-jsonld-and-filter-interaction.md` | 详情页加 JSON-LD 结构化数据；首页机关下拉与筛选值不一致 | `2386082` |
 
-同时还有三个已提交但未推送的提交（`dd87b10` #33 筛选、`dea8ca5` UA + 增量同步脚本、
-`029ce13` #34 退订）——恢复推送通道后一并推送。
+同时 `origin/main` 之后的全部提交（issue #33 起，含 #39）都已提交但未推送 —— 恢复
+推送通道后一并推送（数量随迭代增长，当前值看 `git rev-list --count origin/main..HEAD`）。
