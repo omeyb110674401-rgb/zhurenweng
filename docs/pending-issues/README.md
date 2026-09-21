@@ -21,6 +21,11 @@ codeload 404），**无法创建 issue**。停用期间新工作的 issue 正文
 | `47-period-bucket-drilldown.md` | 公示期分布的桶不可钻取（页面上最后一处点不开的数字） | `b37b20c` |
 | `48-trend-range-drilldown.md` | 趋势表的小计与总计点不开（求和结果缺区间口径） | `03cedd9` |
 | `49-e2e-html-helper-and-itemlist.md` | e2e 解析器收成共享工具 + 首页 ItemList 结构化数据 | `17e6314` |
+| `50-code-review-and-fixes.md` | 全量代码评审（规范 + 规格两轴）与 11 项修复：牵头口径在筛选表单里丢失、邮件 href 未转义、stats.ts 的裸 NUL 字节让文件不可评审、多词搜索三路径三语义 | `b92493c` |
+
+**另有 `FOLLOWUPS.md`（durable，不随本目录删除）**：各 issue 的「未做（有意）」小节里
+既有真实待办也有有意取舍，都登记在那里 —— 本目录按约定会在补录 tracker 后删除，删文件
+不该把「将来可能要做的事」一起带走（issue #50 指出的「遗留项没有落脚点」）。
 
 同时 `origin/main` 之后的全部提交（issue #33 起，含 #39）都已提交但未推送 —— 恢复
 推送通道后一并推送（数量随迭代增长，当前值看 `git rev-list --count origin/main..HEAD`）。
