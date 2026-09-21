@@ -137,7 +137,8 @@ export default async function StatsPage() {
         <p className="section-hint">
           按发布日期所在月份统计（{months[0]} 至 {months[months.length - 1]}）。
           点格子里的数字可查看该机关该月发布的条目（条数与格子一致）；点月度合计可查看该月全部条目。
-          小计与总计是求和结果，没有对应的筛选口径，故不可点（issue #45）。
+          小计与总计点进去是该区间（{months[0]} 至 {months[months.length - 1]}）的筛选结果
+          —— 行小计按机关、总计按全部机关（issue #48）。
         </p>
         {trendAgencies.length === 0 ? (
           <EmptyBlock
@@ -189,7 +190,20 @@ export default async function StatsPage() {
                       </td>
                     );
                   })}
-                  <td className="stat-num stat-total">{series.total}</td>
+                  <td className="stat-num stat-total">
+                    {series.total > 0 ? (
+                      <Link
+                        className="stat-drill"
+                        href={`/?agency=${encodeURIComponent(agency)}&lead=1&from=${months[0]}&to=${months[months.length - 1]}`}
+                        data-testid="trend-row-total-link"
+                        aria-label={`查看${agency}在 ${months[0]} 至 ${months[months.length - 1]} 发布的 ${series.total} 条公示`}
+                      >
+                        {series.total}
+                      </Link>
+                    ) : (
+                      series.total
+                    )}
+                  </td>
                 </tr>
               ))}
               <tr data-testid="trend-total-row">
@@ -211,7 +225,21 @@ export default async function StatsPage() {
                   </td>
                 ))}
                 <td className="stat-num stat-total">
-                  {monthTotals.reduce((sum, total) => sum + total, 0)}
+                  {(() => {
+                    const grand = monthTotals.reduce((sum, total) => sum + total, 0);
+                    return grand > 0 ? (
+                      <Link
+                        className="stat-drill"
+                        href={`/?from=${months[0]}&to=${months[months.length - 1]}`}
+                        data-testid="trend-grand-total-link"
+                        aria-label={`查看 ${months[0]} 至 ${months[months.length - 1]} 发布的 ${grand} 条公示`}
+                      >
+                        {grand}
+                      </Link>
+                    ) : (
+                      grand
+                    );
+                  })()}
                 </td>
               </tr>
             </tbody>

@@ -318,7 +318,12 @@ function parseTrendRows(html) {
     const cells = [
       ...block.matchAll(/<td class="stat-num" data-month="([^"]*)">([\s\S]*?)<\/td>/g),
     ].map((cell) => Number(/(\d+)/.exec(cell[2].replace(/<[^>]*>/g, ''))?.[1] ?? 0));
-    const total = Number(/<td class="stat-num stat-total">(\d+)<\/td>/.exec(block)[1]);
+    // 行小计自 issue #48 起是区间钻取链接 —— 取数字前先剥标签
+    const total = Number(
+      /(\d+)/.exec(
+        /<td class="stat-num stat-total">([\s\S]*?)<\/td>/.exec(block)[1].replace(/<[^>]*>/g, ''),
+      )[1],
+    );
     return { agency, cells, total };
   });
 }
@@ -354,6 +359,35 @@ function parseTrendDrills(html) {
     }
   }
   return result;
+}
+
+/** 解析趋势表的行小计钻取链接（→ [{ agency, count, href }]；只含非零小计）。 */
+function parseTrendRowTotalDrills(html) {
+  const rows = [...html.matchAll(/data-testid="trend-row">([\s\S]*?)<\/tr>/g)];
+  const result = [];
+  for (const row of rows) {
+    const block = row[1];
+    const agency = /<th scope="row">([^<]+)<\/th>/.exec(block)[1];
+    const link = /<a[^>]*data-testid="trend-row-total-link"[^>]*>(\d+)<\/a>/.exec(block);
+    if (link) {
+      result.push({
+        agency,
+        count: Number(link[1]),
+        href: (/href="([^"]*)"/.exec(link[0])?.[1] ?? '').replaceAll('&amp;', '&'),
+      });
+    }
+  }
+  return result;
+}
+
+/** 解析趋势表的总计（右下角）钻取链接（→ { count, href } | null）。 */
+function parseTrendGrandTotalDrill(html) {
+  const link = /<a[^>]*data-testid="trend-grand-total-link"[^>]*>(\d+)<\/a>/.exec(html);
+  if (!link) return null;
+  return {
+    count: Number(link[1]),
+    href: (/href="([^"]*)"/.exec(link[0])?.[1] ?? '').replaceAll('&amp;', '&'),
+  };
 }
 
 /** 解析趋势表「全部机关」行的月度合计钻取链接（→ [{ month, count, href }]）。 */
@@ -824,6 +858,35 @@ describe('issue #11：数据统计页与出站点击聚合', () => {
       ),
       '零格子不该是链接',
     );
-    assert.ok(checked >= 6, `应至少核对 6 个数字，实际 ${checked}`);
+
+    // 行小计（窗口内该机关的求和）→ ?agency=X&lead=1&from=…&to=…（issue #48）
+    const rowTotals = parseTrendRowTotalDrills(html);
+    assert.ok(rowTotals.length >= 3, `应有可钻取的行小计，实际 ${rowTotals.length}`);
+    for (const drill of rowTotals) {
+      assert.match(
+        drill.href,
+        /^\/\?agency=.+&lead=1&from=\d{4}-\d{2}&to=\d{4}-\d{2}$/,
+        `行小计链接应带机关 + 牵头口径 + 区间，实际：${drill.href}`,
+      );
+      const list = stripSsrComments(await (await fetch(`${app.url}${drill.href}`)).text());
+      const got = Number(/筛选后共 (\d+) 条/.exec(list)?.[1] ?? -1);
+      assert.equal(got, drill.count, `${decodeURIComponent(drill.href)} 应恰好 ${drill.count} 条`);
+      assert.match(list, /发布区间：|发布月份：/, '列表页应显示区间摘要');
+      checked += 1;
+    }
+
+    // 总计（窗口内全部机关）→ ?from=…&to=…
+    const grand = parseTrendGrandTotalDrill(html);
+    assert.ok(grand !== null, '总计应可钻取');
+    assert.match(grand.href, /^\/\?from=\d{4}-\d{2}&to=\d{4}-\d{2}$/, '总计链接只带区间');
+    const grandList = stripSsrComments(await (await fetch(`${app.url}${grand.href}`)).text());
+    assert.equal(
+      Number(/筛选后共 (\d+) 条/.exec(grandList)?.[1] ?? -1),
+      grand.count,
+      '总计点进去应恰好等于总计数字',
+    );
+    checked += 1;
+
+    assert.ok(checked >= 12, `应至少核对 12 个数字，实际 ${checked}`);
   });
 });

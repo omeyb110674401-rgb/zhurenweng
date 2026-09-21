@@ -17,6 +17,8 @@ export interface HomeSearchParams {
   lead?: string | string[];
   page?: string | string[];
   month?: string | string[];
+  from?: string | string[];
+  to?: string | string[];
   period?: string | string[];
 }
 
@@ -48,6 +50,31 @@ export function monthParam(value: string | string[] | undefined): string | undef
 }
 
 /**
+ * 取 querystring 里的发布月份区间（issue #48）：两端都必须是 YYYY-MM。
+ *
+ * 为什么需要区间：统计页趋势表的「小计 / 总计」是**窗口内的求和**（最近 6 个月），
+ * 单个 `?month=` 表达不了它 —— 而 #36 定的规矩是每个数字点开后条数必须与表格一致。
+ *
+ * 规矩（都是「宁可不筛，也不给假空态」）：
+ * - 只给一端也有效（`from` 或 `to` 单独用）；
+ * - 两端都给且 `from > to` → 两端都不生效（手改 URL 把顺序写反是常见事，
+ *   不该因此看到一页「筛选后共 0 条」）；
+ * - 任一端格式非法 → 该端不生效（与未知领域值同一处理）。
+ *
+ * 兼容：`?month=YYYY-MM` 是 `from = to = 该月` 的**别名**（issue #45 已发布的钻取
+ * 链接保持有效）。SQL 侧只有区间一条路径，别名在解析层折平 —— 不养两套口径。
+ */
+export function monthRangeParam(
+  fromRaw: string | string[] | undefined,
+  toRaw: string | string[] | undefined,
+): { from?: string; to?: string } {
+  const from = monthParam(fromRaw);
+  const to = monthParam(toRaw);
+  if (from !== undefined && to !== undefined && from > to) return {};
+  return { from, to };
+}
+
+/**
  * 取 querystring 里的公示期分桶（issue #47）：只认 `notice-period.ts` 里定义的
  * 桶 key（`lte7` / `b8_15` / `b16_30` / `gt30`），其余一律不生效 —— 与未知领域值
  * 同一处理。桶的边界与文案也来自那份定义，这里不重复一套。
@@ -66,8 +93,10 @@ export interface HomeQuery {
   keyword?: string;
   /** 机关筛选只算牵头机关（issue #36，统计页钻取链接带 lead=1 进来） */
   leadAgencyOnly: boolean;
-  /** 发布月份（YYYY-MM，issue #45：统计页趋势表钻取用） */
-  month?: string;
+  /** 发布月份区间下界（YYYY-MM，issue #48：趋势表小计 / 总计钻取用） */
+  from?: string;
+  /** 发布月份区间上界（YYYY-MM，含该月） */
+  to?: string;
   /** 公示期分桶 key（issue #47：统计页公示期分布钻取用） */
   period?: PeriodBucketKey;
   /** 请求的页码（已夹到正整数；实际页码还要按总数夹一次） */
@@ -82,13 +111,18 @@ export function parseHomeQuery(params: HomeSearchParams): HomeQuery {
   const category = categoryParam !== undefined && isKnownCategory(categoryParam) ? categoryParam : undefined;
   const agency = firstParam(params.agency);
   const keyword = firstParam(params.q);
-  const month = monthParam(params.month);
+  // 区间优先；没给区间时 `?month=` 折平为 from = to（issue #45 的链接保持有效）
+  const range = monthRangeParam(params.from, params.to);
+  const legacyMonth = monthParam(params.month);
+  const from = range.from ?? (range.to === undefined ? legacyMonth : undefined);
+  const to = range.to ?? (range.from === undefined ? legacyMonth : undefined);
   const period = periodParam(params.period);
   return {
     category,
     agency,
     keyword,
-    month,
+    from,
+    to,
     period,
     leadAgencyOnly: firstParam(params.lead) === '1',
     page: pageParam(params.page),
@@ -96,7 +130,8 @@ export function parseHomeQuery(params: HomeSearchParams): HomeQuery {
       category !== undefined ||
       agency !== undefined ||
       keyword !== undefined ||
-      month !== undefined ||
+      from !== undefined ||
+      to !== undefined ||
       period !== undefined,
   };
 }

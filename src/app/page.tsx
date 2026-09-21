@@ -66,10 +66,12 @@ interface FilterState {
   agency?: string;
   keyword?: string;
   /**
-   * 发布月份（YYYY-MM，issue #45）：统计页「公示量月度趋势」表的钻取口径。
+   * 发布月份区间（YYYY-MM，issue #48）：统计页「公示量月度趋势」表的钻取口径 ——
+   * 月份格子是 from = to = 该月，行小计 / 总计是窗口起止月。
    * 与统计页聚合同口径（按**发布**月份分组），否则「点进去的条数 = 表格数字」不成立。
    */
-  month?: string;
+  from?: string;
+  to?: string;
   /**
    * 公示期分桶（issue #47）：统计页「公示期长度分布」的钻取口径。
    * 桶边界与文案统一在 lib/notice-period.ts，SQL 条件由同一份定义推导。
@@ -98,7 +100,8 @@ function buildFilterHref(current: FilterState, next: Partial<FilterState>): stri
   // lead 只在有机关筛选时才有意义（无机关时它不改变任何结果）
   if (merged.agency && merged.leadAgencyOnly) search.set('lead', '1');
   if (merged.keyword) search.set('q', merged.keyword);
-  if (merged.month) search.set('month', merged.month);
+  if (merged.from) search.set('from', merged.from);
+  if (merged.to) search.set('to', merged.to);
   if (merged.period) search.set('period', merged.period);
   if (merged.page !== undefined && merged.page > 1) search.set('page', String(merged.page));
   const qs = search.toString();
@@ -113,12 +116,13 @@ export default async function HomePage({ searchParams }: HomePageProps) {
     category: query.category,
     agency: query.agency,
     keyword: query.keyword,
-    month: query.month,
+    from: query.from,
+    to: query.to,
     period: query.period,
     // 只有「带了机关 + lead=1」才算牵头口径；裸 lead=1 不改变任何结果
     leadAgencyOnly: query.leadAgencyOnly,
   };
-  const { category, agency, keyword, month, period } = current;
+  const { category, agency, keyword, from, to, period } = current;
   const hasFilter = query.hasFilter;
 
   const size = pageSize();
@@ -128,7 +132,8 @@ export default async function HomePage({ searchParams }: HomePageProps) {
     category,
     agency,
     keyword,
-    publishedMonth: month,
+    publishedFromMonth: from,
+    publishedToMonth: to,
     periodBucket: period,
     leadAgencyOnly: current.leadAgencyOnly && agency !== undefined,
   };
@@ -163,7 +168,15 @@ export default async function HomePage({ searchParams }: HomePageProps) {
     category,
     agency ? (current.leadAgencyOnly ? `机关（牵头）：${agency}` : `机关：${agency}`) : '',
     keyword ? `关键词：${keyword}` : '',
-    month ? `发布月份：${month}` : '',
+    from !== undefined && to !== undefined
+      ? from === to
+        ? `发布月份：${from}`
+        : `发布区间：${from} 至 ${to}`
+      : from !== undefined
+        ? `发布月份：${from} 起`
+        : to !== undefined
+          ? `发布月份：${to} 止`
+          : '',
     period ? `公示期：${periodBucketLabel(period) ?? period}` : '',
   ]
     .filter(Boolean)
@@ -256,7 +269,8 @@ export default async function HomePage({ searchParams }: HomePageProps) {
           {/* 机关下拉 + 关键词框共用一个 GET 表单；当前领域经隐藏字段保留 */}
           <form className="filter-form" action="/" method="get" data-testid="filter-form">
             {category !== undefined && <input type="hidden" name="category" value={category} />}
-            {month !== undefined && <input type="hidden" name="month" value={month} />}
+            {from !== undefined && <input type="hidden" name="from" value={from} />}
+            {to !== undefined && <input type="hidden" name="to" value={to} />}
             {period !== undefined && <input type="hidden" name="period" value={period} />}
             <input
               className="filter-keyword"

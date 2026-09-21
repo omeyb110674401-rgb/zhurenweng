@@ -100,12 +100,15 @@ export interface ListNoticesFilteredOptions {
    */
   keyword?: string;
   /**
-   * 发布月份（YYYY-MM）精确到月（issue #45）：统计页趋势表的钻取链接用。
-   * 口径必须与 stats.ts 的 `substr(published_at, 1, 7)` 一致 —— 两处不一致，
-   * 「点进去的条数 = 表格上的数字」就不成立（issue #36 定的不变式）。
-   * 调用方保证格式合法（见 app/_lib/home-query.ts 的 monthParam）。
+   * 发布月份区间（YYYY-MM，含两端；issue #48）：统计页趋势表的钻取链接用 ——
+   * 月份格子用 from = to = 该月，行小计 / 总计用窗口的起止月。
+   *
+   * 口径必须与 stats.ts 的 `substr(published_at, 1, 7)` 一致（两处不一致，
+   * 「点进去的条数 = 表格上的数字」就不成立 —— issue #36 定的不变式）。
+   * 调用方保证格式合法（见 app/_lib/home-query.ts 的 monthRangeParam）。
    */
-  publishedMonth?: string;
+  publishedFromMonth?: string;
+  publishedToMonth?: string;
   /**
    * 公示期分桶（issue #47）：统计页「公示期长度分布」的钻取链接用。
    * 桶边界与文案统一在 `src/lib/notice-period.ts`，这里的 SQL 条件由同一份
@@ -227,12 +230,16 @@ function filterConditions(options: ListNoticesFilteredOptions) {
   if (options.periodBucket) {
     conditions.push(periodBucketCondition(options.periodBucket));
   }
-  if (options.publishedMonth) {
-    // 月份前缀匹配：published_at 是 ISO 日期字符串，取前 7 位即月份。
-    // 与统计页聚合同一口径（stats.ts 用 substr(published_at, 1, 7)）。
-    conditions.push(
-      sql`${notices.publishedAt} like ${`${likeLiteral(options.publishedMonth)}%`} escape '\\'`,
-    );
+  // 发布月份区间：published_at 是 ISO 日期字符串，取前 7 位即月份，与统计页聚合
+  // 同口径（stats.ts 用 substr(published_at, 1, 7)）。字符串比较在两种方言下都按
+  // 字节序比较 YYYY-MM，等价于月份先后 —— 不需要任何日期函数。
+  // 任一端缺省即只约束另一端；published_at 为空的行不满足比较 → 与趋势表
+  // 「缺发布日期不计入」同一口径。
+  if (options.publishedFromMonth) {
+    conditions.push(sql`substr(${notices.publishedAt}, 1, 7) >= ${options.publishedFromMonth}`);
+  }
+  if (options.publishedToMonth) {
+    conditions.push(sql`substr(${notices.publishedAt}, 1, 7) <= ${options.publishedToMonth}`);
   }
   if (options.keyword) {
     const keyword = keywordCondition(options.keyword);

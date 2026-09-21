@@ -1,6 +1,13 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { firstParam, monthParam, pageParam, parseHomeQuery, periodParam } from '../../src/app/_lib/home-query.ts';
+import {
+  firstParam,
+  monthParam,
+  monthRangeParam,
+  pageParam,
+  parseHomeQuery,
+  periodParam,
+} from '../../src/app/_lib/home-query.ts';
 
 /**
  * 单元：首页 querystring 解析（issue #41）。
@@ -51,6 +58,24 @@ describe('monthParam：发布月份（issue #45）', () => {
   });
 });
 
+describe('monthRangeParam：发布月份区间（issue #48）', () => {
+  it('两端合法 → 原样返回；只给一端也有效', () => {
+    assert.deepEqual(monthRangeParam('2026-04', '2026-09'), { from: '2026-04', to: '2026-09' });
+    assert.deepEqual(monthRangeParam('2026-04', undefined), { from: '2026-04', to: undefined });
+    assert.deepEqual(monthRangeParam(undefined, '2026-09'), { from: undefined, to: '2026-09' });
+    assert.deepEqual(monthRangeParam(undefined, undefined), { from: undefined, to: undefined });
+  });
+
+  it('from > to → 两端都不生效（宁可不筛，也不给一页假空态）', () => {
+    assert.deepEqual(monthRangeParam('2026-09', '2026-04'), {});
+  });
+
+  it('格式非法的一端不生效，另一端照常', () => {
+    assert.deepEqual(monthRangeParam('2026-13', '2026-09'), { from: undefined, to: '2026-09' });
+    assert.deepEqual(monthRangeParam('2026-04', 'abc'), { from: '2026-04', to: undefined });
+  });
+});
+
 describe('periodParam：公示期分桶（issue #47）', () => {
   it('只认 notice-period.ts 定义过的桶 key', () => {
     for (const key of ['lte7', 'b8_15', 'b16_30', 'gt30']) {
@@ -82,6 +107,24 @@ describe('parseHomeQuery：筛选状态与索引口径', () => {
     assert.equal(parseHomeQuery({ month: '2026-13' }).hasFilter, false, '非法月份不生效');
     assert.equal(parseHomeQuery({ period: 'b16_30' }).hasFilter, true, '公示期是筛选维度（issue #47）');
     assert.equal(parseHomeQuery({ period: 'nope' }).hasFilter, false, '非法桶 key 不生效');
+    assert.equal(parseHomeQuery({ from: '2026-04' }).hasFilter, true, '区间下界是筛选维度');
+    assert.equal(parseHomeQuery({ to: '2026-09' }).hasFilter, true, '区间上界是筛选维度');
+    assert.equal(
+      parseHomeQuery({ from: '2026-09', to: '2026-04' }).hasFilter,
+      false,
+      '倒置区间不生效（也就不是筛选）',
+    );
+  });
+
+  it('?month= 是 from = to 的别名（issue #45 已发布的链接保持有效）', () => {
+    const legacy = parseHomeQuery({ month: '2026-08' });
+    assert.equal(legacy.from, '2026-08');
+    assert.equal(legacy.to, '2026-08');
+    assert.equal(legacy.hasFilter, true);
+    // 显式区间优先于别名
+    const explicit = parseHomeQuery({ month: '2026-08', from: '2026-01', to: '2026-06' });
+    assert.equal(explicit.from, '2026-01');
+    assert.equal(explicit.to, '2026-06');
   });
 
   it('lead=1 只在显式传 1 时为真，其余值一律假', () => {
@@ -96,7 +139,8 @@ describe('parseHomeQuery：筛选状态与索引口径', () => {
       category: undefined,
       agency: undefined,
       keyword: '意见',
-      month: undefined,
+      from: undefined,
+      to: undefined,
       period: undefined,
       leadAgencyOnly: false,
       page: 3,
