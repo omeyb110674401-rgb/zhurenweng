@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { firstParam, pageParam, parseHomeQuery } from '../../src/app/_lib/home-query.ts';
+import { firstParam, monthParam, pageParam, parseHomeQuery } from '../../src/app/_lib/home-query.ts';
 
 /**
  * 单元：首页 querystring 解析（issue #41）。
@@ -36,6 +36,21 @@ describe('pageParam：页码', () => {
   });
 });
 
+describe('monthParam：发布月份（issue #45）', () => {
+  it('接受 YYYY-MM，补零必需（2026-8 不是合法月份值）', () => {
+    assert.equal(monthParam('2026-08'), '2026-08');
+    assert.equal(monthParam('2026-01'), '2026-01');
+    assert.equal(monthParam('2026-12'), '2026-12');
+    assert.equal(monthParam(' 2026-09 '), '2026-09', '去空白后仍合法');
+  });
+
+  it('非法值一律不生效（与未知领域值同一处理，不报错、不空页）', () => {
+    for (const bad of ['2026-13', '2026-00', '2026-8', '26-08', '2026-08-01', '2026', 'abc', '%', '2026-%', '', '   ', undefined]) {
+      assert.equal(monthParam(bad), undefined, `month=${JSON.stringify(bad)} 应不生效`);
+    }
+  });
+});
+
 describe('parseHomeQuery：筛选状态与索引口径', () => {
   it('未知领域值不生效（避免任意 querystring 触发无效筛选）', () => {
     assert.equal(parseHomeQuery({ category: '生态环境' }).category, '生态环境');
@@ -43,12 +58,14 @@ describe('parseHomeQuery：筛选状态与索引口径', () => {
     assert.equal(parseHomeQuery({ category: '不存在的领域' }).hasFilter, false);
   });
 
-  it('hasFilter 只看三个筛选维度（翻页与 lead 都不算）', () => {
+  it('hasFilter 只看筛选维度（翻页与 lead 都不算）', () => {
     assert.equal(parseHomeQuery({}).hasFilter, false);
     assert.equal(parseHomeQuery({ page: '2' }).hasFilter, false, '翻页不是筛选');
     assert.equal(parseHomeQuery({ lead: '1' }).hasFilter, false, '裸 lead 不改变结果');
     assert.equal(parseHomeQuery({ q: '意见' }).hasFilter, true);
     assert.equal(parseHomeQuery({ agency: '司法部' }).hasFilter, true);
+    assert.equal(parseHomeQuery({ month: '2026-08' }).hasFilter, true, '月份是筛选维度（issue #45）');
+    assert.equal(parseHomeQuery({ month: '2026-13' }).hasFilter, false, '非法月份不生效');
   });
 
   it('lead=1 只在显式传 1 时为真，其余值一律假', () => {
@@ -63,6 +80,7 @@ describe('parseHomeQuery：筛选状态与索引口径', () => {
       category: undefined,
       agency: undefined,
       keyword: '意见',
+      month: undefined,
       leadAgencyOnly: false,
       page: 3,
       hasFilter: true,

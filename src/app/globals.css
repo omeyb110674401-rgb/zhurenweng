@@ -739,6 +739,14 @@ body {
   outline-offset: 2px;
 }
 
+/* 统计页表格里的钻取数字（issue #45）：数字本身是链接，保持等宽对齐与可点感 */
+.stat-drill {
+  color: var(--accent);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  font-variant-numeric: tabular-nums;
+}
+
 .stat-table {
   width: 100%;
   border-collapse: collapse;

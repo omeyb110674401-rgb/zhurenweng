@@ -128,7 +128,11 @@ export default async function StatsPage() {
 
       <section className="stats-section" aria-labelledby="stats-trend-title">
         <h2 id="stats-trend-title">公示量月度趋势（最近 {TREND_MONTHS} 个月）</h2>
-        <p className="section-hint">按发布日期所在月份统计（{months[0]} 至 {months[months.length - 1]}）。</p>
+        <p className="section-hint">
+          按发布日期所在月份统计（{months[0]} 至 {months[months.length - 1]}）。
+          点格子里的数字可查看该机关该月发布的条目（条数与格子一致）；点月度合计可查看该月全部条目。
+          小计与总计是求和结果，没有对应的筛选口径，故不可点（issue #45）。
+        </p>
         {trendAgencies.length === 0 ? (
           <EmptyBlock
             testId="stats-trend-empty"
@@ -160,11 +164,25 @@ export default async function StatsPage() {
               {trendAgencies.map(([agency, series]) => (
                 <tr key={agency} data-testid="trend-row">
                   <th scope="row">{agency}</th>
-                  {months.map((month) => (
-                    <td className="stat-num" key={month} data-month={month}>
-                      {series.byMonth.get(month) ?? 0}
-                    </td>
-                  ))}
+                  {months.map((month) => {
+                    const count = series.byMonth.get(month) ?? 0;
+                    return (
+                      <td className="stat-num" key={month} data-month={month}>
+                        {count > 0 ? (
+                          <Link
+                            className="stat-drill"
+                            href={`/?agency=${encodeURIComponent(agency)}&lead=1&month=${month}`}
+                            data-testid="trend-cell-link"
+                            aria-label={`查看${agency} ${month} 发布的 ${count} 条公示`}
+                          >
+                            {count}
+                          </Link>
+                        ) : (
+                          count
+                        )}
+                      </td>
+                    );
+                  })}
                   <td className="stat-num stat-total">{series.total}</td>
                 </tr>
               ))}
@@ -172,7 +190,18 @@ export default async function StatsPage() {
                 <th scope="row">全部机关</th>
                 {monthTotals.map((total, index) => (
                   <td className="stat-num stat-total" key={months[index]}>
-                    {total}
+                    {total > 0 ? (
+                      <Link
+                        className="stat-drill"
+                        href={`/?month=${months[index]}`}
+                        data-testid="trend-month-link"
+                        aria-label={`查看 ${months[index]} 发布的 ${total} 条公示`}
+                      >
+                        {total}
+                      </Link>
+                    ) : (
+                      total
+                    )}
                   </td>
                 ))}
                 <td className="stat-num stat-total">

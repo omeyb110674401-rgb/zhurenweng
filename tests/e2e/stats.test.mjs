@@ -314,9 +314,10 @@ function parseTrendRows(html) {
   return [...html.matchAll(/data-testid="trend-row">([\s\S]*?)<\/tr>/g)].map((match) => {
     const block = match[1];
     const agency = /<th scope="row">([^<]+)<\/th>/.exec(block)[1];
-    const cells = [...block.matchAll(/<td class="stat-num" data-month="[^"]*">(\d+)<\/td>/g)].map(
-      (cell) => Number(cell[1]),
-    );
+    // 格子内容自 issue #45 起可能是钻取链接（非零格子），数字要从链接文本里取
+    const cells = [
+      ...block.matchAll(/<td class="stat-num" data-month="([^"]*)">([\s\S]*?)<\/td>/g),
+    ].map((cell) => Number(/(\d+)/.exec(cell[2].replace(/<[^>]*>/g, ''))?.[1] ?? 0));
     const total = Number(/<td class="stat-num stat-total">(\d+)<\/td>/.exec(block)[1]);
     return { agency, cells, total };
   });
@@ -325,10 +326,47 @@ function parseTrendRows(html) {
 /** 解析月度趋势「全部机关」合计行（→ { monthTotals: [6], grand }）。 */
 function parseTrendTotals(html) {
   const block = /data-testid="trend-total-row">([\s\S]*?)<\/tr>/.exec(html)[1];
-  const cells = [...block.matchAll(/<td class="stat-num stat-total">(\d+)<\/td>/g)].map((cell) =>
-    Number(cell[1]),
-  );
+  const cells = [
+    ...block.matchAll(/<td class="stat-num stat-total">([\s\S]*?)<\/td>/g),
+  ].map((cell) => Number(/(\d+)/.exec(cell[1].replace(/<[^>]*>/g, ''))?.[1] ?? 0));
   return { monthTotals: cells.slice(0, 6), grand: cells[cells.length - 1] };
+}
+
+/** 解析趋势表的格子钻取链接（→ [{ agency, month, count, href }]；只含非零格子）。 */
+function parseTrendDrills(html) {
+  const rows = [...html.matchAll(/data-testid="trend-row">([\s\S]*?)<\/tr>/g)];
+  const result = [];
+  for (const row of rows) {
+    const block = row[1];
+    const agency = /<th scope="row">([^<]+)<\/th>/.exec(block)[1];
+    for (const cell of block.matchAll(
+      /<td class="stat-num" data-month="([^"]*)">([\s\S]*?)<\/td>/g,
+    )) {
+      const link = /<a[^>]*data-testid="trend-cell-link"[^>]*>(\d+)<\/a>/.exec(cell[2]);
+      if (link) {
+        result.push({
+          agency,
+          month: cell[1],
+          count: Number(link[1]),
+          href: (/href="([^"]*)"/.exec(link[0])?.[1] ?? '').replaceAll('&amp;', '&'),
+        });
+      }
+    }
+  }
+  return result;
+}
+
+/** 解析趋势表「全部机关」行的月度合计钻取链接（→ [{ month, count, href }]）。 */
+function parseTrendMonthDrills(html) {
+  const block = /data-testid="trend-total-row">([\s\S]*?)<\/tr>/.exec(html)[1];
+  return [
+    ...block.matchAll(
+      /<td class="stat-num stat-total"[^>]*>\s*(<a[^>]*data-testid="trend-month-link"[^>]*>(\d+)<\/a>)/g,
+    ),
+  ].map((match) => ({
+    count: Number(match[2]),
+    href: (/href="([^"]*)"/.exec(match[1])?.[1] ?? '').replaceAll('&amp;', '&'),
+  }));
 }
 
 /** 解析公示期分布行（→ { bucketKey: count }）。 */
@@ -685,5 +723,54 @@ describe('issue #11：数据统计页与出站点击聚合', () => {
       expected.agencyTotals,
     );
     assert.equal(parseTopClicks(html).length, 3, '重复抓取不得清零或重算点击聚合');
+  });
+
+  it('趋势表每个非零数字都能钻取，且点进去的条数 = 格子数字（issue #45）', async () => {
+    const html = stripSsrComments(await (await fetch(`${app.url}/stats`)).text());
+
+    const cells = parseTrendDrills(html);
+    assert.ok(cells.length >= 3, `趋势表应有可钻取的格子，实际 ${cells.length}`);
+    let checked = 0;
+    for (const cell of cells) {
+      assert.match(
+        cell.href,
+        /^\/\?agency=.+&lead=1&month=\d{4}-\d{2}$/,
+        `格子链接应带机关 + 牵头口径 + 发布月份，实际：${cell.href}`,
+      );
+      const list = stripSsrComments(await (await fetch(`${app.url}${cell.href}`)).text());
+      const got = Number(/筛选后共 (\d+) 条/.exec(list)?.[1] ?? -1);
+      assert.equal(
+        got,
+        cell.count,
+        `${decodeURIComponent(cell.href)} 点进去应恰好 ${cell.count} 条`,
+      );
+      // 筛选状态要看得见：列表页摘要里写着「发布月份：YYYY-MM」
+      assert.match(
+        list,
+        new RegExp(`发布月份：${cell.month}`),
+        '列表页应显示月份筛选摘要（否则读者不知道自己在看什么）',
+      );
+      checked += 1;
+    }
+
+    // 月度合计行：同一月份跨全部机关
+    const monthLinks = parseTrendMonthDrills(html);
+    assert.ok(monthLinks.length >= 3, `月度合计应有可钻取月份，实际 ${monthLinks.length}`);
+    for (const link of monthLinks) {
+      assert.match(link.href, /^\/\?month=\d{4}-\d{2}$/, `月度链接只带月份：${link.href}`);
+      const list = stripSsrComments(await (await fetch(`${app.url}${link.href}`)).text());
+      const got = Number(/筛选后共 (\d+) 条/.exec(list)?.[1] ?? -1);
+      assert.equal(got, link.count, `${link.href} 点进去应恰好 ${link.count} 条`);
+      checked += 1;
+    }
+
+    // 零格子不链：点进去是空态，没有信息量（也不给爬虫多造无界地址）
+    assert.ok(
+      !/<td class="stat-num" data-month="[^"]*">\s*<a[^>]*data-testid="trend-cell-link"[^>]*>0</.test(
+        html,
+      ),
+      '零格子不该是链接',
+    );
+    assert.ok(checked >= 6, `应至少核对 6 个数字，实际 ${checked}`);
   });
 });

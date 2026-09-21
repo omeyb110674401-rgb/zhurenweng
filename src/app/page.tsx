@@ -65,6 +65,11 @@ interface FilterState {
   agency?: string;
   keyword?: string;
   /**
+   * 发布月份（YYYY-MM，issue #45）：统计页「公示量月度趋势」表的钻取口径。
+   * 与统计页聚合同口径（按**发布**月份分组），否则「点进去的条数 = 表格数字」不成立。
+   */
+  month?: string;
+  /**
    * 机关筛选只算牵头机关（issue #36）：统计页的钻取链接带 `lead=1` 进来，
    * 与「各部门公示量」同一口径（联合发文只归牵头机关，否则各部门之和会超过总数）。
    * 从下拉框自己选的机关不带这个参数 —— 那时是「任一参与机关」（issue #21）。
@@ -87,6 +92,7 @@ function buildFilterHref(current: FilterState, next: Partial<FilterState>): stri
   // lead 只在有机关筛选时才有意义（无机关时它不改变任何结果）
   if (merged.agency && merged.leadAgencyOnly) search.set('lead', '1');
   if (merged.keyword) search.set('q', merged.keyword);
+  if (merged.month) search.set('month', merged.month);
   if (merged.page !== undefined && merged.page > 1) search.set('page', String(merged.page));
   const qs = search.toString();
   return qs.length > 0 ? `/?${qs}` : '/';
@@ -100,16 +106,23 @@ export default async function HomePage({ searchParams }: HomePageProps) {
     category: query.category,
     agency: query.agency,
     keyword: query.keyword,
+    month: query.month,
     // 只有「带了机关 + lead=1」才算牵头口径；裸 lead=1 不改变任何结果
     leadAgencyOnly: query.leadAgencyOnly,
   };
-  const { category, agency, keyword } = current;
+  const { category, agency, keyword, month } = current;
   const hasFilter = query.hasFilter;
 
   const size = pageSize();
   // 页码先按请求值算偏移；总数拿到后再夹到有效范围（?page=999 落到末页而不是空页）
   const requestedPage = query.page;
-  const filter = { category, agency, keyword, leadAgencyOnly: current.leadAgencyOnly && agency !== undefined };
+  const filter = {
+    category,
+    agency,
+    keyword,
+    publishedMonth: month,
+    leadAgencyOnly: current.leadAgencyOnly && agency !== undefined,
+  };
 
   // 仓库层排序：征求意见中在前、截止日期升序（即将截止在前）、无截止日期靠后；
   // 筛选（issue #9）只过滤行、不改变该顺序。合计与列表共用同一组筛选条件。
@@ -141,6 +154,7 @@ export default async function HomePage({ searchParams }: HomePageProps) {
     category,
     agency ? (current.leadAgencyOnly ? `机关（牵头）：${agency}` : `机关：${agency}`) : '',
     keyword ? `关键词：${keyword}` : '',
+    month ? `发布月份：${month}` : '',
   ]
     .filter(Boolean)
     .join(' · ');
@@ -232,6 +246,7 @@ export default async function HomePage({ searchParams }: HomePageProps) {
           {/* 机关下拉 + 关键词框共用一个 GET 表单；当前领域经隐藏字段保留 */}
           <form className="filter-form" action="/" method="get" data-testid="filter-form">
             {category !== undefined && <input type="hidden" name="category" value={category} />}
+            {month !== undefined && <input type="hidden" name="month" value={month} />}
             <input
               className="filter-keyword"
               type="search"

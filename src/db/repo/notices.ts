@@ -98,6 +98,13 @@ export interface ListNoticesFilteredOptions {
    * 通配符按字面处理（issue #33：`%` / `_` 不再被当成 LIKE 通配）。
    */
   keyword?: string;
+  /**
+   * 发布月份（YYYY-MM）精确到月（issue #45）：统计页趋势表的钻取链接用。
+   * 口径必须与 stats.ts 的 `substr(published_at, 1, 7)` 一致 —— 两处不一致，
+   * 「点进去的条数 = 表格上的数字」就不成立（issue #36 定的不变式）。
+   * 调用方保证格式合法（见 app/_lib/home-query.ts 的 monthParam）。
+   */
+  publishedMonth?: string;
   limit?: number;
   /** 分页偏移（首页分页用；默认 0）。排序是确定性的（见 AGGREGATION_ORDER），
    *  故同一查询条件下 offset 分页不会重复或漏行。 */
@@ -177,6 +184,13 @@ function filterConditions(options: ListNoticesFilteredOptions) {
         eq(notices.agency, options.agency),
         sql`${notices.agencyKeys} like ${options.leadAgencyOnly ? `${agencyPattern}%` : `%${agencyPattern}%`} escape '\\'`,
       ),
+    );
+  }
+  if (options.publishedMonth) {
+    // 月份前缀匹配：published_at 是 ISO 日期字符串，取前 7 位即月份。
+    // 与统计页聚合同一口径（stats.ts 用 substr(published_at, 1, 7)）。
+    conditions.push(
+      sql`${notices.publishedAt} like ${`${likeLiteral(options.publishedMonth)}%`} escape '\\'`,
     );
   }
   if (options.keyword) {
