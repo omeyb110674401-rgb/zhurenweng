@@ -32,10 +32,11 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import * as cheerio from 'cheerio';
+import { CRAWLER_USER_AGENT } from '../src/lib/site-identity.ts';
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const OUT_ROOT = path.join(repoRoot, 'fixtures', 'e2e-mohurd', 'mohurd');
-const UA = 'zhurenweng-crawler/0.1 (+https://cn101.top; gov-notice aggregator)';
+const UA = CRAWLER_USER_AGENT;
 
 /** 列表接口（参数从栏目页 unitbuild.js 的 queryData 原样搬来，见适配器注释）。 */
 const UNIT_API = 'https://www.mohurd.gov.cn/api-gateway/jpaas-publish-server/front/page/build/unit';

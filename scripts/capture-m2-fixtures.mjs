@@ -12,10 +12,11 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import * as cheerio from 'cheerio';
+import { CRAWLER_USER_AGENT } from '../src/lib/site-identity.ts';
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const OUT_ROOT = path.join(repoRoot, 'fixtures', 'e2e-sources');
-const UA = 'zhurenweng-crawler/0.1 (+https://cn101.top; gov-notice aggregator)';
+const UA = CRAWLER_USER_AGENT;
 
 /** 抓取一次，失败重试两次（政府站点偶发连接超时，重跑整脚本代价大）。 */
 async function get(url, attempt = 1) {

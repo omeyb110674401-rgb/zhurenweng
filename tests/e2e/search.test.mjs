@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { after, before, describe, it } from 'node:test';
 import { startAppServer } from './helpers/app-server.mjs';
 import { createFixtureServer } from './helpers/fixture-server.mjs';
+import { noticeItems } from './helpers/html.mjs';
 
 /**
  * E2E（issue #8）：Meilisearch 全文检索与搜索 UI（测试走 local SearchPort，
@@ -85,16 +86,6 @@ function stripSsrComments(html) {
   return html.replaceAll('<!-- -->', '');
 }
 
-/** 从结果页 HTML 提取条目块（<li data-testid="notice-item">…</li>）。 */
-function extractNoticeItems(html) {
-  const items = [];
-  const pattern = /<li[^>]*data-testid="notice-item"[^>]*>[\s\S]*?<\/li>/g;
-  for (const match of html.matchAll(pattern)) {
-    items.push(match[0]);
-  }
-  return items;
-}
-
 before(async () => {
   // 测试私有 fixture 副本：更新场景会改写渔业法详情页，不动仓库 fixtures/
   fs.cpSync(path.join(repoRoot, 'fixtures', 'npc'), path.join(tempFixturesDir, 'npc'), {
@@ -144,7 +135,7 @@ describe('issue #8：抓取 → 索引 → 搜索命中（SearchPort local）', 
     assert.match(html, /data-testid="search-query-text"[^>]*>道路交通安全法/);
     assert.match(html, /data-testid="search-result-count"[^>]*>共 1 条/);
 
-    const items = extractNoticeItems(html);
+    const items = noticeItems(html);
     assert.equal(items.length, 1);
     assert.ok(
       items[0].includes(TITLES.open2),
@@ -167,7 +158,7 @@ describe('issue #8：抓取 → 索引 → 搜索命中（SearchPort local）', 
     const html = stripSsrComments(
       await (await fetch(`${app.url}/search?q=${encodeURIComponent(BODY_ONLY_KEYWORD)}`)).text(),
     );
-    const items = extractNoticeItems(html);
+    const items = noticeItems(html);
     assert.equal(items.length, 3, 'npc 三条正文都含该地址，应恰好命中 3 条');
     for (const title of Object.values(TITLES)) {
       assert.ok(
@@ -180,19 +171,19 @@ describe('issue #8：抓取 → 索引 → 搜索命中（SearchPort local）', 
   it('汉字紧邻数字不切断短语匹配（issue #15 缺陷 1）：纯汉字短语与含数字短语都应命中', async () => {
     // 「北京市西城区前门西大街1号」：短语本身全是汉字，但正文里紧跟数字 ——
     // 索引变换若把「街1号」合成一个词元，短语「前门西大街」就匹配不到（旧实现的实际表现）。
-    const addressItems = extractNoticeItems(
+    const addressItems = noticeItems(
       stripSsrComments(await (await fetch(`${app.url}/search?q=${DIGIT_ADJACENT_PHRASE}`)).text()),
     );
     assert.equal(addressItems.length, 3, 'npc 三条正文都含该地址，应恰好命中 3 条');
 
     // 「征求意见期限为30日」：短语自身含数字，同样不应被切断
-    const digitItems = extractNoticeItems(
+    const digitItems = noticeItems(
       stripSsrComments(await (await fetch(`${app.url}/search?q=${DIGIT_INSIDE_PHRASE}`)).text()),
     );
     assert.equal(digitItems.length, 3, '含数字的正文短语应恰好命中 3 条');
 
     // 只含数字的查询仍按前缀命中（数字与汉字拆开后，「30」能命中「30日」）
-    const numberItems = extractNoticeItems(
+    const numberItems = noticeItems(
       stripSsrComments(await (await fetch(`${app.url}/search?q=30`)).text()),
     );
     assert.equal(numberItems.length, 3, '数字查询应命中三条正文含「30日」的条目');
@@ -200,7 +191,7 @@ describe('issue #8：抓取 → 索引 → 搜索命中（SearchPort local）', 
 
   it('AI 摘要文本可被检索：stub 摘要语「固定测试摘要」命中两条未截止条目', async () => {
     const html = stripSsrComments(await (await fetch(`${app.url}/search?q=固定测试摘要`)).text());
-    const items = extractNoticeItems(html);
+    const items = noticeItems(html);
     assert.equal(items.length, 2, '两条已生成摘要的未截止条目都应命中');
     assert.ok(items.some((item) => item.includes(TITLES.open1)));
     assert.ok(items.some((item) => item.includes(TITLES.open2)));
@@ -223,7 +214,7 @@ describe('issue #8：抓取 → 索引 → 搜索命中（SearchPort local）', 
       assert.match(html, /没有可检索的字符/);
       assert.match(html, /请输入至少一个汉字、字母或数字/);
       assert.match(html, /data-testid="search-result-count"[^>]*>共 0 条/);
-      assert.equal(extractNoticeItems(html).length, 0, '不应渲染任何条目');
+      assert.equal(noticeItems(html).length, 0, '不应渲染任何条目');
     }
   });
 
@@ -232,7 +223,7 @@ describe('issue #8：抓取 → 索引 → 搜索命中（SearchPort local）', 
     assert.match(html, /data-testid="search-empty-state"/);
     assert.match(html, /没有找到与「区块链」相关的公示/);
     assert.match(html, /data-testid="search-result-count"[^>]*>共 0 条/);
-    assert.equal(extractNoticeItems(html).length, 0);
+    assert.equal(noticeItems(html).length, 0);
     assert.ok(!html.includes('search-error-state'), 'local 检索不应触发错误态');
   });
 
@@ -269,7 +260,7 @@ describe('issue #8：抓取 → 索引 → 搜索命中（SearchPort local）', 
     assert.match(run.output, /检索索引已同步 3 条（provider=local）/);
 
     const html = stripSsrComments(await (await fetch(`${app.url}/search?q=${UPDATED_BODY_KEYWORD}`)).text());
-    const items = extractNoticeItems(html);
+    const items = noticeItems(html);
     assert.equal(items.length, 1, '更新后的正文关键词应恰好命中 1 条');
     assert.ok(
       items[0].includes(TITLES.closed),

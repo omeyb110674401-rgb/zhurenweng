@@ -3,6 +3,7 @@ import { currentDriver, getDb } from '../client.ts';
 import { notices, outboundClickDaily } from '../schema/sqlite.ts';
 import { syncNoticeVersionLinks } from './versions.ts';
 import { siteDateIso } from '../../lib/dates.ts';
+import { splitSearchTerms } from '../../lib/search/search-text.ts';
 import { PERIOD_BUCKETS, type PeriodBucketKey } from '../../lib/notice-period.ts';
 import { deriveCategoryTags } from '../../lib/categories.ts';
 import { agencyKeysOf, canonicalAgency, splitAgencies } from '../../lib/agencies.ts';
@@ -121,11 +122,6 @@ export interface ListNoticesFilteredOptions {
   offset?: number;
 }
 
-/**
- * 关键词最多取前 N 个词：粘贴整段话时不必生成几十个 LIKE 条件（超出部分忽略）。
- */
-const KEYWORD_TERM_LIMIT = 10;
-
 /** LIKE 模式串里的字面量：转义 `\` `%` `_`（配合 SQL 侧的 `escape '\'`）。 */
 function likeLiteral(term: string): string {
   return term.replaceAll('\\', '\\\\').replaceAll('%', '\\%').replaceAll('_', '\\_');
@@ -143,17 +139,15 @@ function likeLiteral(term: string): string {
  * 线上实测 `?q=%` 返回全部 178 条、`?q=50%` 返回 12 条（都含「50」）。逐词转义并显式
  * `escape '\'` 后，两种方言（SQLite / PostgreSQL）行为一致。
  *
- * 与搜索页（/search）的口径差异（刻意保留，各有用途）：本函数是子串匹配、不依赖检索索引、
- * 不改变列表的截止日期排序 —— 检索服务不可用时首页筛选照样可用；搜索页走索引（中文按词
- * 切分、英文前缀匹配、按相关度排序，并额外匹配 AI 摘要文本），多词查询会带上只命中部分词
- * 的条目并排在后面。中文**单词**查询两边结果一致。
+ * 与搜索页（/search）的口径（issue #50 统一）：**多词查询两边都是「全部词都要命中」**，
+ * 拆词规则也共用同一份（lib/search/search-text.ts 的 splitSearchTerms）。差别只剩实现
+ * 与排序：本函数是子串匹配、不依赖检索索引、不改变列表的截止日期排序 —— 检索服务不可用
+ * 时首页筛选照样可用；搜索页走索引（中文按词切分、英文前缀匹配、按相关度排序，并额外
+ * 匹配 AI 摘要文本）。此前生产 Meilisearch 默认会把对不上的词丢掉，同一个查询两条路径
+ * 给出两种答案（线上实测 `医疗保障 不存在的词xyz`：搜索页 4 条、首页 0 条）。
  */
 function keywordCondition(keyword: string) {
-  const terms = keyword
-    .split(/\s+/)
-    .map((term) => term.toLowerCase())
-    .filter((term) => term.length > 0)
-    .slice(0, KEYWORD_TERM_LIMIT);
+  const terms = splitSearchTerms(keyword);
   if (terms.length === 0) return undefined;
   return and(
     ...terms.map(

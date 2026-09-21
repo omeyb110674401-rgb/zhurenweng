@@ -14,8 +14,9 @@
  *     worker node scripts/audit-attachment-shape.mjs
  */
 import { Client } from 'pg';
+import { CRAWLER_USER_AGENT } from '../src/lib/site-identity.ts';
 
-const UA = 'zhurenweng-crawler/0.1 (+https://cn101.top; gov-notice aggregator)';
+const UA = CRAWLER_USER_AGENT;
 
 const client = new Client({ connectionString: process.env.DATABASE_URL });
 await client.connect();

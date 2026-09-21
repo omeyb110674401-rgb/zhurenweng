@@ -26,20 +26,29 @@ docker version && docker compose version
 { "registry-mirrors": ["https://docker.m.daocloud.io", "https://docker.1panel.live", "https://hub.rat.dev"] }
 ```
 
-## 2. 获取代码（二选一）
+## 2. 获取代码
 
-**A. 服务器直接克隆**（网络通时最简）
+**A. 服务器直接克隆** —— **当前不可用**：2026-09-21 起 GitHub 账号 `omeyb110674401-rgb`
+被停用（仓库页与 codeload 均 404）。恢复推送通道或换托管后再启用。
 ```bash
 git clone https://github.com/omeyb110674401-rgb/zhurenweng.git /opt/zhurenweng
 ```
 
-**B. 本机打包上传**（GitHub 慢时推荐；在开发机 Git Bash 执行）
+**B. 本机打包上传**（整包通道，当前可用；在开发机 Git Bash 执行）
 ```bash
 cd /d/Projects
 tar --exclude=node_modules --exclude=.next --exclude=.git --exclude=data -czf zhurenweng.tar.gz zhurenweng
 scp zhurenweng.tar.gz root@<公网IP>:/opt/
 ssh root@<公网IP> "mkdir -p /opt/zhurenweng && tar -xzf /opt/zhurenweng.tar.gz -C /opt --strip-components=1"
 ```
+
+**C. 增量同步单个文件**（已上线后改几个文件时用，**当前主用通道**）
+```bash
+bash deploy/sync-files-local.sh src/app/page.tsx src/lib/dates.ts
+```
+逐文件校验 sha256；传完仍需在服务器上重建镜像：
+`cd /opt/zhurenweng && docker compose build web worker && docker compose up -d web worker`。
+通道细节、历史脚本（`deploy-NN.sh`）为何不可用见 `deploy/README.md`。
 
 ## 3. 配置环境变量
 
@@ -116,7 +125,9 @@ docker compose run --rm -e WORKER_ONCE=1 worker npm run worker
 
 ## 8. 日常运维
 
-- **更新**：重新获取代码（`git pull` 或重传 tar 包）→ `docker compose up -d --build`
+- **更新**：增量改几个文件走 `deploy/sync-files-local.sh`（当前主用通道），整包走第 2 节 B；
+  `git pull` 依赖的 GitHub 通道自 2026-09-21 起不可用。传完在服务器上
+  `docker compose build web worker && docker compose up -d web worker`
 - **备份**：卷 `db-data`、`meili-data`（`caddy-data` 建议一并备份，含证书私钥）；
   `docker compose exec db pg_dump -U zhurenweng zhurenweng > backup.sql`
 - **日志**：`docker compose logs -f caddy worker`

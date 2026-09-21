@@ -93,4 +93,43 @@ describe('issue #37：邮件 HTML 转义', () => {
     assert.match(mail.html, /<pre>/, '自家 <pre> 结构保留');
     assert.match(mail.text, /HTTP 500：<html><body>Bad Gateway<\/body><\/html>/);
   });
+
+  it('提醒邮件：href 里的动态值也转义（官方原文 URL 来自源站）', () => {
+    // 同一份规矩的另一半：属性值也是动态值。一个双引号就能跳出 href，把源站数据变成
+    // 邮件正文里的标记与链接 —— issue #50 之前标题与截止日期都转义了，URL 没有。
+    const hostile = 'https://example.gov.cn/a"onmouseover="alert(1)';
+    const mail = buildReminderEmail({
+      email: 'a@example.com',
+      notice: {
+        id: 'x'.repeat(16),
+        sourceId: 'npc',
+        title: '正常标题',
+        agency: '司法部',
+        url: hostile,
+        publishedAt: '2026-09-01',
+        deadlineAt: '2026-09-08',
+        status: 'open',
+        categoryTags: [],
+        bodyText: null,
+        attachments: [],
+        aiSummary: null,
+        summaryModel: null,
+        fetchedAt: '2026-09-01T00:00:00.000Z',
+        outboundClicks: 0,
+        versionOf: null,
+        versionSeq: null,
+        agencyKeys: null,
+      },
+      days: 7,
+      stage: 'd7',
+      unsubscribeToken: 'unsub-token',
+    });
+
+    assert.ok(
+      !mail.html.includes('onmouseover="alert(1)"'),
+      `href 里的引号不应逃出属性：${mail.html}`,
+    );
+    assert.match(mail.html, /href="https:\/\/example\.gov\.cn\/a&quot;onmouseover=&quot;alert\(1\)"/);
+    assert.match(mail.text, /https:\/\/example\.gov\.cn\/a"onmouseover="alert\(1\)/, '纯文本保持字面');
+  });
 });

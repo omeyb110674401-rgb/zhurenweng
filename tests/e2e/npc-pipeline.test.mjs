@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { after, before, describe, it } from 'node:test';
 import { startAppServer } from './helpers/app-server.mjs';
 import { createFixtureServer } from './helpers/fixture-server.mjs';
+import { noticeItems } from './helpers/html.mjs';
 
 /**
  * E2E（issue #3）：首条贯穿全栈的 tracer bullet。
@@ -111,13 +112,11 @@ function extractListItems(html) {
 
 /**
  * 聚合列表自 issue #5 起为多源并存（npc / moj / govcn 条目同页展示）。
- * 按 <li class="notice-item"> 分块提取每条的标题 / 状态徽标 / 倒计时，
+ * 逐条提取标题 / 状态徽标 / 倒计时，
  * 供本场景只对 npc 条目作逐条断言。
  */
 function extractItemBlocks(html) {
-  return html
-    .split(/<li class="notice-item"/)
-    .slice(1)
+  return noticeItems(html)
     .map((block) => block.slice(0, block.indexOf('</li>')))
     .map((block) => ({
       title: (/<a[^>]*notice-title-link[^>]*>([^<]+)<\/a>/.exec(block) ?? [])[1] ?? '',

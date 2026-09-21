@@ -6,6 +6,10 @@ import type { SearchDocument } from '../ports.ts';
  * 检索文本处理（issue #8）：SearchPort 本地实现（SQLite FTS5）与
  * Meilisearch 适配器共用的「文档构建 + 查询归一化」工具。
  *
+ * 第三个消费者是首页关键词筛选与 PG 兜底检索（issue #50）：多词查询的语义
+ * （**全部词都要命中**）与「一个词怎么算」的拆词规则，三条路径共用下面这一份 ——
+ * 此前各写各的，同一个查询在三条路径上给出三种结果。
+ *
  * 中文检索策略（FTS5 unicode61 分词器对连续汉字只建一个长词、无法子串命中）：
  * 索引写入前在汉字与相邻词元字符（汉字 / 字母 / 数字）之间插入空格，让每个汉字
  * 成为独立词元；查询时把用户的中文连续片段还原为同规则的短语（phrase）查询 ——
@@ -53,6 +57,56 @@ const ASCII_ANY = /[A-Za-z0-9]/;
  */
 export function hasSearchableQuery(query: string): boolean {
   return CJK_ANY.test(query) || ASCII_ANY.test(query);
+}
+
+/**
+ * 多词查询的词数上限：够表达意图，又不至于让 WHERE 长出几十个 LIKE 条件
+ * （粘贴整段话时超出部分忽略）。首页筛选与 PG 兜底检索共用这一份。
+ */
+export const SEARCH_TERM_LIMIT = 10;
+
+/**
+ * 查询词拆分：按空白拆、小写归一、丢掉空词、限量。
+ *
+ * 为什么收成一处（issue #50）：**多词查询 = 全部词都要命中** 这条语义在三条路径
+ * 上必须一致 —— 首页筛选（SQL 逐词 LIKE 后 AND）、无 Meilisearch 的 PG 兜底
+ * （应用层逐词包含）、检索索引（Meilisearch `matchingStrategy: 'all'`；FTS5 的
+ * 隐式 AND）。此前「一个词怎么算」各写各的，同一个查询三条路径三种答案：线上实测
+ * `医疗保障 不存在的词xyz` 在 Meilisearch 路径返回 4 条（默认 matchingStrategy
+ * 会把对不上的词逐个丢掉），本地 FTS5 路径返回 0 条。
+ *
+ * 小写归一同时是「大小写不敏感」的保证：SQL 侧对 lower() 比较，应用层对已小写的
+ * 文本比较（见 matchesAllTerms），两边都不再看原串大小写。
+ *
+ * 一个已知例外：**纯标点词元**在 FTS5 索引里不存在（索引只收汉字 / 字母 / 数字），
+ * `buildFts5MatchQuery` 会忽略它，而首页筛选仍要求它出现在标题或正文里。两边都把
+ * 它当「有内容的词」处理是做不到的 —— 索引里没有标点这个词元。
+ */
+export function splitSearchTerms(query: string): string[] {
+  return query
+    .split(/\s+/)
+    .map((term) => term.toLowerCase())
+    .filter((term) => term.length > 0)
+    .slice(0, SEARCH_TERM_LIMIT);
+}
+
+/**
+ * 应用层判据：**全部词**都要在给定字段里出现（大小写不敏感）。
+ *
+ * 与 `splitSearchTerms` 配对使用，是「多词 = 全部词」在应用层的执行者（PG 兜底检索
+ * 与任何拿不到索引的场合）。放在这里而不是适配器里：它是纯字符串判据，与
+ * 「一个词怎么算」同一份定义；也因此在单测里不必把数据库驱动拉进来。
+ *
+ * 大小写不敏感与 SQL 侧的 ILIKE 对齐：曾用区分大小写的 `includes`，含大写的词
+ * （如 `Health`）会被粗筛选中、又在复核里被丢掉 —— 命中数凭空少一截。
+ */
+export function matchesAllTerms(fields: string[], terms: string[]): boolean {
+  const haystack = fields.map((field) => field.toLowerCase());
+  // 词这一侧也归一小写：调用方通常已过 splitSearchTerms，但判据本身要站得住 ——
+  // 否则「大小写不敏感」只在调用方守规矩时才成立。
+  return terms
+    .map((term) => term.toLowerCase())
+    .every((term) => haystack.some((text) => text.includes(term)));
 }
 
 /**

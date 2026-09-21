@@ -102,15 +102,35 @@ function toIso(y: number, m: number, d: number): string | null {
 }
 
 /**
+ * 两个日期之间的日历天数（b − a，b 晚于 a 为正）；任一无法解析返回 null。
+ *
+ * 天数差只此一份实现：公示期长度分布（repo 层）与倒计时（daysUntil）都走这里。
+ * 此前 stats.ts 另写了一份（正则截前 10 位 + Date.UTC，不校验月日范围）—— 两边
+ * 只在日期严格是零填充 YYYY-MM-DD 时一致：`2026-13-45` 这类坏值会被 Date.UTC
+ * 静默归一成另一个真实日期，算出一个看着合理的天数，而日历口径的真相是
+ * 「这个日期不存在」。这里统一走 normalizeDateText，它用回读比对把不存在的
+ * 日期判成 null，与「缺日期不参与统计」同一处理。
+ */
+export function calendarDaysBetween(
+  aText: string | null | undefined,
+  bText: string | null | undefined,
+): number | null {
+  const a = normalizeDateText(aText);
+  const b = normalizeDateText(bText);
+  if (a === null || b === null) return null;
+  return Math.round((isoToUtc(b) - isoToUtc(a)) / DAY_MS);
+}
+
+/** ISO 日期（YYYY-MM-DD）→ UTC 零点的毫秒数：同口径相减，规避时区与夏令时漂移。 */
+function isoToUtc(iso: string): number {
+  const [y, m, d] = iso.split('-').map(Number) as [number, number, number];
+  return Date.UTC(y, m - 1, d);
+}
+
+/**
  * 距离截止日期还剩的日历天数（按站点日历日，东八区）：
  * 今天截止为 0，明天截止为 1；已过为负数；无法解析为 null。
  */
 export function daysUntil(deadlineIso: string | null | undefined, now: Date): number | null {
-  const deadline = normalizeDateText(deadlineIso);
-  if (!deadline) return null;
-  const [y, m, d] = deadline.split('-').map(Number) as [number, number, number];
-  const deadlineUtc = Date.UTC(y, m - 1, d);
-  const [ny, nm, nd] = siteDateIso(now).split('-').map(Number) as [number, number, number];
-  const todayUtc = Date.UTC(ny, nm - 1, nd);
-  return Math.round((deadlineUtc - todayUtc) / DAY_MS);
+  return calendarDaysBetween(siteDateIso(now), deadlineIso);
 }

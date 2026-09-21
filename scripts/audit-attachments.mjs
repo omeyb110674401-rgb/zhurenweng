@@ -16,8 +16,9 @@
  * 只读：仅 SELECT + 对外 HEAD/GET，不写库。
  */
 import { Client } from 'pg';
+import { CRAWLER_USER_AGENT } from '../src/lib/site-identity.ts';
 
-const UA = 'zhurenweng-crawler/0.1 (+https://cn101.top; gov-notice aggregator)';
+const UA = CRAWLER_USER_AGENT;
 const TIMEOUT_MS = 12_000;
 const SPACING_MS = 250;
 

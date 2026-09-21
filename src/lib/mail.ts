@@ -26,7 +26,9 @@ export function appBaseUrl(): string {
 const SITE_FOOTER = '主人翁 · 政府公示与征求意见信息聚合（发现 · 读懂 · 行动）';
 
 /**
- * HTML 转义（issue #37）：**凡是插进 html 正文的动态值都必须过这一层**。
+ * HTML 转义（issue #37）：**凡是插进 html 正文的动态值都必须过这一层**，
+ * 包括 href 里的动态值 —— 属性里一个双引号就能跳出引号、改写整段标记，
+ * 而官方原文链接来自源站、退订链接带用户 token，都不是本站能替其担保的内容。
  *
  * 为什么必须做：邮件正文是手工拼的 HTML 字符串，此前把用户输入与库内数据直接插值 ——
  * 订阅关键词来自表单（`关键词：<b>x</b>` 会被当标签渲染）、错误摘要来自抓取失败的
@@ -211,9 +213,9 @@ export function buildReminderEmail(input: {
     html: [
       `<p>你订阅的公示「${escapeHtml(notice.title)}」征求意见即将截止：</p>`,
       `<p>截止日期：<strong>${escapeHtml(notice.deadlineAt ?? '未标注')}</strong>（还剩 ${days} 天，${STAGE_LABELS[stage]}提醒）</p>`,
-      `<p><a href="${detail}">站内详情（含 AI 摘要与提意指引）</a></p>`,
-      `<p><a href="${notice.url}">官方原文（请前往官方渠道提交意见）</a></p>`,
-      `<p>本提醒按你的订阅规则发送，每条公示截止前 7 天、3 天各提醒一次。不想再收到提醒？<a href="${unsubscribe}">退订（打开页面后点确认）</a>。</p>`,
+      `<p><a href="${escapeHtml(detail)}">站内详情（含 AI 摘要与提意指引）</a></p>`,
+      `<p><a href="${escapeHtml(notice.url)}">官方原文（请前往官方渠道提交意见）</a></p>`,
+      `<p>本提醒按你的订阅规则发送，每条公示截止前 7 天、3 天各提醒一次。不想再收到提醒？<a href="${escapeHtml(unsubscribe)}">退订（打开页面后点确认）</a>。</p>`,
       `<p>——<br>${SITE_FOOTER}</p>`,
     ].join('\n'),
     headers: unsubscribeHeaders(input.unsubscribeToken),

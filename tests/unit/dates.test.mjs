@@ -3,7 +3,13 @@ import { execFileSync } from 'node:child_process';
 import path from 'node:path';
 import { describe, it } from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { daysUntil, normalizeDateText, siteDateIso, siteMonthIso } from '../../src/lib/dates.ts';
+import {
+  calendarDaysBetween,
+  daysUntil,
+  normalizeDateText,
+  siteDateIso,
+  siteMonthIso,
+} from '../../src/lib/dates.ts';
 
 /**
  * 单元：日期归一与倒计时（issue #24 补丁 + issue #40 时区）。
@@ -129,5 +135,43 @@ describe('siteDateIso / siteMonthIso：站点日历日（东八区）', () => {
         `TZ=${tz} 下应给出同样的站点日历日（北京 09-22 00:30 / 09-21 23:30 / 09-22 07:59）`,
       );
     }
+  });
+});
+
+describe('calendarDaysBetween：天数差只有一份实现（issue #50）', () => {
+  it('正向 / 反向 / 同一天 / 跨月跨年', () => {
+    assert.equal(calendarDaysBetween('2026-09-01', '2026-09-08'), 7);
+    assert.equal(calendarDaysBetween('2026-09-08', '2026-09-01'), -7, 'b 早于 a 为负');
+    assert.equal(calendarDaysBetween('2026-09-01', '2026-09-01'), 0);
+    assert.equal(calendarDaysBetween('2026-12-30', '2027-01-02'), 3, '跨年');
+    assert.equal(calendarDaysBetween('2026-02-27', '2026-03-02'), 3, '跨月（2026 非闰年）');
+  });
+
+  it('缺值与非日期写法返回 null，不猜一个数出来', () => {
+    for (const bad of [null, undefined, '', '不是日期', '2026年9月', '2026-09']) {
+      assert.equal(calendarDaysBetween('2026-09-01', bad), null, `${JSON.stringify(bad)} 应为 null`);
+      assert.equal(calendarDaysBetween(bad, '2026-09-01'), null, `${JSON.stringify(bad)} 应为 null`);
+    }
+  });
+
+  it('不存在的日期是 null，而不是被 Date 静默归一成另一个日子', () => {
+    // 统一实现的直接收益：stats.ts 原先自己写的那份只截前 10 位就交给 Date.UTC，
+    // `2026-13-45` 会被归一成 2027-02-14，于是「公示期长度」算出一个看着合理的数字 ——
+    // 而日历口径的真相是「这个日期不存在」，该条目不参与分布（与缺日期同一处理）。
+    assert.equal(calendarDaysBetween('2026-13-45', '2027-02-14'), null, '13 月 45 日不存在');
+    assert.equal(calendarDaysBetween('2026-02-30', '2026-03-02'), null, '2 月 30 日不存在');
+    assert.equal(calendarDaysBetween('2026-04-31', '2026-05-02'), null, '4 月 31 日不存在');
+  });
+
+  it('斜杠 / 点分 / 中文写法与 normalizeDateText 同口径', () => {
+    assert.equal(calendarDaysBetween('2026/09/01', '2026.09.08'), 7);
+    assert.equal(calendarDaysBetween('2026年9月1日', '2026-09-08'), 7);
+  });
+
+  it('daysUntil 与它同源：倒计时就是「今天 → 截止日期」的天数差', () => {
+    const now = new Date('2026-09-01T02:00:00Z'); // 北京 09-01 10:00
+    assert.equal(daysUntil('2026-09-08', now), 7);
+    assert.equal(daysUntil('2026-09-08', now), calendarDaysBetween(siteDateIso(now), '2026-09-08'));
+    assert.equal(daysUntil('2026-08-30', now), -2, '已过为负');
   });
 });

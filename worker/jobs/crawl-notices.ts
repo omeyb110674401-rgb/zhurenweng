@@ -5,6 +5,7 @@ import { getNoticeById, upsertNotice } from '../../src/db/repo/notices.ts';
 import { getSourceById, recordSourceFailure, upsertSource } from '../../src/db/repo/sources.ts';
 import { syncNoticesToSearchIndex } from '../../src/lib/search/sync.ts';
 import { siteDateIso } from '../../src/lib/dates.ts';
+import { CRAWLER_USER_AGENT } from '../../src/lib/site-identity.ts';
 import {
   sourceAdapters,
   type NormalizedNotice,
@@ -53,14 +54,14 @@ const MAX_REDIRECT_HOPS = 5;
  */
 const DETAIL_FETCH_INTERVAL_MS = 400;
 /**
- * 爬虫 UA（HTTP 头只能是 ByteString，必须保持 ASCII）。
+ * 爬虫 UA：与审计 / 快照脚本（scripts/*.mjs）共用同一份常量。
  *
- * 联系地址指向**本站**而不是代码仓库：UA 里的 URL 是给源站运维看的 ——
- * 他们若因流量来查我们是谁，落到一个能说明来意的页面上才有意义。
- * （原先是 GitHub 仓库地址，2026-09-21 该账号被停用、链接 404；抓取脚本里
- * 早已统一用本站地址，这里跟上。）
+ * 为什么收成一处：那串 UA 原先在 6 个文件里各写一遍，改一处漏一处就会让源站
+ * 收到指向死主机的联系地址 —— 2026-09-21 就是这么发生的（UA 里还写着已 404 的
+ * 仓库地址）。语义（为什么联系地址指本站、为什么是常量而非 SITE_URL）见
+ * src/lib/site-identity.ts。
  */
-const USER_AGENT = 'zhurenweng-crawler/0.1 (+https://cn101.top; gov-notice aggregator)';
+const USER_AGENT = CRAWLER_USER_AGENT;
 
 /** 两行小工具：等待若干毫秒（礼貌间隔，见 DETAIL_FETCH_INTERVAL_MS）。 */
 function sleep(ms: number): Promise<void> {

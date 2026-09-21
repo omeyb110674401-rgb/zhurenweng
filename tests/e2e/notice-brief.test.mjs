@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { after, before, describe, it } from 'node:test';
 import { startAppServer } from './helpers/app-server.mjs';
 import { createFixtureServer } from './helpers/fixture-server.mjs';
-import { cellNumber, stripSsrComments as stripComments } from './helpers/html.mjs';
+import { noticeItems, cellNumber, stripSsrComments as stripComments } from './helpers/html.mjs';
 
 /**
  * E2E（issue #27）：详情页的「结构化速读」与「意见提交方式」。
@@ -75,7 +75,7 @@ function stripSsrComments(html) {
 /** 取指定标题条目的详情页 HTML。 */
 async function detailOf(title) {
   const list = await (await fetch(`${app.url}/`)).text();
-  const blocks = list.split(/<li class="notice-item"/).slice(1);
+  const blocks = noticeItems(list);
   for (const block of blocks) {
     const anchor = /<a[^>]*notice-title-link[^>]*href="([^"]+)"[^>]*>([^<]+)<\/a>/.exec(block);
     if (anchor && anchor[2].trim() === title) {

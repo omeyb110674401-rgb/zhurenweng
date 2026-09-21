@@ -3,6 +3,8 @@ import { describe, it } from 'node:test';
 import {
   buildFts5MatchQuery,
   hasSearchableQuery,
+  matchesAllTerms,
+  splitSearchTerms,
   toCjkSpacedText,
 } from '../../src/lib/search/search-text.ts';
 import { MeilisearchSearch } from '../../src/lib/search/meilisearch-search.ts';
@@ -128,6 +130,7 @@ describe('issue #32：无词元查询（纯标点）', () => {
     assert.equal(body.q, '征求意见');
     assert.equal(body.page, 2);
     assert.equal(body.hitsPerPage, 50);
+    assert.equal(body.matchingStrategy, 'all', '多词查询必须全部词命中（issue #50）');
     // total 取精确 totalHits，而不是本页条数（issue #31）
     assert.equal(result.total, 176);
     assert.deepEqual(
@@ -135,5 +138,44 @@ describe('issue #32：无词元查询（纯标点）', () => {
       ['a'.repeat(16), 'b'.repeat(16)],
       '形状异常的命中应被丢掉而不是让整页崩掉',
     );
+  });
+});
+
+describe('issue #50：多词查询 = 全部词命中（三条路径同口径）', () => {
+  it('splitSearchTerms：按空白拆、小写归一、丢空词、限量', () => {
+    assert.deepEqual(splitSearchTerms('医疗保障 监督检查'), ['医疗保障', '监督检查']);
+    assert.deepEqual(splitSearchTerms('  Health   DATA '), ['health', 'data'], '大小写归一');
+    assert.deepEqual(splitSearchTerms(' \t\n '), [], '纯空白没有词');
+    assert.deepEqual(splitSearchTerms('《》 医疗保障'), ['《》', '医疗保障'], '标点也算一个词');
+    assert.equal(
+      splitSearchTerms(Array.from({ length: 30 }, () => '词').join(' ')).length,
+      10,
+      '最多 10 个词（粘贴整段话不该长出几十个 LIKE）',
+    );
+  });
+
+  it('matchesAllTerms：全部词都要出现，大小写不敏感', () => {
+    const fields = ['关于医疗保障基金使用监督管理的通知', '正文内容', 'Health Insurance'];
+    assert.equal(matchesAllTerms(fields, ['医疗保障']), true);
+    assert.equal(matchesAllTerms(fields, ['医疗保障', '基金']), true, '跨词 AND');
+    assert.equal(
+      matchesAllTerms(fields, ['医疗保障', '不存在的词xyz']),
+      false,
+      '缺一个词就不算命中（Meilisearch 默认的 last 会丢掉它，于是返回 4 条）',
+    );
+    assert.equal(matchesAllTerms(fields, ['health']), true, '大小写不敏感（与 SQL 侧 ILIKE 对齐）');
+    assert.equal(matchesAllTerms(fields, ['正文', 'Insurance']), true, '命中可以分散在不同字段');
+    assert.equal(matchesAllTerms(fields, []), true, '没有词就不筛（调用方保证词非空）');
+  });
+
+  it('Meilisearch 请求带 matchingStrategy: all，且查询原样送出', async () => {
+    const fetchImpl = recordingFetch(fakeResponse({ payload: { hits: [], totalHits: 0 } }));
+    const port = new MeilisearchSearch({ ...CONFIG, fetchImpl });
+    await port.search('医疗保障 不存在的词xyz', { page: 1, perPage: 50 });
+
+    assert.equal(fetchImpl.calls.length, 1);
+    const body = JSON.parse(fetchImpl.calls[0].init.body);
+    assert.equal(body.matchingStrategy, 'all', '必须要求全部词命中');
+    assert.equal(body.q, '医疗保障 不存在的词xyz', '查询原样送出，语义由 matchingStrategy 决定');
   });
 });

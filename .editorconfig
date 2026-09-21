@@ -1,0 +1,17 @@
+root = true
+
+# 与 .gitattributes 的 eol=lf 对齐：编辑器保存时也写 LF，别让 IDE 把 CRLF 写回来。
+[*]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+indent_style = space
+indent_size = 2
+trim_trailing_whitespace = true
+
+# Markdown 的行尾双空格是换行语义，不能裁掉
+[*.md]
+trim_trailing_whitespace = false
+
+[Makefile]
+indent_style = tab

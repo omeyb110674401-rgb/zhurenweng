@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { after, before, describe, it } from 'node:test';
 import { startAppServer } from './helpers/app-server.mjs';
 import { createFixtureServer } from './helpers/fixture-server.mjs';
+import { noticeItems } from './helpers/html.mjs';
 
 /**
  * E2E（issue #31）：搜索结果的分页与「共 N 条」必须如实。
@@ -69,16 +70,9 @@ function stripSsrComments(html) {
   return html.replaceAll('<!-- -->', '');
 }
 
-/** 结果页 HTML → 条目块列表。 */
-function extractNoticeItems(html) {
-  return [...html.matchAll(/<li[^>]*data-testid="notice-item"[^>]*>[\s\S]*?<\/li>/g)].map(
-    (match) => match[0],
-  );
-}
-
 /** 结果页 HTML → 条目详情链接（去重前，用于查重）。 */
 function itemHrefs(html) {
-  return extractNoticeItems(html).map(
+  return noticeItems(html).map(
     (item) => (/href="(\/notices\/[0-9a-f]+)"/.exec(item) ?? [])[1] ?? '',
   );
 }
@@ -156,7 +150,7 @@ describe('issue #31：搜索结果总数与分页', () => {
     firstPage = await fetchSearch(new URLSearchParams({ q: QUERY }).toString());
     total = totalFrom(firstPage);
 
-    const items = extractNoticeItems(firstPage);
+    const items = noticeItems(firstPage);
     assert.equal(items.length, PER_PAGE, `第 1 页应恰好 ${PER_PAGE} 条`);
     assert.ok(
       total > PER_PAGE,
@@ -192,7 +186,7 @@ describe('issue #31：搜索结果总数与分页', () => {
     assert.ok(seen.every((href) => href !== ''), '每个条目都应有详情链接');
     // 末页是余数：总数对每页条数取模（整除时末页满页）
     const lastPageCount = total % PER_PAGE === 0 ? PER_PAGE : total % PER_PAGE;
-    const lastPageItems = extractNoticeItems(html);
+    const lastPageItems = noticeItems(html);
     assert.equal(lastPageItems.length, lastPageCount, '末页条数应为余数');
     assert.deepEqual(pageStatus(html), [Math.ceil(total / PER_PAGE), Math.ceil(total / PER_PAGE)]);
     assert.match(html, /data-testid="search-pagination-next-disabled"/, '末页不应有下一页链接');
@@ -217,7 +211,7 @@ describe('issue #31：搜索结果总数与分页', () => {
     const outOfRange = await fetchSearch(new URLSearchParams({ q: QUERY, page: '999' }).toString());
     const totalPages = Math.ceil(total / PER_PAGE);
     assert.deepEqual(pageStatus(outOfRange), [totalPages, totalPages], '应回落到末页');
-    assert.equal(extractNoticeItems(outOfRange).length > 0, true, '末页应有条目');
+    assert.equal(noticeItems(outOfRange).length > 0, true, '末页应有条目');
     assert.doesNotMatch(outOfRange, /data-testid="search-empty-state"/);
   });
 

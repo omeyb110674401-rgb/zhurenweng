@@ -127,6 +127,20 @@ describe('parseHomeQuery：筛选状态与索引口径', () => {
     assert.equal(explicit.to, '2026-06');
   });
 
+  it('半区间 + 别名：别名不补另一侧（不凭空造出区间）', () => {
+    // 这是**不变量钉子**，不是修缺陷：旧实现的镜像守卫（`range.to === undefined ? 别名 : undefined`）
+    // 在四种输入下与新实现完全等价，已逐例核对过。issue #50 只是把两个互为镜像的内联条件
+    // 收成一个有名字的 `hasRange` —— 读者不必再自己推「哪一侧缺省时才认别名」。
+    // 钉住的性质：别名只在**两端都没给区间**时生效，绝不会补上缺的那一侧。
+    const halfLower = parseHomeQuery({ from: '2026-01', month: '2026-03' });
+    assert.equal(halfLower.from, '2026-01');
+    assert.equal(halfLower.to, undefined, '上界不该被别名填上');
+
+    const halfUpper = parseHomeQuery({ to: '2026-03', month: '2026-01' });
+    assert.equal(halfUpper.to, '2026-03');
+    assert.equal(halfUpper.from, undefined, '下界不该被别名填上');
+  });
+
   it('lead=1 只在显式传 1 时为真，其余值一律假', () => {
     assert.equal(parseHomeQuery({ lead: '1' }).leadAgencyOnly, true);
     for (const value of ['0', 'true', '', undefined]) {

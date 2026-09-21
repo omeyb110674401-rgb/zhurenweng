@@ -111,11 +111,16 @@ export function parseHomeQuery(params: HomeSearchParams): HomeQuery {
   const category = categoryParam !== undefined && isKnownCategory(categoryParam) ? categoryParam : undefined;
   const agency = firstParam(params.agency);
   const keyword = firstParam(params.q);
-  // 区间优先；没给区间时 `?month=` 折平为 from = to（issue #45 的链接保持有效）
+  // 区间优先；两端都没给时才认旧别名 `?month=`（折平为 from = to，issue #45 的
+  // 旧链接保持有效）。半区间 + 别名的组合**不拼**：`?from=2026-01&month=2026-03`
+  // 若折平上界，就凭空造出一个谁也没要求的区间 —— 与本模块「宁可不筛，也不给
+  // 假空态」的规矩相悖（用户看到的是「发布区间：2026-01 至 2026-03」，而他只
+  // 指定了一个起点和一个互不相干的月份别名）。
   const range = monthRangeParam(params.from, params.to);
-  const legacyMonth = monthParam(params.month);
-  const from = range.from ?? (range.to === undefined ? legacyMonth : undefined);
-  const to = range.to ?? (range.from === undefined ? legacyMonth : undefined);
+  const hasRange = range.from !== undefined || range.to !== undefined;
+  const legacyMonth = hasRange ? undefined : monthParam(params.month);
+  const from = range.from ?? legacyMonth;
+  const to = range.to ?? legacyMonth;
   const period = periodParam(params.period);
   return {
     category,

@@ -1,4 +1,4 @@
-import { ilike, inArray, or, sql } from 'drizzle-orm';
+import { and, ilike, inArray, or, sql } from 'drizzle-orm';
 import { currentDriver, getDb } from '../../db/client.ts';
 import { notices } from '../../db/schema/sqlite.ts';
 import {
@@ -8,7 +8,14 @@ import {
   type SearchPort,
   type SearchResult,
 } from '../ports.ts';
-import { buildFts5MatchQuery, hasSearchableQuery, summarySearchText, toCjkSpacedText } from './search-text.ts';
+import {
+  buildFts5MatchQuery,
+  hasSearchableQuery,
+  matchesAllTerms,
+  splitSearchTerms,
+  summarySearchText,
+  toCjkSpacedText,
+} from './search-text.ts';
 
 /**
  * SearchPort 本地实现（issue #8，ADR-0001 第 2 条）：开发 / 测试默认检索后端，
@@ -135,9 +142,16 @@ export class LocalSearch implements SearchPort {
   }
 
   /**
-   * PostgreSQL：ILIKE 退化查询（标题 / 正文 / AI 摘要 JSON 粗筛）→
+   * PostgreSQL：逐词 ILIKE 退化查询（标题 / 正文 / AI 摘要 JSON 粗筛，词间 AND）→
    * 应用层按 FTS 同款字段语义复核（摘要只计各段 text，不计原文引用）→ 取当前页。
    * 无相关性排序，按主键稳定输出。
+   *
+   * 逐词 AND（issue #50）：与首页筛选、FTS5、Meilisearch 同为「全部词都要命中」。
+   * 此前这里拿**整串**当子串匹配（`includes(query)`），多词输入在这条路径上必然
+   * 零命中 —— 同一个查询三条路径三种答案。
+   *
+   * 粗筛与复核都必须大小写不敏感：SQL 侧是 ILIKE，而应用层此前用区分大小写的
+   * `includes`，于是「Health」这类含大写的词会被粗筛选中、又在复核里被丢掉。
    *
    * `total` 取复核后的命中数；候选行触及 PG_CANDIDATE_LIMIT 时它是**下界**
    * （复核无法在 SQL 里表达，只能在候选集上做）—— 本部署规模（数百条）不会触及，
@@ -149,7 +163,8 @@ export class LocalSearch implements SearchPort {
     perPage: number,
   ): Promise<SearchResult> {
     const db = await getDb();
-    const pattern = likePattern(query);
+    const terms = splitSearchTerms(query);
+    if (terms.length === 0) return { total: 0, hits: [] };
     const rows = await db
       .select({
         id: notices.id,
@@ -159,21 +174,23 @@ export class LocalSearch implements SearchPort {
       })
       .from(notices)
       .where(
-        or(
-          ilike(notices.title, pattern),
-          ilike(notices.bodyText, pattern),
-          ilike(notices.aiSummaryJson, pattern),
+        and(
+          ...terms.map((term) =>
+            or(
+              ilike(notices.title, likePattern(term)),
+              ilike(notices.bodyText, likePattern(term)),
+              ilike(notices.aiSummaryJson, likePattern(term)),
+            ),
+          ),
         ),
       )
       .limit(PG_CANDIDATE_LIMIT);
-    const matched = rows.filter((row) => {
-      const summary = summarySearchText(safeParse(row.aiSummaryJson));
-      return (
-        row.title.includes(query) ||
-        (row.bodyText ?? '').includes(query) ||
-        summary.includes(query)
-      );
-    });
+    const matched = rows.filter((row) =>
+      matchesAllTerms(
+        [row.title, row.bodyText ?? '', summarySearchText(safeParse(row.aiSummaryJson))],
+        terms,
+      ),
+    );
     const offset = (page - 1) * perPage;
     return {
       total: matched.length,
@@ -184,9 +201,10 @@ export class LocalSearch implements SearchPort {
   }
 }
 
-/** ILIKE 模式串：转义 % _ 与转义符本身，保证用户输入按字面子串匹配 */
-function likePattern(query: string): string {
-  return `%${query.replaceAll(/[\\%_]/g, '\\$&')}%`;
+/**
+ * ILIKE 模式串：转义 % _ 与转义符本身，保证用户输入按字面子串匹配 */
+function likePattern(term: string): string {
+  return `%${term.replaceAll(/[\\%_]/g, '\\$&')}%`;
 }
 
 function safeParse(text: string | null): unknown {

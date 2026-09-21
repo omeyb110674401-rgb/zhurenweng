@@ -817,8 +817,8 @@ describe('issue #11：数据统计页与出站点击聚合', () => {
     for (const cell of cells) {
       assert.match(
         cell.href,
-        /^\/\?agency=.+&lead=1&month=\d{4}-\d{2}$/,
-        `格子链接应带机关 + 牵头口径 + 发布月份，实际：${cell.href}`,
+        /^\/\?agency=.+&lead=1&from=\d{4}-\d{2}&to=\d{4}-\d{2}$/,
+        `格子链接应带机关 + 牵头口径 + 发布月份（区间写法，from = to），实际：${cell.href}`,
       );
       const list = stripSsrComments(await (await fetch(`${app.url}${cell.href}`)).text());
       const got = Number(/筛选后共 (\d+) 条/.exec(list)?.[1] ?? -1);
@@ -840,7 +840,11 @@ describe('issue #11：数据统计页与出站点击聚合', () => {
     const monthLinks = parseTrendMonthDrills(html);
     assert.ok(monthLinks.length >= 3, `月度合计应有可钻取月份，实际 ${monthLinks.length}`);
     for (const link of monthLinks) {
-      assert.match(link.href, /^\/\?month=\d{4}-\d{2}$/, `月度链接只带月份：${link.href}`);
+      assert.match(
+        link.href,
+        /^\/\?from=\d{4}-\d{2}&to=\d{4}-\d{2}$/,
+        `月度链接用区间写法（from = to），不再产出 ?month= 别名：${link.href}`,
+      );
       const list = stripSsrComments(await (await fetch(`${app.url}${link.href}`)).text());
       const got = Number(/筛选后共 (\d+) 条/.exec(list)?.[1] ?? -1);
       assert.equal(got, link.count, `${link.href} 点进去应恰好 ${link.count} 条`);
@@ -884,5 +888,29 @@ describe('issue #11：数据统计页与出站点击聚合', () => {
     checked += 1;
 
     assert.ok(checked >= 12, `应至少核对 12 个数字，实际 ${checked}`);
+  });
+
+  it('钻取进来的牵头口径在筛选表单里被留住（issue #50）', async () => {
+    const html = stripSsrComments(await (await fetch(`${app.url}/stats`)).text());
+    const agency = parseAgencyTotals(html)[0];
+    assert.ok(agency.href.includes('lead=1'), `机关钻取链接应带牵头口径：${agency.href}`);
+
+    // 钻取进去的列表页：表单必须把 lead=1 一起提交。否则用户不改机关、只填个关键词点
+    // 「筛选」，口径就静默退回「任一参与机关」，条数当场变化（线上实测发改委 25 → 26）。
+    const lead = stripSsrComments(await (await fetch(`${app.url}${agency.href}`)).text());
+    assert.match(lead, /机关（牵头）：/, '列表页摘要要说明当前是牵头口径');
+    const form = /<form[^>]*data-testid="filter-form"[\s\S]*?<\/form>/.exec(lead)?.[0] ?? '';
+    assert.match(
+      form,
+      /<input type="hidden" name="lead" value="1"/,
+      '牵头口径应作为隐藏字段随表单提交（否则筛选控件在说谎）',
+    );
+
+    // 反向：没带牵头口径的机关筛选不该凭空多出这个字段
+    const plain = stripSsrComments(
+      await (await fetch(`${app.url}/?agency=${encodeURIComponent(agency.agency)}`)).text(),
+    );
+    const plainForm = /<form[^>]*data-testid="filter-form"[\s\S]*?<\/form>/.exec(plain)?.[0] ?? '';
+    assert.ok(!plainForm.includes('name="lead"'), '未带牵头口径的页面不该写 lead 隐藏字段');
   });
 });

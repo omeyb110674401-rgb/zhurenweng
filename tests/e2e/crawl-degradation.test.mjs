@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { after, before, describe, it } from 'node:test';
 import { startAppServer } from './helpers/app-server.mjs';
 import { createFixtureServer } from './helpers/fixture-server.mjs';
+import { noticeItems } from './helpers/html.mjs';
 
 /**
  * E2E（issue #30）：抓取降级 —— 详情抓取失败**不得覆盖**已入库的详情层数据。
@@ -76,9 +77,7 @@ function stripSsrComments(html) {
 /** 首页里该条目的链接与状态徽标。 */
 async function listBlock() {
   const home = stripSsrComments(await (await fetch(`${app.url}/`)).text());
-  const block = home
-    .split(/<li class="notice-item"/)
-    .slice(1)
+  const block = noticeItems(home)
     .map((chunk) => chunk.slice(0, chunk.indexOf('</li>')))
     .find((chunk) => chunk.includes(TITLE));
   assert.ok(block, `首页应含条目「${TITLE}」`);

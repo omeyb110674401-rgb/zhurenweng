@@ -13,6 +13,23 @@
  * 只放纯字符串工具，不引入任何依赖（ADR-0001：e2e 零外部依赖）。
  */
 
+/**
+ * 列表页 → 条目块数组（每条一个 `<li …>…</li>` 片段）。
+ *
+ * 为什么收成一处：**12 个 e2e 文件各自写了一遍**「按 `<li class="notice-item"` 切块」
+ * （`split(...).slice(1)` 与 `matchAll(...)` 两种写法）。列表项一旦改标记，要同时改
+ * 12 处，漏一处就是「解析不到 → 断言报出看不懂的错」。字段提取仍留在各文件里
+ * （各测各的字段），这里只固定**什么算一条**。
+ *
+ * 匹配 `data-testid="notice-item"` 而不是 class：testid 是本仓库 e2e 的稳定契约
+ * （`notice-item.tsx` 上两个属性都有），class 是样式细节，改版式时容易跟着动。
+ */
+export function noticeItems(html) {
+  return [...String(html).matchAll(/<li[^>]*data-testid="notice-item"[^>]*>[\s\S]*?<\/li>/g)].map(
+    (match) => match[0],
+  );
+}
+
 /** React SSR 在「文本 + 表达式」混排处插入 `<!-- -->` 注释，文本断言前剥掉。 */
 export function stripSsrComments(html) {
   return html.replaceAll('<!-- -->', '');

@@ -13,6 +13,7 @@ import {
   robotsMeta,
   stripSsrComments as stripComments,
 } from './helpers/html.mjs';
+import { noticeItems } from './helpers/html.mjs';
 
 /**
  * E2E（issue #19）：首页分页与真实合计。
@@ -78,11 +79,9 @@ function stripSsrComments(html) {
   return stripComments(html);
 }
 
-/** 按 <li class="notice-item"> 分块取标题（页面展示顺序）。 */
+/** 列表条目 → 标题（页面展示顺序）。 */
 function itemTitles(html) {
-  return html
-    .split(/<li class="notice-item"/)
-    .slice(1)
+  return noticeItems(html)
     .map((block) => block.slice(0, block.indexOf('</li>')))
     .map((block) => (/<a[^>]*notice-title-link[^>]*>([^<]+)<\/a>/.exec(block) ?? [])[1] ?? '');
 }

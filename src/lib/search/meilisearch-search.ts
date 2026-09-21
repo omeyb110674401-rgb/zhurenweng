@@ -103,7 +103,16 @@ export class MeilisearchSearch implements SearchPort {
         : SEARCH_DEFAULT_PER_PAGE;
     const response = await this.request(`/indexes/${this.indexUid}/search`, {
       method: 'POST',
-      body: JSON.stringify({ q: trimmed, page, hitsPerPage: perPage }),
+      body: JSON.stringify({
+        q: trimmed,
+        page,
+        hitsPerPage: perPage,
+        // 多词查询必须**全部词命中**（issue #50）：默认的 `matchingStrategy: 'last'`
+        // 会把对不上的词逐个丢掉 —— 线上实测 `医疗保障 不存在的词xyz` 返回 4 条
+        // （等于只搜了「医疗保障」），而本地 FTS5 路径对同一查询返回 0 条：同一个
+        // 查询两条路径两种答案（#32 的教训）。与首页筛选（#33 的逐词 AND）同口径。
+        matchingStrategy: 'all',
+      }),
     });
     const payload = (await response.json()) as { hits?: unknown; totalHits?: unknown };
     if (!Array.isArray(payload.hits)) return { total: 0, hits: [] };

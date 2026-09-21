@@ -30,10 +30,11 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import * as cheerio from 'cheerio';
+import { CRAWLER_USER_AGENT } from '../src/lib/site-identity.ts';
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const OUT_ROOT = path.join(repoRoot, 'fixtures', 'e2e-cac', 'cac');
-const UA = 'zhurenweng-crawler/0.1 (+https://cn101.top; gov-notice aggregator)';
+const UA = CRAWLER_USER_AGENT;
 const SITE = 'https://www.cac.gov.cn';
 const LIST_URL = `${SITE}/hdfw/wxan/A093802index_1.htm`;
 

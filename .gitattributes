@@ -1,0 +1,9 @@
+# 换行符统一：仓库内一律以 LF 存储与检出（eol=lf）。
+#
+# 为什么显式声明而不是靠 core.autocrlf：开发机是 Windows（autocrlf=true，检出时
+# 写 CRLF），容器是 Linux。两侧换行不同会带来两个真实代价 ——
+#   1. 「改一行」在 diff 里显示成整文件重写（src/db/repo/stats.ts 曾因存储为 CRLF
+#      而长期不可评审：任何一行改动都表现为 215 行全变）；
+#   2. shell 脚本带到 Linux 侧会因行尾 \r 报 bad interpreter。
+# text=auto 让 git 按内容判断文本 / 二进制，二进制文件不做转换。
+* text=auto eol=lf

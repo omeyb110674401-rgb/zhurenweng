@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { after, before, describe, it } from 'node:test';
 import { startAppServer } from './helpers/app-server.mjs';
 import { createFixtureServer } from './helpers/fixture-server.mjs';
-import { stripSsrComments as stripComments } from './helpers/html.mjs';
+import { noticeItems, stripSsrComments } from './helpers/html.mjs';
 
 /**
  * E2E（issue #43）：状态列每日一轮，页面不能因此说已关闭的征集还能提意见。
@@ -53,15 +53,9 @@ function runWorkerOnce() {
   });
 }
 
-function stripSsrComments(html) {
-  return stripComments(html);
-}
-
 /** 列表页 → 条目数组（标题 / 详情链接 / 徽标 / 倒计时文案）。 */
 function listItems(html) {
-  return html
-    .split('<li class="notice-item"')
-    .slice(1)
+  return noticeItems(html)
     .map((block) => block.slice(0, block.indexOf('</li>')))
     .map((chunk) => ({
       href: /href="(\/notices\/[0-9a-f]+)"/.exec(chunk)?.[1] ?? null,

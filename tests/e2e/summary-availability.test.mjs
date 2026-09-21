@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { after, before, describe, it } from 'node:test';
 import { startAppServer } from './helpers/app-server.mjs';
 import { createFixtureServer } from './helpers/fixture-server.mjs';
+import { noticeItems } from './helpers/html.mjs';
 
 /**
  * E2E（issue #22）：AI 摘要区的可用性门控。
@@ -61,7 +62,7 @@ function runWorkerOnce() {
 
 /** 从列表页取指定标题条目的详情链接。 */
 function hrefOf(html, title) {
-  const blocks = html.split(/<li class="notice-item"/).slice(1);
+  const blocks = noticeItems(html);
   for (const block of blocks) {
     const anchor = /<a[^>]*notice-title-link[^>]*href="([^"]+)"[^>]*>([^<]+)<\/a>/.exec(block);
     if (anchor && anchor[2].trim() === title) return anchor[1];

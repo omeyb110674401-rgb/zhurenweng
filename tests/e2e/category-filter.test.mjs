@@ -8,6 +8,7 @@ import { after, before, describe, it } from 'node:test';
 import { startAppServer } from './helpers/app-server.mjs';
 import { createFixtureServer } from './helpers/fixture-server.mjs';
 import { stripSsrComments as stripComments } from './helpers/html.mjs';
+import { noticeItems } from './helpers/html.mjs';
 
 /**
  * E2E（issue #9）：领域标签自动打标 + 列表页分类/机关/关键词筛选。
@@ -130,16 +131,6 @@ function stripSsrComments(html) {
   return stripComments(html);
 }
 
-/** 从结果页 HTML 提取条目块（<li data-testid="notice-item">…</li>）。 */
-function extractNoticeItems(html) {
-  const items = [];
-  const pattern = /<li[^>]*data-testid="notice-item"[^>]*>[\s\S]*?<\/li>/g;
-  for (const match of html.matchAll(pattern)) {
-    items.push(match[0]);
-  }
-  return items;
-}
-
 /** 条目块 → 标题文本（notice-title-link 的子文本）。 */
 function itemTitle(item) {
   const match = /data-testid="notice-title-link"[^>]*>([^<]*)<\/a>/.exec(item);
@@ -155,7 +146,7 @@ function itemTags(item) {
 
 /** 结果页 HTML → 条目标题序列（保持渲染顺序 = 倒计时排序）。 */
 function listOrder(html) {
-  return extractNoticeItems(html).map(itemTitle);
+  return noticeItems(html).map(itemTitle);
 }
 
 /** GET 首页（可带 querystring，值自行 encodeURIComponent）并返回剥注释后的 HTML。 */
@@ -204,7 +195,7 @@ describe('issue #9：领域标签自动打标与分类浏览筛选', () => {
     const html = await fetchHome();
     assert.match(html, /data-testid="filter-result-count"[^>]*>共 9 条/, '跨源去重后应恰为 9 条');
 
-    const tagsByTitle = new Map(extractNoticeItems(html).map((item) => [itemTitle(item), itemTags(item)]));
+    const tagsByTitle = new Map(noticeItems(html).map((item) => [itemTitle(item), itemTags(item)]));
     for (const [title, expected] of Object.entries(EXPECTED_TAGS)) {
       assert.deepEqual(
         tagsByTitle.get(title),
@@ -283,7 +274,7 @@ describe('issue #9：领域标签自动打标与分类浏览筛选', () => {
     // fixture 的 mee hdjl 条目正文里含真实形态的「征求意见单位名单」：
     // 「2.国家能源局综合司」含「能源」、「1.工业和信息化部办公厅」含「信息化」
     const html = await fetchHome('/');
-    const item = extractNoticeItems(html).find((block) => itemTitle(block) === TITLES.hedian);
+    const item = noticeItems(html).find((block) => itemTitle(block) === TITLES.hedian);
     assert.ok(item, '列表页应有核动力厂导则条目');
     assert.deepEqual(
       itemTags(item),
@@ -432,7 +423,7 @@ describe('issue #9：领域标签自动打标与分类浏览筛选', () => {
         `「${wildcard}」应作为字面量匹配（fixture 里没有这种字面量，故为空）`,
       );
       assert.match(html, /data-testid="filter-result-count"[^>]*>筛选后共 0 条/);
-      assert.equal(extractNoticeItems(html).length, 0);
+      assert.equal(noticeItems(html).length, 0);
     }
   });
 
@@ -440,7 +431,7 @@ describe('issue #9：领域标签自动打标与分类浏览筛选', () => {
     const html = await fetchHome(`/?q=${encodeURIComponent('区块链')}`);
     assert.match(html, /data-testid="notice-empty-state"/);
     assert.match(html, /data-testid="filter-result-count"[^>]*>筛选后共 0 条/);
-    assert.equal(extractNoticeItems(html).length, 0);
+    assert.equal(noticeItems(html).length, 0);
     assert.match(html, /data-testid="filter-clear"/);
   });
 
@@ -511,7 +502,7 @@ describe('issue #9：领域标签自动打标与分类浏览筛选', () => {
   it('sitemap：lastmod 是内容时间（发布日期），不是我们的抓取时间（issue #44）', async () => {
     const home = await fetchHome();
     const publishedById = new Map(
-      extractNoticeItems(home).map((item) => [
+      noticeItems(home).map((item) => [
         /href="(\/notices\/[0-9a-f]+)"/.exec(item)[1],
         /发布：(\d{4}-\d{2}-\d{2}|未标注)/.exec(item)?.[1] ?? null,
       ]),

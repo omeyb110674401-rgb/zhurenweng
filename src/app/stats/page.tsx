@@ -31,6 +31,47 @@ const PERIOD_LABELS: Record<string, string> = Object.fromEntries(
 );
 
 
+/**
+ * 机关钻取链接：空机关名返回 null。
+ *
+ * 为什么不能照常给链接：`?agency=` 会被首页当成「未传该参数」（home-query.ts 的
+ * firstParam 把空串视作未传），点进去是**未筛选**的全量列表，数字与表格不符。
+ * 与其给一个说谎的链接，不如让那个数字保持不可点 —— issue #36 的规矩是
+ * 「点进去的条数 = 表格上的数字」，不是「每个数字都必须能点」。
+ */
+function agencyDrillHref(agency: string, extra = ''): string | null {
+  return agency === '' ? null : `/?agency=${encodeURIComponent(agency)}&lead=1${extra}`;
+}
+
+/**
+ * 可钻取的数字：能表达出筛选条件且数字非零时渲染成链接，否则退化为纯文本。
+ *
+ * 两处退化各有理由：数字为 0 时点进去必然是空列表，链接只让读者白点一次；
+ * 维度无法用 querystring 表达时（空机关名）给链接就是给假数字（见上）。
+ * 收成一个组件而不是六处 `{n > 0 ? <Link> : n}`：原先趋势表总计那格为了算个和
+ * 还要在 JSX 里写立即执行函数，可读性最差的那一处正是这么来的。
+ */
+function DrillNumber({
+  count,
+  href,
+  testId,
+  label,
+  text,
+}: {
+  count: number;
+  href: string | null;
+  testId: string;
+  label: string;
+  text?: string;
+}) {
+  if (href === null || count === 0) return <>{text ?? count}</>;
+  return (
+    <Link className="stat-drill" href={href} data-testid={testId} aria-label={label}>
+      {text ?? count}
+    </Link>
+  );
+}
+
 export default async function StatsPage() {
   const now = new Date();
   const [overview, agencyTotals, monthlyCounts, periodDistribution, topClicked, clicksByDate] =
@@ -61,6 +102,8 @@ export default async function StatsPage() {
     overview.totalNotices -
     periodDistribution.reduce((sum, bucket) => sum + bucket.count, 0);
   const hasNotices = overview.totalNotices > 0;
+  // 趋势表总计：窗口内各月合计之和（与行小计同源，口径见上方的分桶说明）
+  const grandTotal = monthTotals.reduce((sum, total) => sum + total, 0);
 
   return (
     <main>
@@ -106,26 +149,34 @@ export default async function StatsPage() {
               </tr>
             </thead>
             <tbody>
-              {agencyTotals.map((row: AgencyTotal) => (
-                <tr key={row.agency} data-testid="agency-total-row">
-                  <th scope="row">
-                    {/*
-                      钻取链接（issue #36）：带 lead=1 走**牵头机关**口径 ——
-                      与这张表的口径一致，所以「点进去的条数 = 表格上的数字」。
-                      不带 lead 的话是「任一参与机关」（issue #21），联合发文会让
-                      条数比表格多（实测发改委 25 → 26），看起来像统计出错。
-                    */}
-                    <Link
-                      href={`/?agency=${encodeURIComponent(row.agency)}&lead=1`}
-                      data-testid="agency-total-link"
-                      aria-label={`查看${row.agency}牵头的 ${row.count} 条公示`}
-                    >
-                      {row.agency}
-                    </Link>
-                  </th>
-                  <td className="stat-num">{row.count}</td>
-                </tr>
-              ))}
+              {agencyTotals.map((row: AgencyTotal) => {
+                const href = agencyDrillHref(row.agency);
+                const label = row.agency === '' ? '未标注机关' : row.agency;
+                return (
+                  <tr key={row.agency} data-testid="agency-total-row">
+                    <th scope="row">
+                      {/*
+                        钻取链接（issue #36）：带 lead=1 走**牵头机关**口径 ——
+                        与这张表的口径一致，所以「点进去的条数 = 表格上的数字」。
+                        不带 lead 的话是「任一参与机关」（issue #21），联合发文会让
+                        条数比表格多（实测发改委 25 → 26），看起来像统计出错。
+                      */}
+                      {href === null ? (
+                        <span data-testid="agency-total-label">{label}</span>
+                      ) : (
+                        <Link
+                          href={href}
+                          data-testid="agency-total-link"
+                          aria-label={`查看${label}牵头的 ${row.count} 条公示`}
+                        >
+                          {label}
+                        </Link>
+                      )}
+                    </th>
+                    <td className="stat-num">{row.count}</td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
           </div>
@@ -175,34 +226,22 @@ export default async function StatsPage() {
                     const count = series.byMonth.get(month) ?? 0;
                     return (
                       <td className="stat-num" key={month} data-month={month}>
-                        {count > 0 ? (
-                          <Link
-                            className="stat-drill"
-                            href={`/?agency=${encodeURIComponent(agency)}&lead=1&month=${month}`}
-                            data-testid="trend-cell-link"
-                            aria-label={`查看${agency} ${month} 发布的 ${count} 条公示`}
-                          >
-                            {count}
-                          </Link>
-                        ) : (
-                          count
-                        )}
+                        <DrillNumber
+                          count={count}
+                          href={agencyDrillHref(agency, `&from=${month}&to=${month}`)}
+                          testId="trend-cell-link"
+                          label={`查看${agency} ${month} 发布的 ${count} 条公示`}
+                        />
                       </td>
                     );
                   })}
                   <td className="stat-num stat-total">
-                    {series.total > 0 ? (
-                      <Link
-                        className="stat-drill"
-                        href={`/?agency=${encodeURIComponent(agency)}&lead=1&from=${months[0]}&to=${months[months.length - 1]}`}
-                        data-testid="trend-row-total-link"
-                        aria-label={`查看${agency}在 ${months[0]} 至 ${months[months.length - 1]} 发布的 ${series.total} 条公示`}
-                      >
-                        {series.total}
-                      </Link>
-                    ) : (
-                      series.total
-                    )}
+                    <DrillNumber
+                      count={series.total}
+                      href={agencyDrillHref(agency, `&from=${months[0]}&to=${months[months.length - 1]}`)}
+                      testId="trend-row-total-link"
+                      label={`查看${agency}在 ${months[0]} 至 ${months[months.length - 1]} 发布的 ${series.total} 条公示`}
+                    />
                   </td>
                 </tr>
               ))}
@@ -210,36 +249,23 @@ export default async function StatsPage() {
                 <th scope="row">全部机关</th>
                 {monthTotals.map((total, index) => (
                   <td className="stat-num stat-total" key={months[index]}>
-                    {total > 0 ? (
-                      <Link
-                        className="stat-drill"
-                        href={`/?month=${months[index]}`}
-                        data-testid="trend-month-link"
-                        aria-label={`查看 ${months[index]} 发布的 ${total} 条公示`}
-                      >
-                        {total}
-                      </Link>
-                    ) : (
-                      total
-                    )}
+                    {/* 用区间写法（from = to = 该月）而不是 `?month=`：issue #48 已把
+                        `?month=` 定为只读兼容别名（老链接仍认），页面不该再产出它 */}
+                    <DrillNumber
+                      count={total}
+                      href={`/?from=${months[index]}&to=${months[index]}`}
+                      testId="trend-month-link"
+                      label={`查看 ${months[index]} 发布的 ${total} 条公示`}
+                    />
                   </td>
                 ))}
                 <td className="stat-num stat-total">
-                  {(() => {
-                    const grand = monthTotals.reduce((sum, total) => sum + total, 0);
-                    return grand > 0 ? (
-                      <Link
-                        className="stat-drill"
-                        href={`/?from=${months[0]}&to=${months[months.length - 1]}`}
-                        data-testid="trend-grand-total-link"
-                        aria-label={`查看 ${months[0]} 至 ${months[months.length - 1]} 发布的 ${grand} 条公示`}
-                      >
-                        {grand}
-                      </Link>
-                    ) : (
-                      grand
-                    );
-                  })()}
+                  <DrillNumber
+                    count={grandTotal}
+                    href={`/?from=${months[0]}&to=${months[months.length - 1]}`}
+                    testId="trend-grand-total-link"
+                    label={`查看 ${months[0]} 至 ${months[months.length - 1]} 发布的 ${grandTotal} 条公示`}
+                  />
                 </td>
               </tr>
             </tbody>
@@ -273,18 +299,13 @@ export default async function StatsPage() {
                   />
                 </span>
                 <span className="period-count">
-                  {bucket.count > 0 ? (
-                    <Link
-                      className="stat-drill"
-                      href={`/?period=${bucket.key}`}
-                      data-testid="period-bucket-link"
-                      aria-label={`查看公示期${PERIOD_LABELS[bucket.key]}的 ${bucket.count} 条公示`}
-                    >
-                      {bucket.count} 条
-                    </Link>
-                  ) : (
-                    `${bucket.count} 条`
-                  )}
+                  <DrillNumber
+                    count={bucket.count}
+                    href={`/?period=${bucket.key}`}
+                    testId="period-bucket-link"
+                    label={`查看公示期${PERIOD_LABELS[bucket.key]}的 ${bucket.count} 条公示`}
+                    text={`${bucket.count} 条`}
+                  />
                 </span>
               </li>
             ))}

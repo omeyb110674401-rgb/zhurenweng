@@ -109,6 +109,20 @@ function buildFilterHref(current: FilterState, next: Partial<FilterState>): stri
   return qs.length > 0 ? `/?${qs}` : '/';
 }
 
+/**
+ * 发布月份筛选的摘要文案（issue #45/#48）：区间 / 起点 / 终点 / 单月四种形态。
+ *
+ * 抽成函数是因为这段判断原先嵌在数组字面量里、三层嵌套三元 —— 读者得自己数括号
+ * 才知道哪个分支对应哪种 URL 形态。改成顺序 early-return 后，四种形态一眼可数。
+ */
+function monthFilterSummary(from: string | undefined, to: string | undefined): string {
+  if (from === undefined && to === undefined) return '';
+  if (from !== undefined && to !== undefined) {
+    return from === to ? `发布月份：${from}` : `发布区间：${from} 至 ${to}`;
+  }
+  return from !== undefined ? `发布月份：${from} 起` : `发布月份：${to} 止`;
+}
+
 export default async function HomePage({ searchParams }: HomePageProps) {
   // 解析与 generateMetadata 共用同一份（issue #41）：领域只接受已知标签值
   // （未知值不生效，避免任意 querystring 触发无效筛选）
@@ -169,15 +183,7 @@ export default async function HomePage({ searchParams }: HomePageProps) {
     category,
     agency ? (current.leadAgencyOnly ? `机关（牵头）：${agency}` : `机关：${agency}`) : '',
     keyword ? `关键词：${keyword}` : '',
-    from !== undefined && to !== undefined
-      ? from === to
-        ? `发布月份：${from}`
-        : `发布区间：${from} 至 ${to}`
-      : from !== undefined
-        ? `发布月份：${from} 起`
-        : to !== undefined
-          ? `发布月份：${to} 止`
-          : '',
+    monthFilterSummary(from, to),
     period ? `公示期：${periodBucketLabel(period) ?? period}` : '',
   ]
     .filter(Boolean)
@@ -284,12 +290,22 @@ export default async function HomePage({ searchParams }: HomePageProps) {
               </a>
             ))}
           </nav>
-          {/* 机关下拉 + 关键词框共用一个 GET 表单；当前领域经隐藏字段保留 */}
+          {/* 机关下拉 + 关键词框共用一个 GET 表单；其余筛选维度经隐藏字段保留 */}
           <form className="filter-form" action="/" method="get" data-testid="filter-form">
             {category !== undefined && <input type="hidden" name="category" value={category} />}
             {from !== undefined && <input type="hidden" name="from" value={from} />}
             {to !== undefined && <input type="hidden" name="to" value={to} />}
             {period !== undefined && <input type="hidden" name="period" value={period} />}
+            {/*
+              牵头口径也要留住（issue #50）：从统计页钻取进来的是 `?agency=X&lead=1`
+              （牵头机关，表格数字按它算），而表单此前只保留 category / from / to /
+              period —— 用户不改机关、只填个关键词点「筛选」，lead=1 就静默丢失，
+              口径退回「任一参与机关」，条数当场变化（发改委 25 → 26）。
+              只在带机关时才写：裸 lead=1 不改变任何结果（见 buildFilterHref）。
+            */}
+            {current.leadAgencyOnly && agency !== undefined && (
+              <input type="hidden" name="lead" value="1" />
+            )}
             <input
               className="filter-keyword"
               type="search"

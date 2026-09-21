@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { after, before, describe, it } from 'node:test';
 import { startAppServer } from './helpers/app-server.mjs';
 import { createFixtureServer } from './helpers/fixture-server.mjs';
+import { noticeItems } from './helpers/html.mjs';
 
 /**
  * E2E（issue #18 / #20）：M2 扩源 —— 交通运输部 / 市场监管总局 / 工业和信息化部 /
@@ -109,11 +110,9 @@ function stripSsrComments(html) {
   return html.replaceAll('<!-- -->', '');
 }
 
-/** 按 <li class="notice-item"> 分块提取列表条目（标题 / 状态徽标 / 倒计时）。 */
+/** 列表条目 → 标题 / 状态徽标 / 倒计时（标题 / 状态徽标 / 倒计时）。 */
 function extractItemBlocks(html) {
-  return html
-    .split(/<li class="notice-item"/)
-    .slice(1)
+  return noticeItems(html)
     .map((block) => block.slice(0, block.indexOf('</li>')))
     .map((block) => ({
       title: (/<a[^>]*notice-title-link[^>]*>([^<]+)<\/a>/.exec(block) ?? [])[1] ?? '',
