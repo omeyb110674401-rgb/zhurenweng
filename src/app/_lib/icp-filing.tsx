@@ -12,10 +12,10 @@ const BEIAN_URL = 'https://beian.miit.gov.cn/';
 export function IcpFiling() {
   const number = process.env.ICP_NUMBER?.trim();
   if (!number) {
-    return <p>ICP 备案：待备案（占位）</p>;
+    return <p data-testid="icp-filing">ICP 备案：待备案（占位）</p>;
   }
   return (
-    <p>
+    <p data-testid="icp-filing">
       <a href={BEIAN_URL} target="_blank" rel="noopener noreferrer">
         {number}
       </a>

@@ -49,6 +49,14 @@ const STYLE = `
   fieldset { border: none; padding: 0; margin: 0; display: grid; gap: 10px; }
   .login-box { max-width: 420px; margin: 64px auto; background: #fff; border: 1px solid #d8dee6; border-radius: 8px; padding: 24px; }
   .login-error { color: #c02626; }
+  a.skip-link { position: absolute; left: -9999px; top: 0; }
+  a.skip-link:focus { left: 0; background: #1c4ed8; color: #fff; padding: 8px 14px; }
+  .table-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  /* 源健康看板 7 列，窄屏下此前会把**整页**撑出横向滚动条（issue #53，与站点
+     统计页 issue #37 同一处缺陷）；顶栏的标题与操作按钮也要能换行 */
+  @media (max-width: 640px) {
+    header.admin-bar { flex-wrap: wrap; }
+  }
 `;
 
 export function adminPageDocument(bodyHtml: string): string {
@@ -62,6 +70,8 @@ export function adminPageDocument(bodyHtml: string): string {
     `<style>${STYLE}</style>`,
     '</head>',
     '<body class="admin-page">',
+    // 与站点页面同一套跳转主内容（issue #53）：后台顶栏也有若干操作入口
+    '<a class="skip-link" href="#main-content">跳到主要内容</a>',
     bodyHtml,
     '</body>',
     '</html>',
@@ -142,7 +152,7 @@ export function renderUnauthorizedBody(options: {
         '再用它登录管理后台。</p>',
       ];
   return adminPageDocument(
-    `<main><div class="login-box"><h1>管理后台</h1>${inner}</div></main>`,
+    `<main id="main-content"><div class="login-box"><h1>管理后台</h1>${inner}</div></main>`,
   );
 }
 
@@ -186,11 +196,13 @@ export function renderSourceBoard(sources: SourceRecord[]): string {
     sources.length === 0
       ? '<div class="muted" data-testid="source-board-empty">尚无源登记记录，抓取任务运行一次后出现。</div>'
       : [
+          '<div class="table-wrap">',
           '<table data-testid="source-health-board">',
           '<thead><tr><th scope="col">源</th><th scope="col">健康</th><th scope="col">启用</th>',
           '<th scope="col">最近成功抓取</th><th scope="col">最近错误信息</th><th scope="col">最近错误时间</th><th scope="col">操作</th></tr></thead>',
           `<tbody>${rows}</tbody>`,
           '</table>',
+          '</div>',
         ].join(''),
     '</section>',
   ].join('');
@@ -268,7 +280,7 @@ export function renderDashboardBody(options: {
 }): string {
   return adminPageDocument(
     [
-      '<main data-testid="admin-dashboard">',
+      '<main id="main-content" data-testid="admin-dashboard">',
       '<header class="admin-bar">',
       '<div><h1>管理后台</h1><p class="muted">主人翁 · 源健康 / 摘要复核 / 手动补录</p></div>',
       '<div>',

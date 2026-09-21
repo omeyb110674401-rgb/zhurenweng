@@ -1,5 +1,6 @@
 import Link from 'next/link';
 import type { Metadata } from 'next';
+import { SiteFooter } from '@/app/_lib/site-footer';
 
 /**
  * 退订结果页（issue #7）：由 /unsubscribe 的 303 重定向进入，
@@ -25,7 +26,7 @@ export default async function UnsubscribeDonePage({ searchParams }: UnsubscribeD
     : '未找到对应的订阅（链接可能不完整）。请使用邮件底部的完整退订链接，或重新提交订阅。';
 
   return (
-    <main>
+    <main id="main-content">
       <header className="site-header">
         <h1 className="brand" data-testid="unsubscribe-result-title">
           {title}
@@ -40,9 +41,7 @@ export default async function UnsubscribeDonePage({ searchParams }: UnsubscribeD
         </p>
       </section>
 
-      <footer className="site-footer">
-        <p>提交意见请一律前往官方渠道；本站只聚合官方公开信息并提供解读与提醒。</p>
-      </footer>
+      <SiteFooter />
     </main>
   );
 }

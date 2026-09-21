@@ -1,6 +1,6 @@
 import Link from 'next/link';
-import { IcpFiling } from '@/app/_lib/icp-filing';
 import { SearchForm } from '@/app/_lib/search-form';
+import { SiteFooter } from '@/app/_lib/site-footer';
 
 /**
  * 404 页（issue #17 前端审计）：Next 默认 404 是英文文案且没有任何回站入口，
@@ -9,7 +9,7 @@ import { SearchForm } from '@/app/_lib/search-form';
  */
 export default function NotFound() {
   return (
-    <main>
+    <main id="main-content">
       <nav className="breadcrumb">
         <Link href="/">← 返回公示列表</Link>
       </nav>
@@ -30,10 +30,7 @@ export default function NotFound() {
         </p>
       </section>
 
-      <footer className="site-footer">
-        <p>提交意见请一律前往官方渠道；本站只聚合官方公开信息并提供解读与提醒。</p>
-        <IcpFiling />
-      </footer>
+      <SiteFooter />
     </main>
   );
 }

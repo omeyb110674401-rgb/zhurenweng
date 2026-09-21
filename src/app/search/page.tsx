@@ -6,7 +6,7 @@ import { createSearchPort } from '@/lib/ports';
 import { hasSearchableQuery } from '@/lib/search/search-text';
 import { NoticeItem } from '@/app/_lib/notice-item';
 import { SearchForm } from '@/app/_lib/search-form';
-import { IcpFiling } from '@/app/_lib/icp-filing';
+import { SiteFooter } from '@/app/_lib/site-footer';
 
 /**
  * 不进索引（issue #38）：搜索结果页的 URL 是 `?q=…` 的无界变体（每个关键词一个地址），
@@ -100,11 +100,18 @@ export default async function SearchPage({ searchParams }: SearchPageProps) {
   const notices = await getNoticesByIds(hits.map((hit) => hit.id));
 
   return (
-    <main>
+    <main id="main-content">
+      {/* 面包屑此前写在 <header> 里、且是 <p>（issue #53）：全站其它页都是
+          header 之外的 <nav class="breadcrumb">，只有这一页既不是导航地标、
+          位置也不一致 */}
+      <nav className="breadcrumb">
+        <Link href="/">← 返回公示列表</Link>
+      </nav>
+
       <header className="site-header">
-        <p className="breadcrumb">
-          <Link href="/">← 返回公示列表</Link>
-        </p>
+        {/* 全站唯一没有 h1 的页面（issue #53）：标题层级直接从 h2 起，
+            读屏用户与搜索引擎都拿不到「这一页是什么」 */}
+        <h1 className="brand">站内搜索</h1>
         <SearchForm initialQuery={query} />
       </header>
 
@@ -177,7 +184,11 @@ export default async function SearchPage({ searchParams }: SearchPageProps) {
                 上一页
               </Link>
             ) : (
-              <span className="pagination-disabled" data-testid="search-pagination-prev-disabled">
+              <span
+                className="pagination-disabled"
+                data-testid="search-pagination-prev-disabled"
+                aria-disabled="true"
+              >
                 上一页
               </span>
             )}
@@ -194,7 +205,11 @@ export default async function SearchPage({ searchParams }: SearchPageProps) {
                 下一页
               </Link>
             ) : (
-              <span className="pagination-disabled" data-testid="search-pagination-next-disabled">
+              <span
+                className="pagination-disabled"
+                data-testid="search-pagination-next-disabled"
+                aria-disabled="true"
+              >
                 下一页
               </span>
             )}
@@ -202,12 +217,7 @@ export default async function SearchPage({ searchParams }: SearchPageProps) {
         )}
       </section>
 
-      <footer className="site-footer">
-        <p>
-          本站只聚合官方公开信息并提供 AI 解读（AI 生成内容将显著标注），提交意见请一律前往官方渠道。
-        </p>
-        <IcpFiling />
-      </footer>
+      <SiteFooter />
     </main>
   );
 }

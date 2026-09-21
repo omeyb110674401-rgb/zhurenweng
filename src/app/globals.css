@@ -32,6 +32,26 @@ body {
   padding: 24px 20px 48px;
 }
 
+/* 跳到主内容（issue #53）：首页要按 Tab 依次经过搜索框、站内导航、7 个领域 chip、
+   机关下拉与筛选按钮才到列表。默认移出视口、获得焦点时显形 —— 不能用
+   display: none，那样它也无法被键盘聚焦。 */
+.skip-link {
+  position: absolute;
+  left: -9999px;
+  top: 0;
+  z-index: 100;
+  padding: 8px 14px;
+  background: var(--accent);
+  color: #fff;
+  font-size: 14px;
+  text-decoration: none;
+  border-radius: 0 0 8px 0;
+}
+
+.skip-link:focus {
+  left: 0;
+}
+
 .site-header {
   border-bottom: 1px solid var(--line);
   padding-bottom: 16px;
@@ -242,6 +262,7 @@ body {
 .summary-head {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 8px;
   margin-bottom: 6px;
 }
@@ -276,6 +297,9 @@ body {
   margin-bottom: 20px;
 }
 
+/* 主行动按钮。同一个类同时用在 <a>（详情页「去官方渠道提意见」）与 <button>
+   （订阅页「提交订阅」）上 —— 此前只写了链接需要的那几条，于是订阅页的按钮
+   带着 UA 默认边框、光标是箭头、字体是按钮默认字体（issue #53）。 */
 .go-button {
   display: inline-block;
   background: var(--accent);
@@ -284,7 +308,11 @@ body {
   font-weight: 600;
   text-decoration: none;
   padding: 12px 24px;
+  border: none;
   border-radius: 8px;
+  cursor: pointer;
+  font-family: inherit;
+  text-align: center;
 }
 
 .go-button:hover {
@@ -398,6 +426,32 @@ body {
 
 .site-footer p {
   margin: 4px 0;
+}
+
+/* 页脚导航（issue #53）：此前 /stats 与 /subscribe 只能从首页互达 */
+.footer-nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  margin: 10px 0 6px;
+  font-size: 13px;
+}
+
+.footer-nav a {
+  color: var(--ink-soft);
+  text-decoration: none;
+}
+
+.footer-nav a:hover {
+  color: var(--accent);
+  text-decoration: underline;
+}
+
+/* 排序说明与订阅入口（issue #53）：从 `.section-hint` 那段文字墙里拆出来的独立行 */
+.list-actions {
+  margin: 0 0 12px;
+  color: var(--ink-soft);
+  font-size: 13px;
 }
 
 /* ===== AI 摘要（issue #4） ===== */
@@ -541,7 +595,10 @@ body {
   padding: 0;
 }
 
-.form-field label,
+/* 只有**直接子元素**才是字段标签（issue #53）：`.category-option` 是选项行、
+   不是字段名，此前靠 `.category-option { font-weight: 400 !important }` 把
+   继承来的 600 硬压回去。改成子选择器后各归其位，!important 得以删除。 */
+.form-field > label,
 .form-field legend {
   display: block;
   font-size: 13px;
@@ -570,7 +627,6 @@ body {
   align-items: center;
   gap: 6px;
   font-size: 13px;
-  font-weight: 400 !important;
 }
 
 .result-card {
@@ -752,7 +808,6 @@ body {
   border-collapse: collapse;
   background: #fff;
   border: 1px solid var(--line);
-  border-radius: 8px;
   font-size: 14px;
 }
 
@@ -1302,4 +1357,75 @@ body {
   margin: 8px 0 0;
   font-size: 12px;
   color: var(--ink-soft);
+}
+
+/* ===== 长串溢出兜底（issue #53）=====
+   正文与标题里会出现长 ASCII 串（政府公告里的附件文件名，如
+   P020260910579256447259.pdf），此前全站没有任何 overflow-wrap：CJK 会自动
+   折行，长英文串不会，于是把卡片撑出横向滚动。用 anywhere 而不是 break-word
+   —— 前者同时影响 min-content 宽度，flex/grid 子项才真正收得住。
+   刻意**不加**给 `.stat-table th`：趋势表靠固定列宽 + 外层横滚容器工作，
+   让机关名在列内任意断行会把「能滚动」变成「挤成一团」。 */
+.notice-title,
+.detail-title,
+.body-text,
+.diff-text {
+  overflow-wrap: anywhere;
+}
+
+/* ===== 响应式（issue #53）=====
+   这一节之前，全站 **0 条媒体查询**：窄屏只靠流式布局与统计页的横滚容器兜底，
+   于是 ≤300px 视口会被「公示期长度分布」的固定宽度行撑破、详情页字段被压成
+   两条窄列、触控目标普遍小于 40px。下面三个断点只做「窄屏变单列 / 触控变大」，
+   不改桌面视觉。 */
+
+/* 触控目标：只在指针粗糙（手指）的设备生效，鼠标环境保持原有紧凑外观。
+   WCAG 2.5.8 的最低目标是 24px，iOS HIG 建议 44px —— 折中取 40px。 */
+@media (pointer: coarse) {
+  .category-chip,
+  .pagination-link,
+  .pagination-disabled,
+  .filter-button,
+  .category-option {
+    display: inline-flex;
+    align-items: center;
+    min-height: 40px;
+  }
+}
+
+@media (max-width: 560px) {
+  .page {
+    padding: 20px 14px 40px;
+  }
+
+  .brand {
+    font-size: 26px;
+  }
+
+  /* 详情字段：两列在窄屏下每列只剩 110px 左右，「全国人大常委会法制工作委员会」
+     这类 14 字机关名会折成 3-4 行 */
+  .detail-fields {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 420px) {
+  /* 公示期长度分布：标签 150px + 计数 56px 是固定基，加两处间距后整行 ≈236px，
+     280px 视口（Galaxy Fold）会被撑出卡片 → 改成「标签 + 计数一行、进度条次行」 */
+  .period-buckets li {
+    flex-wrap: wrap;
+  }
+
+  .period-buckets .period-label {
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+
+  .period-buckets .period-count {
+    flex: 0 0 auto;
+  }
+
+  .period-buckets .period-bar {
+    flex: 1 1 100%;
+  }
 }

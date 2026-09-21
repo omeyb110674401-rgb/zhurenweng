@@ -11,13 +11,20 @@ import {
 } from '@/db/repo/stats';
 import { lastSiteMonths } from '@/lib/dates';
 import { PERIOD_BUCKETS } from '@/lib/notice-period';
+import { simplePageMetadata } from '@/lib/page-metadata';
+import { SiteFooter } from '@/app/_lib/site-footer';
 
 // 统计随抓取管线与点击实时变化，服务端实时渲染，不做静态预渲染。
 export const dynamic = 'force-dynamic';
 
-export const metadata = {
-  title: '数据统计 —— 主人翁',
-};
+// 此前只有 title、没有 description（issue #53）：搜索结果与聊天软件里的链接预览
+// 就只有一行标题，读者看不出这一页有什么。
+export const metadata = simplePageMetadata({
+  title: '数据统计',
+  description:
+    '本站收录的政府公示与征求意见稿聚合统计：各部门公示量月度趋势（可按机关与月份钻取）、公示期长度分布、出站点击（北极星指标），全部数字都可点开查看对应条目。',
+  path: '/stats',
+});
 
 /** 趋势窗口：最近 6 个日历月（含当前月），返回月份升序（YYYY-MM）。 */
 const TREND_MONTHS = 6;
@@ -106,7 +113,7 @@ export default async function StatsPage() {
   const grandTotal = monthTotals.reduce((sum, total) => sum + total, 0);
 
   return (
-    <main>
+    <main id="main-content">
       <nav className="breadcrumb">
         <Link href="/">← 返回公示列表</Link>
       </nav>
@@ -190,6 +197,9 @@ export default async function StatsPage() {
           点格子里的数字可查看该机关该月发布的条目（条数与格子一致）；点月度合计可查看该月全部条目。
           小计与总计点进去是该区间（{months[0]} 至 {months[months.length - 1]}）的筛选结果
           —— 行小计按机关、总计按全部机关（issue #48）。
+          {/* 0 值为什么点不开（issue #53）：数字在 0 时退化为纯文本是刻意的（点进去必然
+              是空列表），但页面上没有任何说明，读者会以为链接坏了 */}
+          数字为 0 的格子不可点击（点进去只会是空列表）。
         </p>
         {trendAgencies.length === 0 ? (
           <EmptyBlock
@@ -284,6 +294,8 @@ export default async function StatsPage() {
           {periodExcluded > 0
             ? `另有 ${periodExcluded} 条未标注截止日期（或发布日期），不参与统计 —— 四桶之和因此小于收录总数。`
             : '全部条目都已标注截止日期，四桶之和等于收录总数。'}
+          {/* 与趋势表同一说明（issue #53）：0 条时计数退化为纯文本，页面要讲清楚 */}
+          计数为 0 的桶不可点击。
         </p>
         {!hasNotices || periodDistribution.every((bucket) => bucket.count === 0) ? (
           <EmptyBlock testId="stats-period-empty" text="暂无可统计的公示期数据。" />
@@ -350,12 +362,7 @@ export default async function StatsPage() {
         )}
       </section>
 
-      <footer className="site-footer">
-        <p>
-          统计数据全部来自本站收录的官方公开信息与站内跳转点击的纯计数聚合，
-          不涉及任何个人身份信息。
-        </p>
-      </footer>
+      <SiteFooter note="统计数据全部来自本站收录的官方公开信息与站内跳转点击的纯计数聚合，不涉及任何个人身份信息。" />
     </main>
   );
 }

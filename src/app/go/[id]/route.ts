@@ -37,6 +37,35 @@ const REDIRECT_HEADERS = {
 /** 错误响应同样不该被缓存。 */
 const NO_STORE = { 'cache-control': 'no-store' } as const;
 
+/**
+ * 面向读者的错误页（issue #53）：此前 404 / 500 直接回 `{"error":"未找到该公示条目"}`
+ * —— 读者在详情页点「去官方渠道提意见」，若该条目恰好已被合并或清掉，看到的是一屏
+ * 裸 JSON，既读不懂也没有回站路径。这个端点本来就是**给人点**的（机器请求走 302），
+ * 错误响应也该是能读的页面。
+ *
+ * 内联最小样式、不依赖站点渲染管线（这里在 App Router 的响应层，拿不到 globals.css
+ * 与页面组件）；标题与正文都来自下面的常量，没有插值输入。
+ */
+function errorPage(status: number, message: string): NextResponse {
+  const html = [
+    '<!DOCTYPE html><html lang="zh-CN"><head><meta charset="utf-8">',
+    '<meta name="viewport" content="width=device-width, initial-scale=1">',
+    `<title>${message} —— 主人翁</title></head>`,
+    '<body style="margin:0;padding:48px 20px;background:#f8fafc;color:#1f2937;line-height:1.6;',
+    'font-family:system-ui,-apple-system,\'Segoe UI\',\'PingFang SC\',\'Microsoft YaHei\',sans-serif">',
+    '<main id="main-content" style="max-width:640px;margin:0 auto">',
+    `<h1 style="font-size:20px;margin:0 0 12px">${message}</h1>`,
+    '<p style="margin:0 0 20px;color:#4b5563">该链接指向的公示条目可能已被合并或移除。',
+    '本站只做聚合，意见的提交与法律效力一律以官方渠道为准。</p>',
+    '<p style="margin:0"><a href="/" style="color:#b45309">← 返回公示列表</a></p>',
+    '</main></body></html>',
+  ].join('');
+  return new NextResponse(html, {
+    status,
+    headers: { ...NO_STORE, 'content-type': 'text/html; charset=utf-8' },
+  });
+}
+
 /** 爬虫 / 机器人 UA 特征（不区分大小写）：搜索引擎、AI 爬虫、站点扫描器、监控探针。 */
 const BOT_UA_PATTERN =
   /bot|crawler|spider|slurp|scrapy|headless|lighthouse|monitor|uptime|facebookexternalhit|semrush|ahrefs|mj12|dotbot|yandex|petal|bytespider|gptbot|claudebot|anthropic|perplexity/i;
@@ -82,7 +111,7 @@ export async function GET(
   const { id } = await params;
   const notice = await getNoticeById(id);
   if (!notice) {
-    return NextResponse.json({ error: '未找到该公示条目' }, { status: 404, headers: NO_STORE });
+    return errorPage(404, '未找到该公示条目');
   }
 
   // 协议白名单（issue #52，纵深防御）：写入侧都已守卫（爬虫过 resolveUrl、人工补录
@@ -92,11 +121,11 @@ export async function GET(
   try {
     target = new URL(notice.url);
   } catch {
-    return NextResponse.json({ error: '该条目缺少有效的官方原文链接' }, { status: 500, headers: NO_STORE });
+    return errorPage(500, '该条目缺少有效的官方原文链接');
   }
   if (target.protocol !== 'http:' && target.protocol !== 'https:') {
     console.error(`[go] noticeId=${id} 官方原文链接协议非法：${target.protocol}`);
-    return NextResponse.json({ error: '该条目缺少有效的官方原文链接' }, { status: 500, headers: NO_STORE });
+    return errorPage(500, '该条目缺少有效的官方原文链接');
   }
 
   const skipReason = notCountableReason(request);
@@ -123,7 +152,7 @@ export async function GET(
     );
   }
   if (!clickWriteFailed && clicks === null) {
-    return NextResponse.json({ error: '未找到该公示条目' }, { status: 404, headers: NO_STORE });
+    return errorPage(404, '未找到该公示条目');
   }
 
   // 非个人身份的访问日志：仅条目 ID 与日期（不带 UA）

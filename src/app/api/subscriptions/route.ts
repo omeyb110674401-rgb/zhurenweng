@@ -9,6 +9,12 @@ import {
 import { upsertSubscriptionRules } from '@/db/repo/subscriptions';
 import { mailerReady } from '@/lib/mailer-availability';
 import { checkRateLimit } from '@/lib/rate-limit';
+import {
+  clearedSubscribeDraftCookie,
+  hasDraftContent,
+  subscribeDraftCookie,
+  type SubscribeDraft,
+} from '@/lib/subscribe-draft';
 
 /**
  * 订阅提交端点（issue #7，double opt-in 第一步）：POST /api/subscriptions
@@ -36,10 +42,21 @@ export const dynamic = 'force-dynamic';
 
 /**
  * 303 重定向（相对 Location）：自定义服务器 / 反代场景下 request.url 的
- * origin 不可靠，相对路径由客户端按当前地址解析。
+ * origin 不可靠，相对路径由客户端按当前地址解析。`setCookie` 直接给 Set-Cookie 值。
  */
-function redirectTo(path: string): Response {
-  return new Response(null, { status: 303, headers: { location: path } });
+function redirectTo(path: string, setCookie?: string): Response {
+  const headers: Record<string, string> = { location: path };
+  if (setCookie !== undefined) headers['set-cookie'] = setCookie;
+  return new Response(null, { status: 303, headers });
+}
+
+/**
+ * 校验失败时的重定向（issue #53）：把用户已填内容放进短命 cookie 带回订阅页。
+ * 为什么不能走查询串（邮箱会进地址栏、历史、访问日志与 Referer）见
+ * lib/subscribe-draft.ts。
+ */
+function redirectWithDraft(path: string, draft: SubscribeDraft): Response {
+  return redirectTo(path, hasDraftContent(draft) ? subscribeDraftCookie(draft) : undefined);
 }
 
 export async function POST(request: Request): Promise<Response> {
@@ -61,9 +78,17 @@ export async function POST(request: Request): Promise<Response> {
     return redirectTo('/subscribe?error=mailer_unavailable');
   }
 
+  // 草稿（issue #53）：留**原始输入**（不是规范化后的值）—— 用户敲错的东西要原样
+  // 还给他，否则「重新填写」变成「猜自己刚才写了什么」。
+  const draft: SubscribeDraft = {
+    email: String(form.get('email') ?? ''),
+    keywords: String(form.get('keywords') ?? ''),
+    categories: form.getAll('categories').map((value) => String(value)),
+  };
+
   const email = normalizeEmail(String(form.get('email') ?? ''));
   if (email === null) {
-    return redirectTo('/subscribe?error=invalid_email');
+    return redirectWithDraft('/subscribe?error=invalid_email', draft);
   }
 
   const keywords = normalizeKeywords(String(form.get('keywords') ?? ''));
@@ -73,7 +98,7 @@ export async function POST(request: Request): Promise<Response> {
     .filter((value) => (CATEGORY_OPTIONS as readonly string[]).includes(value));
   const rules = validateSubscriptionRules(keywords, categoryInput);
   if (!rules.ok) {
-    return redirectTo(`/subscribe?error=${rules.reason}`);
+    return redirectWithDraft(`/subscribe?error=${rules.reason}`, draft);
   }
 
   const { subscription, outcome } = await upsertSubscriptionRules({
@@ -99,10 +124,11 @@ export async function POST(request: Request): Promise<Response> {
       console.error(
         `[subscribe] 确认邮件发送失败 email=${email}：${error instanceof Error ? error.message : String(error)}`,
       );
-      return redirectTo('/subscribe?error=send_failed');
+      return redirectWithDraft('/subscribe?error=send_failed', draft);
     }
   }
 
-  // 两种结果回同一个参数（见文件头的防枚举说明）
-  return redirectTo('/subscribe?sent=1');
+  // 两种结果回同一个参数（见文件头的防枚举说明）；成功即清掉草稿，
+  // 免得 120 秒内再打开订阅页时看到上一轮的旧输入（issue #53）
+  return redirectTo('/subscribe?sent=1', clearedSubscribeDraftCookie());
 }

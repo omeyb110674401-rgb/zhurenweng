@@ -1,5 +1,6 @@
 import Link from 'next/link';
 import type { Metadata } from 'next';
+import { SiteFooter } from '@/app/_lib/site-footer';
 
 /**
  * 订阅确认结果页（issue #7）：由 /subscribe/confirm 的 303 重定向进入，
@@ -28,7 +29,7 @@ export default async function SubscribeConfirmedPage({ searchParams }: Subscribe
         : '订阅已生效：之后每当你订阅的关键词 / 领域有新的征求意见公示，我们会在截止前 7 天、3 天各发送一封提醒邮件。每封邮件底部都有退订入口（邮件客户端的「退订」按钮可直接退订）。';
 
   return (
-    <main>
+    <main id="main-content">
       <header className="site-header">
         <h1 className="brand" data-testid="subscribe-confirmed-title">
           {title}
@@ -43,9 +44,7 @@ export default async function SubscribeConfirmedPage({ searchParams }: Subscribe
         </p>
       </section>
 
-      <footer className="site-footer">
-        <p>提交意见请一律前往官方渠道；本站只聚合官方公开信息并提供解读与提醒。</p>
-      </footer>
+      <SiteFooter />
     </main>
   );
 }

@@ -1,15 +1,16 @@
 import Link from 'next/link';
+import { redirect } from 'next/navigation';
 import type { Metadata } from 'next';
 import { countNoticesFiltered, listNoticesFiltered, listNoticeAgencies } from '@/db/repo/notices';
 import { NoticeItem } from '@/app/_lib/notice-item';
 import { SearchForm } from '@/app/_lib/search-form';
-import { IcpFiling } from '@/app/_lib/icp-filing';
 import { parseHomeQuery, type HomeSearchParams } from '@/app/_lib/home-query';
 import { periodBucketLabel, type PeriodBucketKey } from '@/lib/notice-period';
 import { buildNoticeListJsonLd, serializeJsonLd } from '@/lib/notice-jsonld';
 import { DOMAIN_CATEGORIES } from '@/lib/categories';
 import { siteUrl } from '@/lib/site-url';
 import { mailerReady } from '@/lib/mailer-availability';
+import { SiteFooter } from '@/app/_lib/site-footer';
 
 // 数据随抓取管线持续更新，首页始终服务端实时渲染，不做静态预渲染。
 export const dynamic = 'force-dynamic';
@@ -161,6 +162,13 @@ export default async function HomePage({ searchParams }: HomePageProps) {
   ]);
   const totalPages = Math.max(1, Math.ceil(total / size));
   const page = Math.min(requestedPage, totalPages);
+  // 越界页码归一（issue #53）：内容此前已经夹到末页，但地址栏与 canonical 还停在
+  // ?page=999 —— 同一份内容对应多个地址，而 generateMetadata 按请求值发的
+  // canonical 还会自指到一个越界地址（筛掉一页后 ?page=2 同理）。
+  // 307 回夹取后的地址：临时重定向，不是「永久搬家」。
+  if (requestedPage !== page) {
+    redirect(buildFilterHref(current, { page }));
+  }
   const notices = await listNoticesFiltered({
     ...filter,
     limit: size,
@@ -200,7 +208,7 @@ export default async function HomePage({ searchParams }: HomePageProps) {
   );
 
   return (
-    <main>
+    <main id="main-content">
       {/* schema.org ItemList（issue #49）：给搜索引擎/聚合器读的机器可读清单；
           用户可见内容全在下方，此处不重复渲染 */}
       <script
@@ -213,8 +221,10 @@ export default async function HomePage({ searchParams }: HomePageProps) {
           主人<span className="brand-accent">翁</span>
         </h1>
         <p className="tagline">政府公示与征求意见信息聚合 —— 发现 · 读懂 · 行动</p>
-        {/* 站内搜索（issue #8）：GET 表单提交到 /search?q=…，不依赖客户端 JS */}
-        <SearchForm />
+        {/* 站内搜索（issue #8）：GET 表单提交到 /search?q=…，不依赖客户端 JS。
+            回填当前列表关键词（issue #53）：筛选后头部框仍为空时，点它会带着空
+            关键词跳到 /search 并把全部筛选条件丢掉，两处搜索框看起来像同一件事。 */}
+        <SearchForm initialQuery={keyword ?? ''} />
         {/* 站内导航（issue #11）：数据统计页入口；订阅入口按邮件端口配置门控（issue #17） */}
         <nav className="site-nav" aria-label="站内导航">
           <a href="/stats" data-testid="stats-nav-link">
@@ -253,6 +263,12 @@ export default async function HomePage({ searchParams }: HomePageProps) {
               </Link>
             </span>
           ) : null}
+        </p>
+
+        {/* 排序说明与订阅入口单独成行（issue #53）：此前它们和条数、页码区间、牵头
+            口径全挤在同一个段落里，窄屏下是一整块文字墙，RSS / 邮件提醒两个入口也
+            读起来像正文的一部分。文案与 testid 一字未改，只换了容器。 */}
+        <p className="list-actions">
           按征求意见截止日期排序，即将截止的排在最前。
           {/* RSS 订阅入口（issue #6）：页面可见入口，配合 head 内的自动发现链接 */}
           <a className="rss-link" href="/feed.xml" data-testid="rss-feed-link">
@@ -268,7 +284,7 @@ export default async function HomePage({ searchParams }: HomePageProps) {
 
         {/* 分类浏览筛选条（issue #9）：领域标签云 + 机关下拉 + 关键词框，
             全部经 URL 参数驱动、服务端渲染，不依赖客户端 JS */}
-        <div className="filter-bar" data-testid="notice-filter-bar" aria-label="公示筛选">
+        <div className="filter-bar" data-testid="notice-filter-bar">
           <nav className="category-cloud" data-testid="category-filter" aria-label="按领域筛选">
             <a
               className={`category-chip${category === undefined ? ' category-chip-active' : ''}`}
@@ -290,8 +306,16 @@ export default async function HomePage({ searchParams }: HomePageProps) {
               </a>
             ))}
           </nav>
-          {/* 机关下拉 + 关键词框共用一个 GET 表单；其余筛选维度经隐藏字段保留 */}
-          <form className="filter-form" action="/" method="get" data-testid="filter-form">
+          {/* 机关下拉 + 关键词框共用一个 GET 表单；其余筛选维度经隐藏字段保留。
+              表单名放在 <form> 上而不是外层 div（issue #53）：无 role 的 div 上的
+              aria-label 多数辅助技术不会暴露，而带名字的 form 是真正的表单地标。 */}
+          <form
+            className="filter-form"
+            action="/"
+            method="get"
+            data-testid="filter-form"
+            aria-label="按机关与关键词筛选"
+          >
             {category !== undefined && <input type="hidden" name="category" value={category} />}
             {from !== undefined && <input type="hidden" name="from" value={from} />}
             {to !== undefined && <input type="hidden" name="to" value={to} />}
@@ -379,7 +403,11 @@ export default async function HomePage({ searchParams }: HomePageProps) {
                 上一页
               </Link>
             ) : (
-              <span className="pagination-disabled" data-testid="pagination-prev-disabled">
+              <span
+                className="pagination-disabled"
+                data-testid="pagination-prev-disabled"
+                aria-disabled="true"
+              >
                 上一页
               </span>
             )}
@@ -396,7 +424,11 @@ export default async function HomePage({ searchParams }: HomePageProps) {
                 下一页
               </Link>
             ) : (
-              <span className="pagination-disabled" data-testid="pagination-next-disabled">
+              <span
+                className="pagination-disabled"
+                data-testid="pagination-next-disabled"
+                aria-disabled="true"
+              >
                 下一页
               </span>
             )}
@@ -404,12 +436,7 @@ export default async function HomePage({ searchParams }: HomePageProps) {
         )}
       </section>
 
-      <footer className="site-footer">
-        <p>
-          本站只聚合官方公开信息并提供 AI 解读（AI 生成内容将显著标注），提交意见请一律前往官方渠道。
-        </p>
-        <IcpFiling />
-      </footer>
+      <SiteFooter />
     </main>
   );
 }

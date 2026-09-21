@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="主人翁">
+  <!--
+    favicon（issue #53）。此前仓库里没有任何图标文件，浏览器标签页是空白页图标、
+    /favicon.ico 直接 404。
+
+    标记与 apple-icon / opengraph-image 保持同一份几何形状：琥珀底 + 三条递减的
+    白色横杠（「一列公示条目」）。**刻意不用「主」字** —— 文字图标依赖渲染端的
+    中文字体与基线计算，同一个文件在不同引擎里会偏上或偏下，而 favicon 恰恰是
+    渲染环境最杂的一类图片（浏览器标签、书签、阅读器、爬虫预览）。要换成字标
+    只需改这一个文件。
+  -->
+  <rect width="64" height="64" rx="14" fill="#b45309" />
+  <g fill="#ffffff">
+    <rect x="16" y="19" width="32" height="5" rx="2.5" />
+    <rect x="16" y="29.5" width="24" height="5" rx="2.5" />
+    <rect x="16" y="40" width="16" height="5" rx="2.5" />
+  </g>
+</svg>

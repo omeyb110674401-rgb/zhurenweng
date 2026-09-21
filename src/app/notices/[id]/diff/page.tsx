@@ -4,6 +4,8 @@ import { notFound } from 'next/navigation';
 import { getNoticeById } from '@/db/repo/notices';
 import { getSourceById } from '@/db/repo/sources';
 import { formatDate } from '@/app/_lib/notice-display';
+import { SiteFooter } from '@/app/_lib/site-footer';
+import { simplePageMetadata } from '@/lib/page-metadata';
 import {
   diffComparability,
   diffNoticeBodies,
@@ -34,7 +36,13 @@ export async function generateMetadata({ params }: NoticeDiffPageProps): Promise
     return { title: '未找到该公示 —— 主人翁' };
   }
   return {
-    title: `条款对比：${notice.title} —— 主人翁`,
+    ...simplePageMetadata({
+      title: `条款对比：${notice.title}`,
+      // 描述此前缺失（issue #53）：noindex 不代表不会被看到 —— 浏览器历史、聊天
+      // 软件里粘贴的链接、搜索引擎的「相似结果」都靠它，缺了就只有光秃秃的标题。
+      description: `「${notice.title}」本轮与上一轮的条款级差异对比（新增 / 删除 / 修改），条款内容以官方原文为准。`,
+      path: `/notices/${notice.id}/diff`,
+    }),
     robots: { index: false, follow: true },
   };
 }
@@ -55,7 +63,7 @@ export default async function NoticeDiffPage({ params }: NoticeDiffPageProps) {
 
   if (!previous) {
     return (
-      <main>
+      <main id="main-content">
         <nav className="breadcrumb">
           <Link href={`/notices/${notice.id}`}>← 返回详情页</Link>
         </nav>
@@ -65,6 +73,7 @@ export default async function NoticeDiffPage({ params }: NoticeDiffPageProps) {
             该条目没有可对比的上一版本（同一法案的此前轮次公示未被收录或未关联）。
           </div>
         </article>
+        <SiteFooter />
       </main>
     );
   }
@@ -79,7 +88,7 @@ export default async function NoticeDiffPage({ params }: NoticeDiffPageProps) {
   );
 
   return (
-    <main>
+    <main id="main-content">
       <nav className="breadcrumb">
         <Link href={`/notices/${notice.id}`}>← 返回详情页</Link>
       </nav>
@@ -148,15 +157,17 @@ export default async function NoticeDiffPage({ params }: NoticeDiffPageProps) {
         )}
       </article>
 
-      <footer className="site-footer">
-        <p>
-          差异由站内自动比对生成，仅供参考；条款内容以官方原文为准，
-          <a href={notice.url} target="_blank" rel="noopener noreferrer">
-            查看本轮官方原文
-          </a>
-          （{source?.name ?? notice.sourceId}）。
-        </p>
-      </footer>
+      <SiteFooter
+        note={
+          <>
+            差异由站内自动比对生成，仅供参考；条款内容以官方原文为准，
+            <a href={notice.url} target="_blank" rel="noopener noreferrer">
+              查看本轮官方原文
+            </a>
+            （{source?.name ?? notice.sourceId}）。
+          </>
+        }
+      />
     </main>
   );
 }

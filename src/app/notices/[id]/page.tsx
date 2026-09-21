@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import { cache } from 'react';
 import type { Metadata } from 'next';
 import { notFound } from 'next/navigation';
 import { getNoticeById } from '@/db/repo/notices';
@@ -12,8 +13,10 @@ import { buildNoticeJsonLd, serializeJsonLd } from '@/lib/notice-jsonld';
 import { effectiveStatus } from '@/lib/notice-status';
 import { llmReady } from '@/lib/llm-availability';
 import { mailerReady } from '@/lib/mailer-availability';
+import { OG_IMAGE } from '@/lib/page-metadata';
 import { siteUrl } from '@/lib/site-url';
 import type { NoticeRecord } from '@/db/types';
+import { SiteFooter } from '@/app/_lib/site-footer';
 
 // 详情数据随抓取管线更新，服务端实时渲染。
 export const dynamic = 'force-dynamic';
@@ -21,6 +24,13 @@ export const dynamic = 'force-dynamic';
 interface NoticeDetailPageProps {
   params: Promise<{ id: string }>;
 }
+
+/**
+ * 同一请求内只查一次（issue #53）：`generateMetadata` 与页面渲染都要这条记录，
+ * 此前各查一遍 —— 同一个 id 在同一个请求里打两次库。`cache()` 是 React 的
+ * **请求级**记忆化：不跨请求、不引入失效问题（页面本身是 force-dynamic）。
+ */
+const getNoticeCached = cache(getNoticeById);
 
 /**
  * 条目的分享 / 检索摘要（可发现性）：状态 + 截止日期 + 机关 + 正文首段。
@@ -45,7 +55,7 @@ function noticeDescription(notice: NoticeRecord, now: Date): string {
 /** 条目页元数据：标题即公示标题，分享链接带 canonical 与 og:url（搜索/转发场景）。 */
 export async function generateMetadata({ params }: NoticeDetailPageProps): Promise<Metadata> {
   const { id } = await params;
-  const notice = await getNoticeById(id);
+  const notice = await getNoticeCached(id);
   if (!notice) {
     return { title: '未找到该公示 —— 主人翁' };
   }
@@ -61,24 +71,31 @@ export async function generateMetadata({ params }: NoticeDetailPageProps): Promi
       description,
       url,
       publishedTime: notice.publishedAt ?? undefined,
+      // 分享图要显式带上（issue #53）：页面自己导出 openGraph 会把父级的整块覆盖，
+      // 此前详情页的分享卡片一直没有图
+      images: [OG_IMAGE],
     },
   };
 }
 
 export default async function NoticeDetailPage({ params }: NoticeDetailPageProps) {
   const { id } = await params;
-  const notice = await getNoticeById(id);
+  const notice = await getNoticeCached(id);
   if (!notice) {
     notFound();
   }
-  const source = await getSourceById(notice.sourceId);
   // 展示用有效状态（issue #43）：库内 status 是每日抓取时推导的，刚过截止的条目
   // 在下一轮抓取前仍是 open —— 徽标、分享摘要与结构化数据都必须按当前日期复核，
   // 否则页面会声称一个已关闭的征集还能提意见（倒计时此时已静默消失）。
   const now = new Date();
   const status = effectiveStatus(notice, now);
-  // 摘要列（issue #4）：done → 渲染五段式摘要；pending / failed_review → 占位
-  const summaryInfo = await getNoticeSummary(notice.id);
+  // 来源名与摘要列互不依赖，并行取（issue #53）：此前是两次串行 await，等于把
+  // 两个查询的往返时间相加。摘要列（issue #4）：done → 渲染五段式摘要；
+  // pending / failed_review → 占位。
+  const [source, summaryInfo] = await Promise.all([
+    getSourceById(notice.sourceId),
+    getNoticeSummary(notice.id),
+  ]);
   // 结构化速读（issue #26/#27）：纯函数、请求期算一次，对存量条目立即生效。
   // 提交方式块与速读卡共用这一份结果，避免同一段正文解析两遍。
   const brief = buildNoticeBrief({
@@ -97,7 +114,7 @@ export default async function NoticeDetailPage({ params }: NoticeDetailPageProps
   );
 
   return (
-    <main>
+    <main id="main-content">
       {/* schema.org 结构化数据（issue #39）：给搜索引擎/聚合器读的机器可读版本，
           字段口径见 lib/notice-jsonld.ts；用户可见内容全在下方，此处不重复渲染 */}
       <script
@@ -264,11 +281,7 @@ export default async function NoticeDetailPage({ params }: NoticeDetailPageProps
         ) : null}
       </article>
 
-      <footer className="site-footer">
-        <p>
-          本站只聚合官方公开信息，提交意见请一律前往官方渠道；意见的法律效力以官方渠道为准。
-        </p>
-      </footer>
+      <SiteFooter />
     </main>
   );
 }

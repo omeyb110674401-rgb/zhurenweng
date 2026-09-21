@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import type { Metadata } from 'next';
 import { confirmTokenStatus } from '@/db/repo/subscriptions';
+import { SiteFooter } from '@/app/_lib/site-footer';
 
 /**
  * 订阅确认页（issue #7，double opt-in 第二步）：GET /subscribe/confirm?token=…
@@ -44,7 +45,7 @@ export default async function SubscribeConfirmPage({ searchParams }: ConfirmPage
           : '确认链接无效';
 
   return (
-    <main>
+    <main id="main-content">
       <header className="site-header">
         <h1 className="brand" data-testid="subscribe-confirm-title">
           {title}
@@ -84,9 +85,7 @@ export default async function SubscribeConfirmPage({ searchParams }: ConfirmPage
         </section>
       )}
 
-      <footer className="site-footer">
-        <p>提交意见请一律前往官方渠道；本站只聚合官方公开信息并提供解读与提醒。</p>
-      </footer>
+      <SiteFooter />
     </main>
   );
 }

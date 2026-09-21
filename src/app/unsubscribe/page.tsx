@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import type { Metadata } from 'next';
 import { unsubscribeTokenStatus } from '@/db/repo/subscriptions';
+import { SiteFooter } from '@/app/_lib/site-footer';
 
 /**
  * 退订确认页（issue #34）：GET /unsubscribe?token=…
@@ -38,7 +39,7 @@ export default async function UnsubscribePage({ searchParams }: UnsubscribePageP
   const status = await unsubscribeTokenStatus(token);
 
   return (
-    <main>
+    <main id="main-content">
       <header className="site-header">
         <h1 className="brand" data-testid="unsubscribe-title">
           {status === 'confirmable' ? '确认退订' : status === 'unsubscribed' ? '已退订' : '退订链接无效'}
@@ -73,9 +74,7 @@ export default async function UnsubscribePage({ searchParams }: UnsubscribePageP
         </section>
       )}
 
-      <footer className="site-footer">
-        <p>提交意见请一律前往官方渠道；本站只聚合官方公开信息并提供解读与提醒。</p>
-      </footer>
+      <SiteFooter />
     </main>
   );
 }

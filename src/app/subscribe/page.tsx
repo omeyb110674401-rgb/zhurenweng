@@ -1,6 +1,14 @@
 import Link from 'next/link';
+import { cookies } from 'next/headers';
 import { CATEGORY_OPTIONS } from '@/lib/subscription';
 import { mailerReady } from '@/lib/mailer-availability';
+import { simplePageMetadata } from '@/lib/page-metadata';
+import {
+  decodeSubscribeDraft,
+  SUBSCRIBE_DRAFT_COOKIE,
+  type SubscribeDraft,
+} from '@/lib/subscribe-draft';
+import { SiteFooter } from '@/app/_lib/site-footer';
 
 /**
  * 订阅页（issue #7，double opt-in 第一步）：
@@ -9,10 +17,21 @@ import { mailerReady } from '@/lib/mailer-availability';
  *
  * 邮件端口门控（issue #17）：`MAILER_PROVIDER=smtp` 但 SMTP_* 未配置时表单必然
  * 提交失败，此时渲染不可用提示与 RSS 兜底，不渲染表单（见 mailer-availability.ts）。
+ *
+ * 失败回填（issue #53）：校验失败时端点会把已填内容放进短命 cookie（见
+ * lib/subscribe-draft.ts），本页读它做默认值 —— 此前一次「漏选领域」就要把邮箱、
+ * 关键词、勾选全部重填一遍。
  */
 
 // 表单提交后经 303 重定向回本页并携带状态参数，始终实时渲染。
 export const dynamic = 'force-dynamic';
+
+export const metadata = simplePageMetadata({
+  title: '订阅截止提醒',
+  description:
+    '按关键词或领域订阅政府公示与征求意见稿的截止提醒：在截止前 7 天、3 天各收到一封邮件。采用 double opt-in（先确认再生效），每封邮件底部都能一键退订，本站只存邮箱、不建账号。',
+  path: '/subscribe',
+});
 
 const ERROR_MESSAGES: Record<string, string> = {
   invalid_email: '邮箱格式不正确，请检查后重试。',
@@ -38,8 +57,15 @@ export default async function SubscribePage({ searchParams }: SubscribePageProps
   const errorMessage = error !== undefined ? ERROR_MESSAGES[error] : undefined;
   const sent = firstValue(params.sent) === '1';
 
+  // 只有「带着错误回来」时才读草稿（issue #53）：正常访问不该被上一轮的输入影响。
+  // 读不到或解析失败都当没有草稿，绝不让它打断渲染。
+  const draft =
+    errorMessage !== undefined
+      ? decodeSubscribeDraft((await cookies()).get(SUBSCRIBE_DRAFT_COOKIE)?.value)
+      : null;
+
   return (
-    <main>
+    <main id="main-content">
       <nav className="breadcrumb">
         <Link href="/">← 返回公示列表</Link>
       </nav>
@@ -64,23 +90,22 @@ export default async function SubscribePage({ searchParams }: SubscribePageProps
         </p>
       ) : null}
 
-      {mailerReady() ? <SubscribeFormSection /> : <SubscribeUnavailableSection />}
+      {mailerReady() ? <SubscribeFormSection draft={draft} /> : <SubscribeUnavailableSection />}
 
-      <footer className="site-footer">
-        <p>提交意见请一律前往官方渠道；本站只聚合官方公开信息并提供解读与提醒。</p>
-      </footer>
+      <SiteFooter />
     </main>
   );
 }
 
-/** 可用态：订阅规则表单（邮箱 + 关键词 + 领域多选）。 */
-function SubscribeFormSection() {
+/** 可用态：订阅规则表单（邮箱 + 关键词 + 领域多选）。`draft` 非空时回填上一次的输入。 */
+function SubscribeFormSection({ draft }: { draft: SubscribeDraft | null }) {
   return (
     <section className="subscribe-section" aria-labelledby="subscribe-form-title">
       <h2 id="subscribe-form-title">填写订阅规则</h2>
       <p className="section-hint">
         采用 double opt-in：提交后先收到一封确认邮件，点击确认链接后订阅才生效；
         每封邮件底部都可一键退订。本站仅存储订阅邮箱，不建立用户账号。
+        {draft !== null ? '（已保留你上次填写的内容）' : null}
       </p>
 
       <form
@@ -97,6 +122,7 @@ function SubscribeFormSection() {
             name="email"
             required
             placeholder="you@example.com"
+            defaultValue={draft?.email ?? ''}
             data-testid="subscribe-email"
           />
         </div>
@@ -110,6 +136,7 @@ function SubscribeFormSection() {
             type="text"
             name="keywords"
             placeholder="例如：医疗保障 噪声污染防治"
+            defaultValue={draft?.keywords ?? ''}
             data-testid="subscribe-keywords"
           />
         </div>
@@ -123,6 +150,7 @@ function SubscribeFormSection() {
                   type="checkbox"
                   name="categories"
                   value={category}
+                  defaultChecked={draft?.categories.includes(category) ?? false}
                   data-testid="subscribe-category-option"
                 />
                 {category}

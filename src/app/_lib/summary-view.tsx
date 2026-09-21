@@ -50,7 +50,10 @@ function SummarySectionBlock({
 }) {
   return (
     <div className="summary-section" data-testid={testId}>
-      <h3 className="summary-section-title">{label}</h3>
+      {/* 此前是 h3（issue #53）：详情页的标题层级是 h1（条目标题）→ 这里的
+          「这是什么 / 影响谁…」，中间没有 h2，跳级会让读屏的标题导航缺一层。
+          样式走 .summary-section-title，与标签名无关。 */}
+      <h2 className="summary-section-title">{label}</h2>
       <p className="summary-section-text">{children ?? section.text}</p>
       {section.quote ? <SectionQuote notice={notice} quote={section.quote} /> : null}
     </div>
@@ -91,7 +94,7 @@ export function SummaryView({
         <SummarySectionBlock notice={notice} label="这是什么" section={summary.what} testId="summary-what" />
         <SummarySectionBlock notice={notice} label="影响谁" section={summary.who} testId="summary-who" />
         <div className="summary-section" data-testid="summary-key-points">
-          <h3 className="summary-section-title">关键条款</h3>
+          <h2 className="summary-section-title">关键条款</h2>
           <ul className="summary-points">
             {summary.keyPoints.map((point, index) => (
               <li key={index}>
