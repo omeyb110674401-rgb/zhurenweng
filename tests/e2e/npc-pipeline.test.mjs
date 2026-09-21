@@ -353,6 +353,25 @@ describe('issue #3：全国人大源 → 入库 → 列表/详情 → 出站跳�
       '机器请求不应计入北极星指标（45 条各 1 次的爬虫遍历会把指标打满）',
     );
 
+    // 除 UA 之外的两维（issue #52）：HEAD 与预取提示都不是「人读了标题并决定去官方页面」。
+    // HEAD 尤其隐蔽：Next 会用 GET 处理器自动实现 HEAD，于是 curl -I、链接校验器、
+    // 监控探针都成了一次点击。
+    const nonHumanRequests = [
+      { method: 'HEAD', headers: { 'user-agent': BROWSER_UA } },
+      { method: 'GET', headers: { 'user-agent': BROWSER_UA, purpose: 'prefetch' } },
+      { method: 'GET', headers: { 'user-agent': BROWSER_UA, 'sec-purpose': 'prefetch;prerender' } },
+    ];
+    for (const { method, headers } of nonHumanRequests) {
+      const response = await fetch(`${app.url}/go/${noticeId}`, { method, redirect: 'manual', headers });
+      assert.equal(response.status, 302, 'HEAD / 预取也应照常 302');
+      assert.equal(response.headers.get('location'), officialUrl);
+    }
+    assert.equal(
+      extractOutboundClicks(await (await fetch(detailUrl)).text()),
+      baseline,
+      'HEAD 与预取请求不应计入北极星指标',
+    );
+
     // 真人点击仍然计数（对照组：证明上面的「不计数」不是把计数整个关掉）
     await fetch(`${app.url}/go/${noticeId}`, {
       redirect: 'manual',

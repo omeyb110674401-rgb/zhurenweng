@@ -387,4 +387,28 @@ describe('构建与部署卫生', () => {
       assert.match(block, /stop_grace_period: \d+s/, `${service} 应显式声明宽限期`);
     }
   });
+
+  it('关键口令必填（issue #52）：缺配置当场失败，而不是静默用公开默认口令起服务', () => {
+    // 从前是 ${POSTGRES_PASSWORD:-zhurenweng} / ${MEILI_MASTER_KEY:-zhurenweng-change-me} ——
+    // 忘填 .env 时数据库与检索就以**公开已知口令**启动，且没有任何提示。
+    // 改成 ${VAR:?} 后 compose 会带着这句说明直接拒绝启动。
+    for (const key of ['POSTGRES_PASSWORD', 'MEILI_MASTER_KEY']) {
+      assert.ok(
+        composeText.includes(`\${${key}:?`),
+        `${key} 应使用 \${VAR:?说明} 必填语法（缺配置当场失败）`,
+      );
+      assert.ok(
+        !composeText.includes(`\${${key}:-`),
+        `${key} 不该再有 :- 回退值（回退值 = 公开默认口令）`,
+      );
+    }
+  });
+
+  it('限流阈值是完整旋钮（issue #52）：.env.example 声明 + compose 传进 web', () => {
+    const webKeys = services.get('web');
+    for (const key of ['SUBSCRIBE_RATE_LIMIT_PER_HOUR', 'ADMIN_LOGIN_RATE_LIMIT_PER_HOUR']) {
+      assert.ok(envVars.has(key), `${key} 应在 .env.example 里声明`);
+      assert.ok(webKeys?.has(key), `${key} 应传进 web 容器（限流跑在 web 进程里）`);
+    }
+  });
 });

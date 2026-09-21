@@ -6,6 +6,7 @@ import { getSourceById, recordSourceFailure, upsertSource } from '../../src/db/r
 import { syncNoticesToSearchIndex } from '../../src/lib/search/sync.ts';
 import { siteDateIso } from '../../src/lib/dates.ts';
 import { isSourceDegraded } from '../../src/lib/source-health.ts';
+import { isAllowedCrawlUrl } from '../../src/lib/net-guard.ts';
 import { CRAWLER_USER_AGENT } from '../../src/lib/site-identity.ts';
 import {
   sourceAdapters,
@@ -42,11 +43,25 @@ import type { Job, JobContext } from '../registry.ts';
  *
  * 领域标签（issue #9）：入库路径（upsertNotice）自动按关键词规则打标；
  * 适配器可通过 NormalizedNotice.categoryTags 直接给出权威领域（优先采用）。
+ *
+ * 出网守卫（issue #52）：详情 URL 由源站列表 HTML 解析而来，重定向目标同样来自源站 ——
+ * 每一跳都先过 `isAllowedCrawlUrl`（拒绝内网 / 本机 / 元数据地址，口径见 net-guard.ts），
+ * 并限制响应体大小。这是抓取侧唯一的信任边界：源站被挂马不该变成打内网的跳板。
  */
 
 const FETCH_TIMEOUT_MS = 15_000;
-/** 普通重定向的最大跟随跳数（只用于 cookieChallenge 源；防异常站点造成无限跟随）。 */
+/**
+ * 重定向的最大跟随跳数（防异常站点造成无限跟随）。**所有源**共用 —— 从前只有
+ * cookieChallenge 源手动跟随，其余交给 fetch 自动跟（≤20 跳、且不看目标），
+ * 那正是 issue #52 的出网缺口：每一跳都要过守卫，就只能自己跟。
+ */
 const MAX_REDIRECT_HOPS = 5;
+/**
+ * 响应体上限（issue #52）：此前只有 15s 超时，没有大小上限 —— 源站异常（或被挂马）
+ * 持续输出大流量时，15 秒内就能把 worker 内存打满，而 worker 同时跑抓取 / 摘要 /
+ * 提醒，OOM 会中断整条数据管线。政府页面实测都在几百 KB 量级，4 MiB 有十倍余量。
+ */
+const MAX_FETCH_BYTES = 4 * 1024 * 1024;
 /**
  * 详情抓取之间的礼貌间隔（issue #14）：三源都是政府站点，串行连发上百个详情
  * 请求容易被 WAF 判定为爬虫而封 IP，整条数据管线会直接断掉。
@@ -122,62 +137,166 @@ function mergeDetail(notice: NormalizedNotice, detail: ParsedDetail): Normalized
 }
 
 /**
+ * 本次运行显式放行的抓取 origin：E2E 的 fixture 源站跑在 `http://127.0.0.1:<port>`
+ * 上（环回地址），守卫默认会拦掉它 —— 由 SOURCES_FIXTURE_BASE 推导后放行。
+ * 生产不设该变量 → 返回空数组 → 所有内网 / 本机目标一律拒绝。
+ */
+function allowedCrawlOrigins(): string[] {
+  const fixtureBase = process.env.SOURCES_FIXTURE_BASE;
+  if (!fixtureBase) return [];
+  try {
+    return [new URL(fixtureBase).origin];
+  } catch {
+    return [];
+  }
+}
+
+/** 3xx：需要跟随的重定向（WAF 挑战也是一种 3xx，但由调用方按 Set-Cookie 区分）。 */
+function isRedirectStatus(status: number): boolean {
+  return status >= 300 && status < 400;
+}
+
+function sameHost(a: string, b: string): boolean {
+  try {
+    return new URL(a).hostname === new URL(b).hostname;
+  } catch {
+    return false;
+  }
+}
+
+/** 丢弃响应体（重定向 / 超限时调用），失败不掩盖原始错误。 */
+async function discard(response: Response): Promise<void> {
+  await response.body?.cancel().catch(() => undefined);
+}
+
+/** Set-Cookie 的值部分（`k=v`），多枚以 `; ` 连接。 */
+function cookieHeaderOf(response: Response): string {
+  return response.headers
+    .getSetCookie()
+    .map((value) => value.split(';')[0] ?? '')
+    .filter((value) => value.length > 0)
+    .join('; ');
+}
+
+/** 把 Location 解析成绝对地址（相对地址按当前地址解析）。 */
+function absoluteLocation(location: string, current: string): string {
+  try {
+    return new URL(location, current).toString();
+  } catch {
+    throw new Error(`重定向 Location 无法解析：${location}`);
+  }
+}
+
+/**
+ * 带守卫的单次请求（**不自动跟随重定向**，见 MAX_REDIRECT_HOPS）。
+ *
+ * 出网守卫（issue #52）：抓取器请求的是第三方页面给出的地址，被挂马 / 改版的源站
+ * 可以用一个指向 `169.254.169.254` 或内网主机的链接指挥 worker 去请求。判定口径与
+ * 为什么不做同源白名单见 src/lib/net-guard.ts。
+ */
+async function guardedFetch(
+  url: string,
+  allowedOrigins: readonly string[],
+  cookie: string,
+): Promise<Response> {
+  const verdict = isAllowedCrawlUrl(url, allowedOrigins);
+  if (!verdict.ok) {
+    throw new Error(`出网守卫拒绝（${verdict.reason}）：${url}`);
+  }
+  const headers: Record<string, string> = { 'user-agent': USER_AGENT };
+  if (cookie.length > 0) headers.cookie = cookie;
+  return fetch(url, { headers, redirect: 'manual', signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) });
+}
+
+/**
+ * 读取响应体为文本，超过 MAX_FETCH_BYTES 即中止（先看 content-length 快速失败，
+ * 再流式计数兜住「不报长度 / 谎报长度」的响应）。
+ */
+async function readCappedText(response: Response): Promise<string> {
+  const limitText = `${Math.round(MAX_FETCH_BYTES / 1024 / 1024)} MiB`;
+  const declared = Number(response.headers.get('content-length') ?? '');
+  if (Number.isFinite(declared) && declared > MAX_FETCH_BYTES) {
+    await discard(response);
+    throw new Error(`响应体超过 ${limitText} 上限（content-length=${declared}）`);
+  }
+  if (response.body === null) return '';
+
+  const reader = response.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    total += value.byteLength;
+    if (total > MAX_FETCH_BYTES) {
+      await reader.cancel().catch(() => undefined);
+      throw new Error(`响应体超过 ${limitText} 上限（已读取 ${total} 字节）`);
+    }
+    chunks.push(value);
+  }
+  return Buffer.concat(chunks).toString('utf8');
+}
+
+/**
  * 抓取文本（HTML 或接口 JSON 原文）。options 为适配器声明的源级处置：
- * - 默认：普通 fetch，非 2xx 视为失败；
+ * - 默认：普通请求，非 2xx 视为失败；
  * - cookieChallenge（司法部站点实测）：首个响应是 3xx + Set-Cookie 且 Location 指回
- *   同一地址的 WAF 挑战，必须带 cookie 重放一次；用 redirect: 'manual' 接住挑战，
- *   避免 fetch 自动跟随重定向时陷入自我循环。
+ *   同一地址的 WAF 挑战，必须带 cookie 重放一次；因此用 redirect: 'manual' 接住挑战，
+ *   避免自动跟随重定向时陷入自我循环。
  *
  * 注意两种 3xx 必须区分（issue #14 上线后实测踩到）：**带 Set-Cookie 的才是 WAF 挑战**；
  * 不带 Set-Cookie 的是普通重定向（司法部列表里的详情链接写成 http://，服务端 302 到
  * https 且无 cookie），必须跟着走 —— 否则整源详情静默退化为列表层数据（截断标题、
  * 无正文、无截止日期），且日志只留下一条「WAF 未下发 cookie」。
+ *
+ * 两条路径都**手动跟随重定向**（issue #52）：每一跳都过出网守卫、都受跳数上限约束。
+ * WAF cookie 只在**同主机**时携带 —— 它由该主机下发，不该跟着重定向送给别的站点
+ * （同主机的 http→https 升级仍带，那是司法部详情的真实路径）。
  */
-async function fetchText(url: string, options?: SourceFetchOptions, hops = 0): Promise<string> {
-  const headers = { 'user-agent': USER_AGENT };
-  const timeout = (): AbortSignal => AbortSignal.timeout(FETCH_TIMEOUT_MS);
+async function fetchText(url: string, options?: SourceFetchOptions): Promise<string> {
+  const allowedOrigins = allowedCrawlOrigins();
+  let current = url;
+  let cookies = '';
+  let cookieHost: string | null = null;
+  let hops = 0;
 
-  if (!options?.cookieChallenge) {
-    const response = await fetch(url, { headers, signal: timeout() });
+  for (;;) {
+    const cookie = cookieHost !== null && sameHost(current, cookieHost) ? cookies : '';
+    const response = await guardedFetch(current, allowedOrigins, cookie);
+    // 只在「还没拿到 cookie」时接受挑战，否则源站每次都下发 Set-Cookie 会成死循环
+    const granted = cookies.length === 0 ? cookieHeaderOf(response) : '';
+
+    if (granted.length > 0) {
+      // WAF 挑战：带 cookie 重放同一地址（挑战不是重定向，不计跳数）
+      await discard(response);
+      cookies = granted;
+      cookieHost = current;
+      continue;
+    }
+
+    if (isRedirectStatus(response.status)) {
+      const location = response.headers.get('location');
+      await discard(response);
+      if (!location) throw new Error(`HTTP ${response.status}（重定向缺少 Location）`);
+      if (hops >= MAX_REDIRECT_HOPS) {
+        throw new Error(`重定向次数超过 ${MAX_REDIRECT_HOPS} 次：${url}`);
+      }
+      hops += 1;
+      current = absoluteLocation(location, current);
+      continue;
+    }
+
     if (!response.ok) {
-      throw new Error(`HTTP ${response.status}`);
+      throw new Error(
+        options?.cookieChallenge && cookies.length === 0
+          ? `HTTP ${response.status}（WAF 未下发 cookie）`
+          : cookies.length > 0
+            ? `HTTP ${response.status}（携带 WAF cookie 重放后仍失败）`
+            : `HTTP ${response.status}`,
+      );
     }
-    return response.text();
+    return readCappedText(response);
   }
-
-  const challenge = await fetch(url, { headers, redirect: 'manual', signal: timeout() });
-  const cookies = challenge.headers
-    .getSetCookie()
-    .map((value) => value.split(';')[0] ?? '')
-    .filter((value) => value.length > 0)
-    .join('; ');
-
-  if (cookies.length === 0 && challenge.status >= 300 && challenge.status < 400) {
-    const location = challenge.headers.get('location');
-    if (!location) {
-      throw new Error(`HTTP ${challenge.status}（重定向缺少 Location）`);
-    }
-    if (hops >= MAX_REDIRECT_HOPS) {
-      throw new Error(`重定向次数超过 ${MAX_REDIRECT_HOPS} 次：${url}`);
-    }
-    return fetchText(new URL(location, url).toString(), options, hops + 1);
-  }
-
-  if (cookies.length === 0) {
-    if (!challenge.ok) {
-      throw new Error(`HTTP ${challenge.status}（WAF 未下发 cookie）`);
-    }
-    return challenge.text();
-  }
-
-  const response = await fetch(url, {
-    headers: { ...headers, cookie: cookies },
-    signal: timeout(),
-  });
-  if (!response.ok) {
-    throw new Error(`HTTP ${response.status}（携带 WAF cookie 重放后仍失败）`);
-  }
-  return response.text();
 }
 
 /**

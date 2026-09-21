@@ -65,8 +65,10 @@ npm run dev            # http://localhost:3000
 | `LIST_PAGE_SIZE` | `50` | 首页每页条数（issue #19）。列表按倒计时排序分页，合计与总页数取真实总数；改后 `docker compose up -d web` 即生效（无需重建） |
 | `WORKER_INTERVAL_MS` / `WORKER_ONCE` | `60000` / （空） | worker 调度间隔（生产 compose 设为每日） / 单轮模式 |
 | `SOURCES_FIXTURE_BASE` | （空） | 设置后所有源适配器的列表页 URL 重写为 `<base>/<源ID>/<listFixturePath ?? list.html>`（列表为接口的源用 list.json；测试注入 fixture 源站，不设则抓取真实源站） |
-| `ADMIN_TOKEN` | （空） | 管理后台 `/admin` 共享密钥（issue #12）。未配置时恒 401；配置后凭会话 Cookie 或 `?token=` 访问，详见「管理后台与健康告警」 |
+| `ADMIN_TOKEN` | （空） | 管理后台 `/admin` 共享密钥（issue #12）。未配置时恒 401；配置后凭会话 Cookie 访问，`?token=` 用于换取会话（issue #52），详见「管理后台与健康告警」 |
 | `ALERT_EMAIL` | （空） | worker 任务失败告警收件邮箱（issue #12）。未配置则不发送告警 |
+| `SUBSCRIBE_RATE_LIMIT_PER_HOUR` | `10` | 订阅提交的限流阈值（次/小时，按客户端 IP 的固定窗口；0 = 不限流，issue #52）。订阅端点会真的发信，不限流时等于把本站当发信放大器 |
+| `ADMIN_LOGIN_RATE_LIMIT_PER_HOUR` | `30` | 后台登录的限流阈值（同上，issue #52）。计数在**进程内存**里，只对单实例部署有效 |
 
 本地验证抓取管线（fixture 注入）：
 
@@ -450,8 +452,21 @@ worker 注册表中的 `summarize-notices` 任务（`worker/jobs/summarize-notic
 
 - 共享密钥 = 环境变量 `ADMIN_TOKEN`，**未配置时所有 `/admin*` 请求一律 401**
   配置指引页。配置后两种放行方式：登录表单（`POST /admin/login`，令牌正确则
-  303 回 `/admin` 并下发 HttpOnly + SameSite=Lax 会话 Cookie，7 天有效）或直接
-  在 URL 带 `?token=<ADMIN_TOKEN>`（脚本 / curl 友好）；`POST /admin/logout` 退出。
+  303 回 `/admin` 并下发 HttpOnly + Secure + SameSite=Lax 会话 Cookie，7 天有效）
+  或 `?token=` **换取**会话（见下）；`POST /admin/logout` 退出。
+- **`?token=` 只换取会话，不再直接放行**（issue #52）：带 token 的 GET 会下发会话
+  Cookie 并 303 到去掉 token 的同地址 —— 共享密钥因此不会留在浏览器历史 / 书签 /
+  分享出去的链接里（它没有独立吊销手段，改 `ADMIN_TOKEN` 才能作废）。**写操作一律
+  只看 Cookie**，URL 里的凭据不能触发写动作。脚本 / curl 用法（两行）：
+  ```bash
+  # 1) 换取会话（-c 保存 Cookie）
+  curl -s -c /tmp/zw-jar "https://cn101.top/admin?token=$ADMIN_TOKEN" -o /dev/null
+  # 2) 用会话读看板 / 发写操作
+  curl -s -b /tmp/zw-jar https://cn101.top/admin | head
+  curl -s -b /tmp/zw-jar -X POST https://cn101.top/admin/sources -d 'id=moj&action=disable'
+  ```
+- 登录限流（issue #52）：按客户端 IP 的固定窗口（`ADMIN_LOGIN_RATE_LIMIT_PER_HOUR`，
+  缺省 30 次/小时），超限回 429 且文案与「令牌不匹配」区分开。
 - 令牌比较为常量时间（双方各做 SHA-256 后 `timingSafeEqual`）；后台为自包含
   HTML + 表单 POST（零客户端 JS、零认证依赖），写操作未授权一律 401。
 

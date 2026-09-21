@@ -8,6 +8,7 @@ import {
 } from '@/lib/subscription';
 import { upsertSubscriptionRules } from '@/db/repo/subscriptions';
 import { mailerReady } from '@/lib/mailer-availability';
+import { checkRateLimit } from '@/lib/rate-limit';
 
 /**
  * 订阅提交端点（issue #7，double opt-in 第一步）：POST /api/subscriptions
@@ -18,6 +19,16 @@ import { mailerReady } from '@/lib/mailer-availability';
  *
  * 邮件端口门控（issue #17）：邮件通道未配置时直接回 mailer_unavailable，
  * 不写库、不发信 —— 否则会留下一条永远收不到确认邮件的待确认订阅。
+ *
+ * 限流与结果文案（issue #52）：这是**匿名可达且会真的发信**的端点 —— 不限流时
+ * 任何人对任意邮箱反复提交，本站就成了一台以自己域名发信的放大器（进黑名单后连
+ * 正常确认信都投不出去）。另外结果文案**不再区分**「已更新规则」与「已发送确认邮件」：
+ * 那个区分等于给匿名者一个「该邮箱是否已确认订阅」的枚举 oracle（隐私泄露），
+ * 统一成一句对两种分支都成立的话。
+ *
+ * 已知取舍（有意保留）：已确认订阅者只要别人知道其邮箱，规则就会被改写（规则是
+ * 「订阅规则」不是身份凭据）。完整修复要给 subscriptions 加待确认规则暂存列 +
+ * 两方言迁移，属单独一轮；见 docs/pending-issues/FOLLOWUPS.md。
  */
 
 // 每次提交都要实时读写库并发送邮件，禁止静态优化与缓存。
@@ -32,6 +43,11 @@ function redirectTo(path: string): Response {
 }
 
 export async function POST(request: Request): Promise<Response> {
+  // 限流先于一切解析：超限的请求不读表单、不写库、不发信
+  if (!checkRateLimit('subscribe', request).allowed) {
+    return redirectTo('/subscribe?error=rate_limited');
+  }
+
   // 非表单请求体（爬虫 POST JSON、扫描器探测、content-type 错配）会让 formData() 抛错，
   // 未捕获就是 500（issue #51）。这是**公开**端点，别让一个乱发的 POST 变成错误页：
   // 按「表单不合法」处理，回订阅页说明。
@@ -85,8 +101,8 @@ export async function POST(request: Request): Promise<Response> {
       );
       return redirectTo('/subscribe?error=send_failed');
     }
-    return redirectTo('/subscribe?sent=1');
   }
 
-  return redirectTo('/subscribe?updated=1');
+  // 两种结果回同一个参数（见文件头的防枚举说明）
+  return redirectTo('/subscribe?sent=1');
 }

@@ -139,6 +139,21 @@ export function createFixtureServer({ fixturesDir, host = '127.0.0.1', port = 0 
         res.end();
         return;
       }
+      // 测试专用：`/__redirect?to=<地址>` 原样 302 到指定地址（issue #52）。
+      // 用来验证「重定向的每一跳都要过出网守卫」—— 源站上一个开放重定向就能把
+      // 抓取器引到内网，只有第一跳受检是拦不住的。真实源站的重定向行为由上面的
+      // marker 文件（waf-cookie-challenge / plain-redirect）模拟，本路由只服务于守卫用例。
+      if (segments[0] === '__redirect') {
+        const to = url.searchParams.get('to') ?? '';
+        if (to.length === 0) {
+          res.writeHead(400, { 'content-type': 'text/plain; charset=utf-8' });
+          res.end('missing to');
+          return;
+        }
+        res.writeHead(302, { location: to });
+        res.end();
+        return;
+      }
       // 目录式接口路径（真实站点以 …/flca/<id>/info/ 形式提供 JSON 数据）→
       // 目录下的 index.json / index.html；其余路径按文件精确匹配。
       const candidates = url.pathname.endsWith('/')

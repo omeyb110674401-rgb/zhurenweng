@@ -111,11 +111,24 @@ export function renderFlash(ok: string | null, error: string | null): string {
   return '';
 }
 
-/** 未授权引导页（401）：配置了 ADMIN_TOKEN 时展示登录表单，否则给出配置指引。 */
-export function renderUnauthorizedBody(options: { tokenConfigured: boolean; mismatch: boolean }): string {
+/**
+ * 引导页（401 / 429）：配置了 ADMIN_TOKEN 时展示登录表单，否则给出配置指引。
+ * `rateLimited` 是登录限流（issue #52）—— 文案必须与「令牌不匹配」区分开，
+ * 否则站长会以为自己的令牌错了，反复重试只会让窗口继续被拒。
+ */
+export function renderUnauthorizedBody(options: {
+  tokenConfigured: boolean;
+  mismatch: boolean;
+  rateLimited?: boolean;
+}): string {
   const inner = options.tokenConfigured
     ? [
         '<p class="muted">输入管理令牌进入控制台。令牌由环境变量 ADMIN_TOKEN 配置，登录状态保持 7 天。</p>',
+        ...(options.rateLimited
+          ? [
+              '<p class="login-error" data-testid="admin-login-rate-limited">尝试过于频繁，已暂时拒绝登录请求，请稍后再试。</p>',
+            ]
+          : []),
         ...(options.mismatch
           ? ['<p class="login-error" data-testid="admin-login-error">令牌不匹配或已失效，请重试。</p>']
           : []),

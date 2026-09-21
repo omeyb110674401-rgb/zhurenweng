@@ -189,16 +189,36 @@ describe('issue #12：管理后台与健康告警', () => {
     assert.ok(setCookie, '登录成功下发会话 Cookie');
     assert.match(setCookie, /HttpOnly/, '会话 Cookie 为 HttpOnly');
     assert.match(setCookie, /SameSite=Lax/, '会话 Cookie 为 SameSite=Lax');
+    assert.match(setCookie, /Secure/, '会话 Cookie 为 Secure（值即长期凭据，不能走明文 HTTP）');
     cookie = setCookie.split(';')[0];
 
-    // 会话 Cookie 与 ?token= 两条路径都能访问看板
+    // 会话 Cookie 能访问看板
     response = await getAdmin('');
     assert.equal(response.status, 200);
     assert.match(await response.text(), /data-testid="admin-dashboard"/);
 
+    // `?token=` 只换取会话（issue #52）：不再直接放行 —— 303 + 下发 Cookie，
+    // 且 Location 里不带 token（共享密钥不该留在浏览器历史 / 书签 / 分享的链接里）
     response = await getAdmin(`?token=${encodeURIComponent(ADMIN_TOKEN)}`, false);
-    assert.equal(response.status, 200);
-    assert.match(await response.text(), /data-testid="admin-dashboard"/);
+    assert.equal(response.status, 303, '?token= 应换取会话而不是直接放行');
+    assert.equal(response.headers.get('location'), '/admin', '换取后落到去掉 token 的地址');
+    const exchanged = response.headers
+      .getSetCookie()
+      .find((value) => value.startsWith('zw_admin_session='));
+    assert.ok(exchanged, '换取时应下发会话 Cookie');
+    response = await fetch(`${app.url}/admin`, { headers: { cookie: exchanged.split(';')[0] } });
+    assert.equal(response.status, 200, '换取来的会话可正常访问看板');
+
+    // 反向断言：写操作不接受 URL 里的凭据（换取只对 GET 生效）——
+    // 否则一次误点的链接就能触发写动作。action 用 enable：万一断言失效也不改变状态。
+    response = await fetch(`${app.url}/admin/sources?token=${encodeURIComponent(ADMIN_TOKEN)}`, {
+      method: 'POST',
+      body: new URLSearchParams({ id: 'moj', action: 'enable' }),
+      redirect: 'manual',
+    });
+    assert.equal(response.status, 401, 'POST 带 ?token= 无会话应 401');
+    response = await getAdmin(`?token=${encodeURIComponent('wrong-token')}`, false);
+    assert.equal(response.status, 401, '错误 token 不换取会话');
 
     // 退出登录：清除 Cookie 后回到 401
     response = await postAdmin('/admin/logout', {});

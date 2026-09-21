@@ -34,6 +34,12 @@
 | #51 | **npm audit 4 个 moderate** | 不修：全部来自 `drizzle-kit → @esbuild-kit/esm-loader → esbuild`（dev-only，容器内不可达），`fixAvailable` 是降级到 `drizzle-kit@0.18`（会破坏配置）。等上游升级 |
 | #51 | **tsconfig 严格度**：`noUncheckedIndexedAccess` / `exactOptionalPropertyTypes` / `noImplicitOverride` / `noFallthroughCasesInSwitch` / `noUnusedLocals` 均未开 | 未做：审计未发现现存缺陷（现有索引访问都有守卫），开启需要成片改动。值得单开一轮做 |
 | #51 | **提醒邮件「先发后记」的跨进程双发窗口** | 有意保留：at-least-once（重复提醒比漏提醒可接受），跨进程由「单实例部署 + worker 重入保护」覆盖。若将来要多副本，改成 claim-first（先占位再发） |
+| #52 | **CSP（内容安全策略）** | 未做：后台 HTML 用内联 `<style>`、Next 自身有内联引导脚本，严格 CSP 需要 nonce 体系；宽松 CSP（'unsafe-inline'）只是自我安慰。其余五个安全头已随 #52 落地 |
+| #52 | **DNS 层 SSRF** | 未做：`src/lib/net-guard.ts` 只做**字面量**判定（内网 IP / 本机主机名 / 单标签），不做 DNS 解析 —— 公网域名解析到私网 IP（rebinding、内网域名）仍能穿透。要覆盖得引入 `node:dns` 解析 + 结果缓存，且每个新主机多一次解析延迟；对「十个固定政府站点」的抓取面收益不抵复杂度 |
+| #52 | **点击两个口径可漂移** | 未做（已实测确认）：`recordOutboundClick` 写两处（`notices.outbound_clicks` + `outbound_click_daily`），第一条成功后第二条失败即漂移。包进事务做不到 —— **实测** drizzle 的 better-sqlite3 事务要求同步回调，`db.transaction(async …)` 抛「Transaction function cannot return a promise」，而按驱动分支会多出第二处方言代码（ADR-0001 只允许 `periodDaysExpr`）。更彻底的替代：把 `outbound_click_daily` 当唯一真源，总额改 `sum(clicks)`（要迁移 + 改统计与详情页两处查询） |
+| #52 | **订阅规则可被第三方改写** | 有意保留（已与用户确认）：已确认订阅者只要别人知道其邮箱，重复提交就会改写其规则（#52 已用限流堵住发信放大、用统一文案去掉「是否已确认」的枚举信号）。完整修复要给 `subscriptions` 加「待确认规则」暂存列 + 两方言迁移 + 确认时套用 —— 属单独一轮 |
+| #52 | **限流是单实例方案** | 未做：计数在进程内存（`src/lib/rate-limit.ts`），多副本部署时实际阈值 = 设定值 × 副本数，重启清零。横向扩容前要换共享存储（Redis / 库表） |
+| #52 | **后台凭据的吊销** | 有意保留：共享密钥模型没有「登出即失效」——Cookie 只是它的副本，改 `ADMIN_TOKEN` 才能作废。#52 已把 `?token=` 收紧为「换取会话」并给 Cookie 加 Secure + 全站 HSTS，缩小在途暴露窗口 |
 
 ## 三、有意不做（by design，别当成遗漏）
 
@@ -52,3 +58,9 @@
   做成链接容易让人以为「点进去就是这个数字」。
 - **`/diff` 与 `/search` 不加 canonical**（#42 / #38）：noindex 页不需要自指 canonical，且写
   `alternates` 会覆盖 layout 的 RSS 自动发现（#41 的教训）。
+- **401 页透露「ADMIN_TOKEN 是否已配置」**（#52）：两种情况都是 401，且配置指引对运维
+  有用（未配置时页面就写着怎么配）；信息价值低于运维价值。
+- **跨源同一公告只按「同 URL」去重**（#52）：README 已声明该口径；两个源以不同 URL
+  发布同一公告时会各成一行，属已知边界而非缺陷。
+- **邮件主题长度无上限**（#52）：主题拼接源站标题，异常源可能给出超长主题。注入不成立
+  （nodemailer 对含非 ASCII 的头整体做 RFC2047 编码），仅健壮性，暂不处理。

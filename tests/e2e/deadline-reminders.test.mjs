@@ -134,6 +134,20 @@ function postSubscription({ email, keywords = '', categories = [] }) {
   });
 }
 
+/**
+ * 点确认页上的「确认订阅」按钮（POST 动作端点，issue #52），跟随 303 到结果页。
+ * 与 postSubscription 分开：一个是提交订阅，一个是确认订阅，语义不同。
+ */
+async function postConfirm(token) {
+  const response = await fetch(`${app.url}/subscribe/confirm/submit`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({ token }),
+    redirect: 'follow',
+  });
+  return { response, html: await response.text() };
+}
+
 /** 从邮件文本中提取站内链接（确认 / 退订）。 */
 function extractLink(text, pathPrefix) {
   const matches = [...text.matchAll(new RegExp(`https?://\\S+${pathPrefix}\\?token=[A-Za-z0-9_-]+`, 'g'))];
@@ -243,7 +257,9 @@ describe('issue #7：订阅 double opt-in → 截止提醒 → 一键退订', ()
     assert.equal(response.status, 303);
     assert.match(response.headers.get('location'), /sent=1/);
     const { html } = await followGet(`${app.url}/subscribe?sent=1`);
-    assert.match(html, /确认邮件已发送/);
+    // 文案对「已订阅（规则已更新）」与「新订阅（已发确认信）」两种分支都成立（issue #52：
+    // 区分这两种回复等于给匿名者一个「该邮箱是否已确认订阅」的枚举 oracle）
+    assert.match(html, /已收到你的订阅设置/);
     assert.match(html, /确认前订阅不生效/);
 
     const mails = mailsTo(ALICE);
@@ -274,9 +290,17 @@ describe('issue #7：订阅 double opt-in → 截止提醒 → 一键退订', ()
     assert.match(mails[1].text, /噪声污染防治、医疗保障/, '规则应更新为 v2');
     assert.match(mails[1].text, /领域：生态环境/, '规则应更新为 v2（领域）');
 
+    // 退订 token 不轮换（issue #52）：它印在每一封发出的邮件底部，轮换会让旧邮件里的
+    // 退订链接全部失效（点开只得到「退订链接无效」），而口径是「每封邮件都可退订」。
+    assert.equal(
+      new URL(extractLink(mails[1].text, '/unsubscribe')).searchParams.get('token'),
+      new URL(extractLink(mails[0].text, '/unsubscribe')).searchParams.get('token'),
+      '重新提交不该轮换退订 token',
+    );
+
     const oldResult = await followGet(oldLink);
-    assert.match(oldResult.response.url, /state=invalid/);
-    assert.match(oldResult.html, /确认链接无效/);
+    assert.match(oldResult.html, /确认链接无效/, '旧确认链接应落到「无效」状态页');
+    assert.match(oldResult.html, /data-testid="subscribe-confirm-status"/);
   });
 
   it('bob 提交订阅并收到确认邮件', async () => {
@@ -294,15 +318,32 @@ describe('issue #7：订阅 double opt-in → 截止提醒 → 一键退订', ()
     assert.equal(readOutbox().length, 3, 'outbox 应只有 3 封确认邮件，无任何提醒');
   });
 
-  it('点击确认链接后订阅生效（alice 新链接成功，旧链接已失效）', async () => {
+  it('确认动作只在 POST：打开确认链接（GET）不确认，点按钮才生效', async () => {
     const aliceLink = extractLink(mailsTo(ALICE)[1].text, '/subscribe/confirm');
-    const aliceResult = await followGet(aliceLink);
+    const aliceToken = new URL(aliceLink).searchParams.get('token');
+
+    // 1) 邮件网关预取（GET）只落到只读确认页 —— 这正是 issue #52 要修的东西：
+    //    从前 GET 直接写库，预取即确认，邮箱主人毫不知情还赔掉那个确认链接
+    const prefetch = await followGet(aliceLink);
+    assert.match(prefetch.html, /data-testid="subscribe-confirm-submit"/, '确认页应给出确认按钮');
+    assert.match(prefetch.html, /确认订阅/);
+
+    // 反向断言：GET 不写库 —— 再打开一次仍是「待确认」（若已确认，页面会渲染状态区而不是按钮）
+    const again = await followGet(aliceLink);
+    assert.match(
+      again.html,
+      /data-testid="subscribe-confirm-submit"/,
+      'GET 预取不得确认订阅（页面应仍处于待确认）',
+    );
+
+    // 2) 点按钮（POST）才真正确认
+    const aliceResult = await postConfirm(aliceToken);
     assert.match(aliceResult.response.url, /\/subscribe\/confirmed$/);
     assert.match(aliceResult.html, /订阅已确认/);
     assert.match(aliceResult.html, /截止前 7 天、3 天各发送一封提醒邮件/);
 
     const bobLink = extractLink(mailsTo(BOB)[0].text, '/subscribe/confirm');
-    const bobResult = await followGet(bobLink);
+    const bobResult = await postConfirm(new URL(bobLink).searchParams.get('token'));
     assert.match(bobResult.response.url, /\/subscribe\/confirmed$/);
     assert.match(bobResult.html, /订阅已确认/);
   });

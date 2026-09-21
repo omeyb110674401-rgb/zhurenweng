@@ -35,7 +35,7 @@ services:
     environment:
       NODE_ENV: production
       DB_DRIVER: postgres
-      DATABASE_URL: postgres://zhurenweng:${POSTGRES_PASSWORD:-zhurenweng}@db:5432/zhurenweng
+      DATABASE_URL: postgres://zhurenweng:${POSTGRES_PASSWORD:?必须在服务器 .env 中设置 POSTGRES_PASSWORD}@db:5432/zhurenweng
       # LLM 与邮件在生产通过环境变量接入真实服务商（ADR-0001 第 5 条）。
       # 变量名必须与代码读取的一致：glm 端口读 GLM_API_KEY（adapters/glm-llm.ts），
       # 摘要区可用性门控也读同一个名字（lib/llm-availability.ts）—— 曾误传 LLM_API_KEY，
@@ -61,7 +61,7 @@ services:
       MAIL_FROM: ${MAIL_FROM:-}
       SEARCH_PROVIDER: meilisearch
       MEILI_URL: http://meilisearch:7700
-      MEILI_MASTER_KEY: ${MEILI_MASTER_KEY:-}
+      MEILI_MASTER_KEY: ${MEILI_MASTER_KEY:?必须在服务器 .env 中设置 MEILI_MASTER_KEY}
       # 管理后台令牌与告警收件邮箱（issue #12）
       SITE_URL: ${SITE_URL:-}
       APP_BASE_URL: ${APP_BASE_URL:-}
@@ -69,6 +69,10 @@ services:
       ALERT_EMAIL: ${ALERT_EMAIL:-}
       # 页脚 ICP 备案号（未配置时页脚显示占位文案）
       ICP_NUMBER: ${ICP_NUMBER:-}
+      # 限流阈值（issue #52）：按客户端 IP 的固定窗口，单位「次/小时」；0 = 不限流。
+      # 计数在进程内存里 —— 单实例部署有效，多副本时实际阈值会乘以副本数。
+      SUBSCRIBE_RATE_LIMIT_PER_HOUR: ${SUBSCRIBE_RATE_LIMIT_PER_HOUR:-}
+      ADMIN_LOGIN_RATE_LIMIT_PER_HOUR: ${ADMIN_LOGIN_RATE_LIMIT_PER_HOUR:-}
     ports:
       - "127.0.0.1:3000:3000"
     depends_on:
@@ -90,7 +94,7 @@ services:
     environment:
       NODE_ENV: production
       DB_DRIVER: postgres
-      DATABASE_URL: postgres://zhurenweng:${POSTGRES_PASSWORD:-zhurenweng}@db:5432/zhurenweng
+      DATABASE_URL: postgres://zhurenweng:${POSTGRES_PASSWORD:?必须在服务器 .env 中设置 POSTGRES_PASSWORD}@db:5432/zhurenweng
       LLM_PROVIDER: ${LLM_PROVIDER:-glm}
       # 预设服务商（默认智谱 GLM）
       GLM_API_KEY: ${GLM_API_KEY:-}
@@ -112,7 +116,7 @@ services:
       MAIL_FROM: ${MAIL_FROM:-}
       SEARCH_PROVIDER: meilisearch
       MEILI_URL: http://meilisearch:7700
-      MEILI_MASTER_KEY: ${MEILI_MASTER_KEY:-}
+      MEILI_MASTER_KEY: ${MEILI_MASTER_KEY:?必须在服务器 .env 中设置 MEILI_MASTER_KEY}
       # 任务失败告警收件邮箱（issue #12；未配置则不发告警）
       APP_BASE_URL: ${APP_BASE_URL:-}
       ALERT_EMAIL: ${ALERT_EMAIL:-}
@@ -134,7 +138,7 @@ services:
     restart: unless-stopped
     environment:
       POSTGRES_USER: zhurenweng
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-zhurenweng}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?必须在服务器 .env 中设置 POSTGRES_PASSWORD}
       POSTGRES_DB: zhurenweng
     volumes:
       - db-data:/var/lib/postgresql/data
@@ -148,7 +152,7 @@ services:
     image: getmeili/meilisearch:v1.13
     restart: unless-stopped
     environment:
-      MEILI_MASTER_KEY: ${MEILI_MASTER_KEY:-zhurenweng-change-me}
+      MEILI_MASTER_KEY: ${MEILI_MASTER_KEY:?必须在服务器 .env 中设置 MEILI_MASTER_KEY}
       MEILI_NO_ANALYTICS: "true"
     volumes:
       - meili-data:/meili_data

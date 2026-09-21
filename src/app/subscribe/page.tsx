@@ -21,6 +21,7 @@ const ERROR_MESSAGES: Record<string, string> = {
   unknown_category: '包含未知领域，请重新选择。',
   send_failed: '确认邮件发送失败，请稍后重试。',
   mailer_unavailable: '邮件订阅暂未开放（邮件通道配置中），请先用 RSS 订阅。',
+  rate_limited: '提交过于频繁，已暂时拒绝本次请求。请稍后再试。',
 };
 
 interface SubscribePageProps {
@@ -36,7 +37,6 @@ export default async function SubscribePage({ searchParams }: SubscribePageProps
   const error = firstValue(params.error);
   const errorMessage = error !== undefined ? ERROR_MESSAGES[error] : undefined;
   const sent = firstValue(params.sent) === '1';
-  const updated = firstValue(params.updated) === '1';
 
   return (
     <main>
@@ -53,12 +53,9 @@ export default async function SubscribePage({ searchParams }: SubscribePageProps
 
       {sent ? (
         <p className="form-banner form-banner-ok" data-testid="subscribe-sent-banner">
-          确认邮件已发送，请查收邮箱并点击确认链接；确认前订阅不生效，不会收到任何提醒邮件。
-        </p>
-      ) : null}
-      {updated ? (
-        <p className="form-banner form-banner-ok" data-testid="subscribe-updated-banner">
-          你的订阅规则已更新，无需再次确认。
+          已收到你的订阅设置：如果该邮箱此前已确认订阅，规则已立即更新（无需再次确认）；
+          如果是新订阅或此前退订过，请查收确认邮件并点击确认链接 —— 确认前订阅不生效，
+          不会收到任何提醒邮件。
         </p>
       ) : null}
       {errorMessage ? (

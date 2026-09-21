@@ -12,6 +12,10 @@ import { siteDateIso } from '@/lib/dates';
  * 机器请求过滤（issue #17）：北极星指标衡量的是人的参与意愿，而爬虫遍历全站
  * 详情页会把每条的 /go 都点一遍 —— 上线首日实测 45 条各 1 次点击、全部来自
  * 一次机器遍历，指标被污染。命中机器特征时照常 302（绝不打断跳转），只是不计数。
+ *
+ * 判定维度在 issue #52 从「UA 一维」扩到「UA + 请求方法 + 预取提示」：Next 会用 GET
+ * 处理器自动实现 HEAD（`curl -I` 也成了一次点击），而 `Purpose: prefetch` 型请求是
+ * 读者还没点就来的。两类都不是「人读了标题并决定去官方页面」。
  */
 
 // 每次请求都要实时读库与计数，禁止静态优化与缓存。
@@ -42,12 +46,33 @@ const SCRIPT_CLIENT_UA =
   /^(node|nodejs|undici|curl|wget|python-requests|python-urllib|httpx|aiohttp|axios|node-fetch|go-http-client|java|okhttp)(\/[\d.]+)?$/i;
 
 /**
- * 请求是否来自机器（爬虫 / 脚本）：是则不计入北极星指标。
+ * 请求为什么不该计入北极星指标：返回原因字符串，可计数时返回 null。
+ *
  * 空 UA 也算机器 —— 真实浏览器一定会带 UA。
+ *
+ * 除 UA 之外的两维（issue #52）：
+ * - **HEAD**：Next 会用 GET 处理器自动实现 HEAD（App Router 的既定行为），于是
+ *   `curl -I`、链接校验器、监控探针都成了「一次点击」；
+ * - **预取 / 预渲染**：`Purpose: prefetch`（Chrome 的推测性预取）与
+ *   `Sec-Purpose: prefetch|prerender` 会在读者**还没点**的时候就来取一次。
+ * 两者都不是「人读了标题并决定去官方页面」，计进去等于自己给指标灌水 ——
+ * 库内那 46 行机器点击就是这么来的（issue #17 的 UA 过滤只挡住了其中一类）。
  */
-function isMachineRequest(request: Request): boolean {
+function notCountableReason(request: Request): string | null {
   const ua = (request.headers.get('user-agent') ?? '').trim();
-  return ua === '' || SCRIPT_CLIENT_UA.test(ua) || BOT_UA_PATTERN.test(ua);
+  if (ua === '') return '空 UA';
+  if (SCRIPT_CLIENT_UA.test(ua) || BOT_UA_PATTERN.test(ua)) {
+    return `机器 UA：${ua.slice(0, 120)}`;
+  }
+  if (request.method === 'HEAD') return 'HEAD 请求';
+
+  const purpose = `${request.headers.get('purpose') ?? ''} ${request.headers.get('sec-purpose') ?? ''}`
+    .trim()
+    .toLowerCase();
+  if (purpose.includes('prefetch') || purpose.includes('prerender')) {
+    return `预取 / 预渲染：${purpose}`;
+  }
+  return null;
 }
 
 export async function GET(
@@ -60,20 +85,24 @@ export async function GET(
     return NextResponse.json({ error: '未找到该公示条目' }, { status: 404, headers: NO_STORE });
   }
 
+  // 协议白名单（issue #52，纵深防御）：写入侧都已守卫（爬虫过 resolveUrl、人工补录
+  // 强制 http/https），但只要库里出现一条非 http(s) 的 url，302 的 Location 就会
+  // 变成 `javascript:` / `data:` —— 浏览器多数会拦，但那不是我们该依赖的东西。
   let target: URL;
   try {
     target = new URL(notice.url);
   } catch {
     return NextResponse.json({ error: '该条目缺少有效的官方原文链接' }, { status: 500, headers: NO_STORE });
   }
+  if (target.protocol !== 'http:' && target.protocol !== 'https:') {
+    console.error(`[go] noticeId=${id} 官方原文链接协议非法：${target.protocol}`);
+    return NextResponse.json({ error: '该条目缺少有效的官方原文链接' }, { status: 500, headers: NO_STORE });
+  }
 
-  if (isMachineRequest(request)) {
-    // 机器请求不计数：日志只记判定与机器 UA（爬虫指纹，非个人身份），
-    // 便于日后排查「北极星指标又被谁打满了」。
-    const ua = (request.headers.get('user-agent') ?? '').trim();
-    console.log(
-      `[go] date=${siteDateIso(new Date())} noticeId=${id} counted=false ua=${ua.slice(0, 120) || '(empty)'}`,
-    );
+  const skipReason = notCountableReason(request);
+  if (skipReason !== null) {
+    // 不计数的请求照常 302（绝不打断跳转）：日志只记判定与机器指纹，不含个人身份。
+    console.log(`[go] date=${siteDateIso(new Date())} noticeId=${id} counted=false 原因=${skipReason}`);
     return NextResponse.redirect(target, { status: 302, headers: REDIRECT_HEADERS });
   }
 
