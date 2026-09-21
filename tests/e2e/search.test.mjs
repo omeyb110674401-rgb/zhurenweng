@@ -210,6 +210,23 @@ describe('issue #8：抓取 → 索引 → 搜索命中（SearchPort local）', 
     );
   });
 
+  it('纯标点查询给出「没有可检索字符」的说明，而不是全库结果（issue #32）', async () => {
+    // 诚实说明这条断言覆盖到哪：e2e 走 local SearchPort，本地路径对纯标点本来就返回 0 条，
+    // 所以**它在修复前也会通过** —— 这里守的是「结果页对该情形有专门文案、且不渲染条目」。
+    // 真正的红色断言在单测 tests/unit/search-query.test.mjs（Meilisearch 适配器对无词元
+    // 查询必须不发请求），因为生产缺陷（整库 178 条被当成命中）只出现在 Meilisearch 路径。
+    for (const query of ['《》', '---']) {
+      const html = stripSsrComments(
+        await (await fetch(`${app.url}/search?q=${encodeURIComponent(query)}`)).text(),
+      );
+      assert.match(html, /data-testid="search-unusable-query"/);
+      assert.match(html, /没有可检索的字符/);
+      assert.match(html, /请输入至少一个汉字、字母或数字/);
+      assert.match(html, /data-testid="search-result-count"[^>]*>共 0 条/);
+      assert.equal(extractNoticeItems(html).length, 0, '不应渲染任何条目');
+    }
+  });
+
   it('无关关键词返回空态，提示友好', async () => {
     const html = stripSsrComments(await (await fetch(`${app.url}/search?q=区块链`)).text());
     assert.match(html, /data-testid="search-empty-state"/);

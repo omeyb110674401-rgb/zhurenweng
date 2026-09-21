@@ -8,7 +8,7 @@ import {
   type SearchPort,
   type SearchResult,
 } from '../ports.ts';
-import { buildFts5MatchQuery, summarySearchText, toCjkSpacedText } from './search-text.ts';
+import { buildFts5MatchQuery, hasSearchableQuery, summarySearchText, toCjkSpacedText } from './search-text.ts';
 
 /**
  * SearchPort 本地实现（issue #8，ADR-0001 第 2 条）：开发 / 测试默认检索后端，
@@ -85,7 +85,9 @@ export class LocalSearch implements SearchPort {
     const trimmed = query.trim();
     const perPage = normalizePerPage(options.perPage);
     const page = normalizePage(options.page);
-    if (trimmed === '') return { total: 0, hits: [] };
+    // 无词元查询（纯标点 / 空白）一律无命中 —— 与 Meilisearch 适配器共用同一判据，
+    // 免得两条路径给出不同答案（issue #32：Meilisearch 那边会把整库当命中返回）
+    if (!hasSearchableQuery(trimmed)) return { total: 0, hits: [] };
     if (currentDriver() === 'postgres') return this.searchPostgres(trimmed, page, perPage);
     return this.searchSqlite(trimmed, page, perPage);
   }

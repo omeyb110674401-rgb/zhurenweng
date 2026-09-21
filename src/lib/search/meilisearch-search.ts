@@ -6,6 +6,7 @@ import {
   type SearchPort,
   type SearchResult,
 } from '../ports.ts';
+import { hasSearchableQuery } from './search-text.ts';
 
 /**
  * SearchPort 生产适配器：Meilisearch（issue #8，PRD 技术栈决策）。
@@ -43,6 +44,8 @@ export interface MeilisearchConfig {
   indexUid: string;
   /** 异步任务等待上限（毫秒） */
   taskTimeoutMs: number;
+  /** fetch 实现（测试注入假 fetch 用，缺省用全局 fetch —— 与 LLM 适配器同一套路数） */
+  fetchImpl?: typeof fetch;
 }
 
 export class MeilisearchSearch implements SearchPort {
@@ -52,6 +55,7 @@ export class MeilisearchSearch implements SearchPort {
   private readonly apiKey: string | undefined;
   private readonly indexUid: string;
   private readonly taskTimeoutMs: number;
+  private readonly fetchImpl: typeof fetch;
   /** 首次使用时确保索引与可搜索属性就绪（幂等，只执行一次） */
   private ensurePromise: Promise<void> | undefined;
 
@@ -60,6 +64,7 @@ export class MeilisearchSearch implements SearchPort {
     this.apiKey = config.apiKey;
     this.indexUid = config.indexUid;
     this.taskTimeoutMs = config.taskTimeoutMs;
+    this.fetchImpl = config.fetchImpl ?? fetch;
   }
 
   async index(documents: SearchDocument[]): Promise<void> {
@@ -88,7 +93,9 @@ export class MeilisearchSearch implements SearchPort {
    */
   async search(query: string, options: SearchOptions = {}): Promise<SearchResult> {
     const trimmed = query.trim();
-    if (trimmed === '') return { total: 0, hits: [] };
+    // 纯标点 / 空白查询：Meilisearch 会当成空查询、把整库当命中返回（issue #32），
+    // 在发请求之前就按「无命中」短路 —— 与本地 FTS5 路径同口径（见 hasSearchableQuery）
+    if (!hasSearchableQuery(trimmed)) return { total: 0, hits: [] };
     const page = Number.isInteger(options.page) && (options.page ?? 0) > 0 ? options.page : 1;
     const perPage =
       Number.isInteger(options.perPage) && (options.perPage ?? 0) > 0
@@ -168,7 +175,7 @@ export class MeilisearchSearch implements SearchPort {
     }
     let response: Response;
     try {
-      response = await fetch(`${this.host}${path}`, {
+      response = await this.fetchImpl(`${this.host}${path}`, {
         ...init,
         headers,
         signal: AbortSignal.timeout(this.taskTimeoutMs),

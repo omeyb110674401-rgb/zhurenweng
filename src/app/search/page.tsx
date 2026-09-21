@@ -2,6 +2,7 @@ import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import { getNoticesByIds } from '@/db/repo/notices';
 import { createSearchPort } from '@/lib/ports';
+import { hasSearchableQuery } from '@/lib/search/search-text';
 import { NoticeItem } from '@/app/_lib/notice-item';
 import { SearchForm } from '@/app/_lib/search-form';
 import { IcpFiling } from '@/app/_lib/icp-filing';
@@ -56,6 +57,9 @@ export default async function SearchPage({ searchParams }: SearchPageProps) {
 
   const perPage = pageSize();
   const requestedPage = pageParam(params.page);
+  // 无词元查询（纯标点 / 空白）：说清楚「该输什么」，而不是拿一个空结果页或全库结果搪塞
+  // （issue #32：生产 Meilisearch 会把整库当命中返回 178 条）
+  const searchable = hasSearchableQuery(query);
 
   // 检索失败（如生产 Meilisearch 不可达）渲染错误态，不让页面 500
   let total = 0;
@@ -113,6 +117,17 @@ export default async function SearchPage({ searchParams }: SearchPageProps) {
             <p className="empty-title">搜索服务暂时不可用</p>
             <p className="empty-hint">
               请稍后重试，或
+              <Link className="search-back-link" href="/">
+                返回公示列表
+              </Link>
+              浏览全部条目。
+            </p>
+          </div>
+        ) : !searchable ? (
+          <div className="empty-state" data-testid="search-unusable-query">
+            <p className="empty-title">「{query}」里没有可检索的字符</p>
+            <p className="empty-hint">
+              请输入至少一个汉字、字母或数字（如「医疗保障」「征求意见」「App」），或
               <Link className="search-back-link" href="/">
                 返回公示列表
               </Link>

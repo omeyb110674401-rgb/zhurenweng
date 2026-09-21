@@ -34,6 +34,26 @@ const WORD_BOUNDARY = new RegExp(
 const CJK_RUN = new RegExp(`${CJK_CHAR}+`, 'g');
 /** 连续 ASCII 字母数字片段（英文 / 数字关键词，走前缀匹配） */
 const ASCII_RUN = /[A-Za-z0-9]+/g;
+/**
+ * 单个可检索字符（**不带 /g**）：`hasSearchableQuery` 用它做存在性判断。
+ * 刻意不复用上面两个 /g 正则 —— 带 /g 的正则 `test()` 会推进 lastIndex，
+ * 同一个正则反复判断会隔次给出错误结果（经典陷阱）。
+ */
+const CJK_ANY = new RegExp(CJK_CHAR);
+const ASCII_ANY = /[A-Za-z0-9]/;
+
+/**
+ * 查询里是否含可检索字符（汉字 / 字母 / 数字）。
+ *
+ * 为什么需要这个判据（issue #32）：线上搜「《》」「---」「。。。」这类**纯标点**查询时，
+ * 结果页给出「共 178 条，按相关度排序」—— Meilisearch 把「没有任何可检索词元」的查询
+ * 当空查询处理，于是**整库都被当成命中**返回。用户输入标点不等于「我要看全部条目」，
+ * 把全库当成相关结果既误导又没法用。本地 FTS5 路径本来就会得到 0 条
+ * （buildFts5MatchQuery 对纯标点返回 null），两条路径在这里必须同口径：**无词元 → 无命中**。
+ */
+export function hasSearchableQuery(query: string): boolean {
+  return CJK_ANY.test(query) || ASCII_ANY.test(query);
+}
 
 /**
  * 索引写入前的文本变换：在汉字与相邻词元字符（汉字 / 字母 / 数字）之间插入空格。
