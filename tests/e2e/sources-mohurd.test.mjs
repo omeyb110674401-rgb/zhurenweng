@@ -236,6 +236,28 @@ describe('issue #28：详情页解析（发布日期 / 正文 / 附件）', () =
     assert.match(detail, /\/api-gateway\/jpaas-web-server\/front\/document\/download\?fileUrl=/);
   });
 
+  it('附件块给出「打不开就回官方原文页」的出路（issue #35）', async () => {
+    // 生产实测 340 个附件引用里 31 个（全为工信部）在两类网络下都 403：
+    // 文件挂在一个对非白名单客户端一律拦的政府主机上，而官方页面链接的是同一批 URL。
+    // 我们不隐藏这些链接（用户浏览器未必同样被拦），但要在附件块里给出官方原文这条退路。
+    const list = stripSsrComments(await (await fetch(`${app.url}/`)).text());
+    const block = blockOf(extractItemBlocks(list), TITLES.headquarter);
+    const detail = stripSsrComments(await (await fetch(`${app.url}${block.href}`)).text());
+
+    const fallback = /data-testid="attachment-fallback"[\s\S]{0,400}?<\/p>/.exec(detail)?.[0] ?? '';
+    assert.ok(fallback.length > 0, '附件块应有出路提示');
+    assert.match(fallback, /附件打不开/);
+    // 出路要指向**该条目的官方原文页**：与页面上的 official-url 同址
+    // （不写死生产域名 —— fixture 场景下详情 URL 落在本地 fixture 源站上）
+    const officialUrl = /data-testid="official-url"[^>]*href="([^"]+)"/.exec(detail)?.[1]
+      ?? /<a href="([^"]+)"[^>]*data-testid="official-url"/.exec(detail)?.[1];
+    assert.ok(officialUrl, '详情页应有官方原文链接');
+    assert.ok(
+      fallback.includes(`href="${officialUrl}"`),
+      `出路提示应链到官方原文页 ${officialUrl}，实际：${fallback.slice(0, 200)}`,
+    );
+  });
+
   it('结构化速读同样适用本源：原文的联系方式被抽成提交渠道（issue #26/#27 复用）', async () => {
     const list = stripSsrComments(await (await fetch(`${app.url}/`)).text());
     const detail = stripSsrComments(

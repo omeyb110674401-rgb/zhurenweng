@@ -197,6 +197,21 @@ export default async function NoticeDetailPage({ params }: NoticeDetailPageProps
                 </li>
               ))}
             </ul>
+            {/*
+              附件打不开时的出路（issue #35）：实测生产 340 个附件引用里有 31 个
+              （全部来自工信部）在两类独立网络下都返回 403 —— 文件挂在
+              jyhwzhq.miit.gov.cn 上，该主机对非白名单客户端一律拦（连根路径都 403），
+              而官方页面链接的就是同一批 URL。我们**不隐藏**这些链接（同一条链接在
+              用户浏览器里未必同样被拦，藏掉等于删掉可能可用的入口），但要让用户在
+              点进一个陌生站点的错误页之前就知道还有官方原文这条路。
+            */}
+            <p className="attachment-hint" data-testid="attachment-fallback">
+              附件打不开？部分政府站点对下载有网络或会话限制，可到
+              <a href={notice.url} target="_blank" rel="noopener noreferrer">
+                官方原文页面
+              </a>
+              获取。
+            </p>
           </section>
         ) : null}
 

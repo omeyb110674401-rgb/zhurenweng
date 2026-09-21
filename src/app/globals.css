@@ -357,6 +357,13 @@ body {
   word-break: break-all;
 }
 
+/* 附件打不开时的出路提示（issue #35）：与正文来源行同一套低对比排版 */
+.attachment-hint {
+  margin: 8px 0 0;
+  font-size: 12px;
+  color: #64748b;
+}
+
 .notice-body {
   margin-bottom: 20px;
 }
