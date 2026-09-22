@@ -7,7 +7,8 @@ import type { MailMessage, MailerPort } from '../ports.ts';
  *
  * 通过环境变量接入（生产 compose / 部署环境注入）：
  * - SMTP_HOST / SMTP_PORT：服务器地址与端口（端口缺省 465）；
- * - SMTP_SECURE：'1' 走 TLS 直连（默认，按端口 465/2465 推断），否则 STARTTLS；
+ * - SMTP_SECURE：只认 '1'（TLS 直连）与 '0'（STARTTLS），留空按端口推断（465 → 直连）；
+ *   其它写法会在构造期报错，见 parseSmtpSecure；
  * - SMTP_USER / SMTP_PASS：认证凭据（都设置才启用认证）；
  * - MAIL_FROM：发件人（如「主人翁 <no-reply@example.gov.cn>」）。
  *
@@ -103,8 +104,7 @@ export function resolveSmtpOptions(env: NodeJS.ProcessEnv = process.env): SmtpEn
   }
   const parsedPort = parseSmtpPort(env.SMTP_PORT);
   const port = parsedPort ?? DEFAULT_SMTP_PORT;
-  const secureFlag = env.SMTP_SECURE?.trim();
-  const secure = secureFlag ? secureFlag === '1' : port === DEFAULT_SMTP_PORT;
+  const secure = parseSmtpSecure(env.SMTP_SECURE, port);
   const user = env.SMTP_USER?.trim() || undefined;
   const pass = env.SMTP_PASS?.trim() || undefined;
   // 认证凭据要么都给要么都不给：只给一半会让 SMTP 在发信时报 535，
@@ -129,4 +129,23 @@ function parseSmtpPort(raw: string | undefined): number | undefined {
     throw new Error(`SMTP_PORT 不是合法端口：「${value}」（应填 1-65535 的整数，如 465）`);
   }
   return port;
+}
+
+/**
+ * SMTP_SECURE：只认 `1` / `0`，其它字面值当场报错（留空则按端口推断）。
+ *
+ * 为什么不容错：`true` 是最顺手的一种写法（`.env.example` 自己也这么写过、生产 `.env`
+ * 里就躺着一条），而按旧实现它会解析成 **STARTTLS** —— 对着 465 这种隐式 TLS 端口发
+ * STARTTLS 握手必然失败，且只在真正发信那一刻才炸，错误现场离配置现场隔了一整个
+ * SMTP 往返。与其猜操作者的意思，不如在这里把话说清（口径同 parseSmtpPort）。
+ */
+function parseSmtpSecure(raw: string | undefined, port: number): boolean {
+  const value = raw?.trim();
+  if (!value) return port === DEFAULT_SMTP_PORT;
+  if (value === '1') return true;
+  if (value === '0') return false;
+  throw new Error(
+    `SMTP_SECURE 只能填 1（隐式 TLS 直连）或 0（STARTTLS），收到「${value}」；` +
+      '留空则按端口推断（465 直连、其余 STARTTLS）',
+  );
 }

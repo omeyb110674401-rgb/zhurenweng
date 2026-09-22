@@ -60,12 +60,38 @@ vim .env   # 按模板逐项填写；POSTGRES_PASSWORD/MEILI_MASTER_KEY/ADMIN_TO
 
 大模型服务商可切换（PRD「通过环境变量可切换服务商」）：默认 `LLM_PROVIDER=glm` 走智谱预设
 （只填 `GLM_API_KEY`）；换任何 OpenAI 兼容端点则设 `LLM_PROVIDER=openai` 并填 `LLM_API_KEY` /
-`LLM_API_BASE` / `LLM_MODEL`（可另加 `LLM_EXTRA_HEADERS`）。**对外提供生成式 AI 服务的模型须为
-已备案的国产模型**（PRD 第 49 条），不要指向境外聚合服务。
+`LLM_API_BASE` / `LLM_MODEL`（可另加 `LLM_TIMEOUT_MS` 与 `LLM_EXTRA_HEADERS`）。**对外提供生成式
+AI 服务的模型须为已备案的国产模型**（PRD 第 49 条），不要指向境外聚合服务。
 
-必填清单：`POSTGRES_PASSWORD`、`DOMAIN`、`SITE_URL`、`APP_BASE_URL`、`GLM_API_KEY`、
-`SMTP_HOST/PORT/USER/PASS/SECURE`、`MAIL_FROM`、`MEILI_MASTER_KEY`、`ADMIN_TOKEN`、`ALERT_EMAIL`、
-`ICP_NUMBER`（备案号，展示在首页/搜索页页脚并链接工信部备案系统）。
+> **现状（issue #55）**：线上走的是 `LLM_PROVIDER=openai` + `LLM_API_BASE=https://opencode.ai/zen/go/v1`
+> + `LLM_MODEL=mimo-v2.5` 的**临时通道**（OpenCode 免费档网关，实测 87.6s/次，故 `LLM_TIMEOUT_MS=300000`）。
+> 它把公示正文经境外中继出境，与 PRD 第 49 条不符，属已认账的合规债；收敛时只改这几行 `.env`，
+> 代码不动。`LLM_EXTRA_HEADERS` 里的会话头是该网关要求的，换直连后应删掉。
+
+邮件用个人 QQ 邮箱 + 授权码（issue #55）：`SMTP_HOST=smtp.qq.com`、`SMTP_PORT=465`、
+`SMTP_USER` 与 `MAIL_FROM` 的地址**必须同一个**（QQ 拒收发件人≠认证账户的信），
+`SMTP_PASS` 填邮箱设置里生成的**授权码**、不是网页登录密码。两条硬约束记在这里免得再踩：
+
+- **只能用 465**：国内云主机一律封着 25 端口出站（`smtp.qq.com:25` 与 `smtp.163.com:25` 实测超时）。
+- **`SMTP_SECURE` 只认 `1` / `0` / 留空**：留空按端口推断（465 → 隐式 TLS 直连）。填 `true`
+  过去会被读成「关闭直连」→ 对 465 发 STARTTLS 必失败且只在发信那一刻炸；现在构造期直接报错。
+
+### 3.1 改 `.env` 的正确姿势（密钥不进命令行、不进对话）
+
+```bash
+# 服务器上（可反复执行，同名键先删后加；自动备份 + chmod 600 + compose 校验）
+bash /opt/zhurenweng/deploy/set-env-keys.sh /tmp/keys.txt      # keys.txt 是 KEY=VALUE 清单
+bash /opt/zhurenweng/deploy/enter-smtp-credentials.sh          # 交互式录 QQ 授权码（read -s 不回显）
+```
+
+清单走文件或 stdin、不走命令行参数：命令行会进 shell history 与云助手的命令记录（控制台可查明文）。
+值里不能含 `$`（compose 会当变量引用展开），脚本会拒绝。
+端口类变量是**运行时**读取的，改完只需 `docker compose up -d web worker`（不必 rebuild）；
+但**先在服务器上跑一次真实验证再重启 web**，否则 `mailerReady()` 一真、订阅入口立刻对外可见。
+
+必填清单：`POSTGRES_PASSWORD`、`DOMAIN`、`SITE_URL`、`APP_BASE_URL`、`LLM_PROVIDER` + 对应密钥、
+`SMTP_HOST` / `SMTP_PORT` / `SMTP_USER` / `SMTP_PASS` / `MAIL_FROM`、`MEILI_MASTER_KEY`、
+`ADMIN_TOKEN`、`ALERT_EMAIL`、`ICP_NUMBER`（备案号，展示在站点所有页面页脚并链接工信部备案系统）。
 
 其中 `DOMAIN` 供 Caddy 签发证书使用；`SITE_URL` / `APP_BASE_URL` 必须与其一致且为 `https://`。
 `ICP_NUMBER` 在 `web` 的运行时读取，改后 `docker compose up -d web` 即生效（无需重新构建）。
@@ -120,6 +146,25 @@ docker compose run --rm -e WORKER_ONCE=1 worker npm run worker
 
 - 页脚备案号展示正确；订阅页隐私说明可见（仅存邮箱、可一键退订）
 - AI 摘要显著标注「AI 生成，仅供参考，以官方原文为准」
+- 摘要端口**走生产路径**验一次（容器模式：环境里已有密钥就不改写，验的是线上现状）。
+  输入正文直接取站内详情页，所以给一个已入库的条目 id 即可：
+  ```bash
+  docker compose run --rm --no-deps -T \
+    -e ZW_VERIFY_NOTICE_URL=http://web:3000/notices/00f8313ea7880fc0 \
+    worker node scripts/verify-llm-port.mjs
+  # 期望：门控 llmReady() = true、provider/model 与 .env 一致、引用逐字命中 N/N
+  ```
+- 邮件用一次**真实订阅**判定（成功与失败走不同落点，不用翻日志）：
+  ```bash
+  curl -s -o /dev/null -D - -m 40 -X POST -F "email=you@example.com" -F "keywords=<kw.utf8" \
+    https://<域名>/api/subscriptions | grep -i '^location'
+  # /subscribe?sent=1        → SMTP 已受理（nodemailer 只有拿到服务端受理才 resolve）
+  # /subscribe?error=send_failed → 发信失败，原因在 docker compose logs web 里
+  ```
+  中文关键词**别从 Windows 终端直接敲**：Git Bash 按 GBK 送出，服务端 UTF-8 解码会得到
+  `U+FFFD` 存进库（issue #55 实测踩过）。用 `-F "name=<文件"` 从 UTF-8 文件逐字节送。
+  退订链路：`POST /unsubscribe/one-click?token=<库里的 unsubscribe_token>` 应回
+  `/unsubscribe/done?ok=1` 并写下 `unsubscribed_at`。
 - 管理后台看板：各源最近成功时间非空；配置 `ALERT_EMAIL` 后人为触发一次失败应收到告警
 - 出站按钮 `/go/<id>` 正常 302 到官方原文（北极星指标埋点）
 - 安全响应头（issue #52）——五条都应出现，且**不应**出现 `X-Powered-By`：

@@ -334,6 +334,25 @@ describe('部署环境变量契约（compose ↔ .env.example ↔ docs ↔ 代�
     assert.throws(() => resolveSmtpOptions({ ...base, SMTP_PORT: 'abc' }), /SMTP_PORT 不是合法端口/);
     assert.throws(() => resolveSmtpOptions({ ...base, SMTP_PORT: '0' }), /SMTP_PORT 不是合法端口/);
     assert.throws(() => resolveSmtpOptions({ ...base, SMTP_PORT: '70000' }), /SMTP_PORT 不是合法端口/);
+    // SMTP_SECURE=true 是**最顺手**的写法（.env.example 曾这么写、生产 .env 里就躺着一条），
+    // 但它按旧实现会被解析成 STARTTLS —— 对着 465 隐式 TLS 端口发 STARTTLS 必失败，
+    // 且只在真正发信那一刻才炸。现在构造期就拒绝，并给出可执行的改法。
+    assert.throws(
+      () => resolveSmtpOptions({ ...base, SMTP_SECURE: 'true' }),
+      /SMTP_SECURE 只能填 1（隐式 TLS 直连）或 0（STARTTLS）/,
+    );
+    assert.deepEqual(
+      resolveSmtpOptions({ ...base, SMTP_SECURE: '0' }),
+      {
+        host: 'smtp.example.com',
+        from: 'no-reply@example.com',
+        port: 465,
+        secure: false,
+        user: undefined,
+        pass: undefined,
+      },
+      'SMTP_SECURE=0 显式关闭直连（STARTTLS 端口用）',
+    );
     assert.throws(
       () => resolveSmtpOptions({ ...base, SMTP_USER: 'bot@example.com' }),
       /SMTP_USER 与 SMTP_PASS 必须同时配置/,
