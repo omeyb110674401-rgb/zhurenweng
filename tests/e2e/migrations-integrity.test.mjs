@@ -34,3 +34,57 @@ for (const driver of ['sqlite', 'postgres']) {
     }
   });
 }
+
+/**
+ * 两方言的迁移序号与建表列集合必须一致（issue #57 起加强）。
+ *
+ * 背景：`src/db/schema/{sqlite,postgres}.ts` 互为镜像是全项目的约定，但此前没有任何
+ * 机器检查 —— 只给一个方言加迁移，另一方言的库就会少一列，而 SQLite 跑的所有测试
+ * 都不会发现（生产用的是 PostgreSQL）。`notice_attachments` 是第一次加 15 列的表，
+ * 这种漂移的代价最高。
+ *
+ * 两条断言：① 迁移**序号**序列一致（drizzle-kit 生成的 0000/0001 两方言随机名不同，
+ * 所以按序号而不是按 tag 比）；② 对手工书写、两方言同名的迁移，CREATE TABLE 的列集合一致。
+ */
+function columnNamesOf(sqlText) {
+  const names = new Set();
+  for (const line of sqlText.split('\n')) {
+    // 只认列定义行（`col` text / "col" integer）；PRIMARY KEY / CONSTRAINT /
+    // FOREIGN KEY / CREATE INDEX 这些行都以关键字开头，天然被排除
+    const match = /^\s*[`"]([a-z0-9_]+)[`"]\s+(text|integer)\b/i.exec(line);
+    if (match) names.add(match[1]);
+  }
+  return names;
+}
+
+function tagsOf(driver) {
+  const journalPath = path.join(root, 'drizzle', driver, 'meta', '_journal.json');
+  return JSON.parse(fs.readFileSync(journalPath, 'utf8')).entries.map((entry) => entry.tag);
+}
+
+const sqliteTags = tagsOf('sqlite');
+const postgresTags = tagsOf('postgres');
+
+test('两方言的迁移序号一致（缺一边就是生产少列）', () => {
+  const numbersOf = (tags) => tags.map((tag) => tag.slice(0, 4));
+  assert.deepEqual(numbersOf(postgresTags), numbersOf(sqliteTags));
+});
+
+test('两方言同名迁移的建表列集合一致', () => {
+  for (const tag of sqliteTags) {
+    if (!postgresTags.includes(tag)) continue; // drizzle-kit 随机命名的生成迁移不比列
+    const sqliteSql = fs.readFileSync(path.join(root, 'drizzle/sqlite', `${tag}.sql`), 'utf8');
+    const postgresSql = fs.readFileSync(
+      path.join(root, 'drizzle/postgres', `${tag}.sql`),
+      'utf8',
+    );
+    const sqliteColumns = columnNamesOf(sqliteSql);
+    const postgresColumns = columnNamesOf(postgresSql);
+    if (sqliteColumns.size === 0 && postgresColumns.size === 0) continue;
+    assert.deepEqual(
+      [...postgresColumns].sort(),
+      [...sqliteColumns].sort(),
+      `${tag}：两方言的列集合不一致`,
+    );
+  }
+});

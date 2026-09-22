@@ -1,4 +1,4 @@
-import { integer, pgTable, primaryKey, text } from 'drizzle-orm/pg-core';
+import { index, integer, pgTable, primaryKey, text } from 'drizzle-orm/pg-core';
 
 /**
  * PostgreSQL schema（生产方言，ADR-0001）。
@@ -171,5 +171,63 @@ export const reminderSends = pgTable(
   },
   (table) => [
     primaryKey({ columns: [table.noticeId, table.reminderStage, table.subscriptionId] }),
+  ],
+);
+
+/**
+ * 附件抽取状态与本文（issue #57）。与 ./sqlite.ts 的 `noticeAttachments` 是镜像。
+ *
+ * 为什么是表而不是 `notices` 的列：`attachments_json` 每轮被整体覆盖
+ * （`src/db/repo/notices.ts` 的 upsert），按数组下标存的任何状态都活不过一轮；
+ * 而一条公示最多 11 个附件、各自成败不同（源站 403 / 非文本 / 扫描件 / 空白意见表），
+ * 一列文本装不下「哪个文件产出了这段条文」。主键取 (notice_id, url)：
+ * url 是官方给的稳定标识，名称会变、下标会漂，只有它能把跨轮状态对上。
+ *
+ * `content_hash` 是跨轮缓存键：命中即不再发请求（附件内容稳定，没必要每天下一遍），
+ * 这也是本任务不违背 #35「不在抓取期探测附件可达性」那条口径的前提。
+ */
+export const noticeAttachments = pgTable(
+  'notice_attachments',
+  {
+    noticeId: text('notice_id')
+      .notNull()
+      .references(() => notices.id),
+    /** 附件 URL，原样保存（详情页链接直接指向它） */
+    url: text('url').notNull(),
+    /** 展示名，每轮随抓取刷新；264/340 个名字没有扩展名，故不作为类型判据 */
+    name: text('name'),
+    /**
+     * 抽取状态：pending 待处理 / ok 已抽出条文 / blocked 源站拒绝（401/403/404）/
+     * not_a_file 返回的是 HTML（含 CDN 拦截页）/ too_large 超字节上限 /
+     * no_draft_text 抽出的正文过短（空白意见表就是这类）/ scanned_no_text 扫描件 /
+     * unsupported_container 解析器抛错 / error 其它失败 / gone 官方已撤下
+     */
+    status: text('status').notNull(),
+    /** 文件类型，按 magic 判（不看扩展名）：pdf / docx / doc / other */
+    kind: text('kind'),
+    /** 实际下载字节数 */
+    bytes: integer('bytes'),
+    /** sha256(body)：跨轮缓存键 */
+    contentHash: text('content_hash'),
+    /** 抽出字符数（`no_draft_text` 的判据） */
+    charCount: integer('char_count'),
+    /** 抽取出的纯文本，入库前截断 */
+    extractedText: text('extracted_text'),
+    /** 失败摘要（含 HTTP 状态），只用于排查与「为什么读不到」的文案 */
+    error: text('error'),
+    /** 0 = 未喂给模型 / 1 = 本轮摘要用到了它 */
+    fedToSummary: integer('fed_to_summary').notNull().default(0),
+    /** 尝试次数（含被熔断跳过的轮次） */
+    attemptCount: integer('attempt_count').notNull().default(0),
+    /** 首次见到该 URL 的时间，ISO 8601 */
+    firstSeenAt: text('first_seen_at').notNull(),
+    /** 最近一次在附件清单里见到它的时间；长期不刷新即官方已撤下 */
+    lastSeenAt: text('last_seen_at').notNull(),
+    /** 最近一次真的发请求的时间（`blocked` 按它做 7 天退避） */
+    lastFetchAt: text('last_fetch_at'),
+  },
+  (table) => [
+    primaryKey({ columns: [table.noticeId, table.url] }),
+    index('notice_attachments_status_idx').on(table.status, table.noticeId),
   ],
 );

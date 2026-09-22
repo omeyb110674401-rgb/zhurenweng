@@ -64,6 +64,13 @@
       "when": 1789911673850,
       "tag": "0008_add_notice_agency_keys",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1790467202000,
+      "tag": "0009_add_notice_attachments",
+      "breakpoints": true
     }
   ]
 }

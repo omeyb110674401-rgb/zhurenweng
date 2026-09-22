@@ -14,6 +14,50 @@ export interface NoticeAttachment {
   url: string;
 }
 
+/**
+ * 附件抽取状态（issue #57）。终态与待处理分开看：
+ * 除 `pending` 外都是本轮已给出结论的状态。
+ *
+ * `blocked`（源站拒绝）与 `not_a_file`（返回 HTML / CDN 拦截页）刻意不隐藏页面上的
+ * 附件链接 —— 我们机房的失败不代表用户的失败，这是 #35 定下的红线。
+ */
+export type AttachmentExtractStatus =
+  | 'pending'
+  | 'ok'
+  | 'blocked'
+  | 'not_a_file'
+  | 'too_large'
+  | 'no_draft_text'
+  | 'scanned_no_text'
+  | 'unsupported_container'
+  | 'error'
+  | 'gone';
+
+/** 附件类型，按文件头 magic 判定（扩展名不可靠：264/340 个附件名根本没有扩展名） */
+export type AttachmentKind = 'pdf' | 'docx' | 'doc' | 'other';
+
+/** `notice_attachments` 一行（附件抽取状态与本文，issue #57） */
+export interface NoticeAttachmentRecord {
+  noticeId: string;
+  /** 附件绝对 URL，与 notice_id 一起构成主键 */
+  url: string;
+  name: string | null;
+  status: AttachmentExtractStatus;
+  kind: AttachmentKind | null;
+  bytes: number | null;
+  /** sha256(body)：跨轮缓存键，命中即不再发请求 */
+  contentHash: string | null;
+  charCount: number | null;
+  extractedText: string | null;
+  error: string | null;
+  /** 本轮摘要是否用到了它 */
+  fedToSummary: boolean;
+  attemptCount: number;
+  firstSeenAt: string;
+  lastSeenAt: string;
+  lastFetchAt: string | null;
+}
+
 /** 公示条目（PRD「数据模型」中的核心实体） */
 export interface NoticeRecord {
   id: string;
