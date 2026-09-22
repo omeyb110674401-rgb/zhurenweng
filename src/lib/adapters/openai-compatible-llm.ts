@@ -193,6 +193,9 @@ export function parseModelJson(content: string): unknown {
  * 1. **必填三段必须非空** —— 此前只校验「是不是字符串」，于是 `"who": ""` 也能落库，
  *    页面上「影响谁」标题下面空无一物（生产实测 mimo-v2.5 有 1 条这样，glm 0 条）。
  *    答不上就抛错，交给重试 / 转人工复核，比留一个空段落诚实。
+ *    不合格时**一次报全三段**并分开写清是缺字段、值不是字符串还是空串：三者的成因
+ *    与处置完全不同，合成一句就会把「校验器按顺序先撞上哪个」误读成「只有那个字段
+ *    有问题」（issue #56 的 30% 失败率就是这么被误判成模型抖动的）。
  * 2. 原文可能确实没有的段（谁能提 / 逾期会怎样）缺省为空串，不算形状异常 ——
  *    把它们变成必填只会逼模型编一句。
  * 3. 渠道数组**一项都不删**：`quotes.channels` 按原始下标与渠道配对，这里删一项
@@ -204,13 +207,34 @@ export function normalizeModelSummary(raw: unknown): QuotedStructuredSummary {
     throw new Error('摘要输出不是 JSON 对象');
   }
   const record = raw as Record<string, unknown>;
-  const requiredText = (key: string): string => {
-    const value = record[key];
-    if (typeof value !== 'string' || value.trim().length === 0) {
-      throw new Error(`摘要输出缺少非空字符串字段 "${key}"`);
+
+  /** 值不合格的原因；合格（非空字符串）时返回 null。三种故障分开说。 */
+  const shapeProblem = (value: unknown): string | null => {
+    if (value === undefined) return '缺字段';
+    if (value === null) return '值是 null';
+    if (typeof value !== 'string') {
+      return `值不是字符串（${Array.isArray(value) ? 'array' : typeof value}）`;
     }
-    return value.trim();
+    return value.trim() === '' ? '空串' : null;
   };
+
+  const problems: string[] = [];
+  const take = (key: 'what' | 'who' | 'howToComment'): string => {
+    const value = record[key];
+    const problem = shapeProblem(value);
+    if (problem !== null) {
+      problems.push(`"${key}" ${problem}`);
+      return '';
+    }
+    return (value as string).trim();
+  };
+  const what = take('what');
+  const who = take('who');
+  const howToComment = take('howToComment');
+  if (problems.length > 0) {
+    throw new Error(`摘要输出的必填段不合格：${problems.join('、')}`);
+  }
+
   const optionalText = (key: string): string => {
     const value = record[key];
     return typeof value === 'string' ? value.trim() : '';
@@ -236,12 +260,12 @@ export function normalizeModelSummary(raw: unknown): QuotedStructuredSummary {
 
   const quotes = readQuotes(record.quotes);
   return {
-    what: requiredText('what'),
-    who: requiredText('who'),
+    what,
+    who,
     whoCanSubmit: optionalText('whoCanSubmit'),
     afterDeadline: optionalText('afterDeadline'),
     deadline,
-    howToComment: requiredText('howToComment'),
+    howToComment,
     channels,
     ...(quotes ? { quotes } : {}),
   };

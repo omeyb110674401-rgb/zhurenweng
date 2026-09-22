@@ -270,8 +270,8 @@ describe('LLM 响应处理：脏数据一律抛错，绝不落库', () => {
     );
     await assert.rejects(
       () => withContent('{"what":"只有一段"}').summarize({ title: 't', url: 'u', bodyText: 'b' }),
-      /缺少非空字符串字段 "who"/,
-      '必填三段按 what → who → howToComment 顺序校验',
+      /"who" 缺字段、"howToComment" 缺字段/,
+      '不合格的两段一次报全（此前按顺序只报第一个，看不出后面还有几段坏）',
     );
     // 这是 issue #55 修掉的真实缺陷：此前只校验「是不是字符串」，`"who": ""` 照样落库，
     // 线上出现过「影响谁」标题下空无一物的详情页（mimo-v2.5 一条）。空串即没答上 → 重试。
@@ -282,8 +282,28 @@ describe('LLM 响应处理：脏数据一律抛错，绝不落库', () => {
           url: 'u',
           bodyText: 'b',
         }),
-      /缺少非空字符串字段 "who"/,
+      /"who" 空串/,
       '空串（含只有空白）也算没答上，不落空段',
+    );
+    await assert.rejects(
+      () =>
+        withContent('{"what":"a","who":"   ","howToComment":"c"}').summarize({
+          title: 't',
+          url: 'u',
+          bodyText: 'b',
+        }),
+      /"who" 空串/,
+      '只有空白字符同样是没答上',
+    );
+    // 三种故障的处置不同，消息必须分得开：模型给成数组时不能说它「空」
+    await assert.rejects(
+      () =>
+        withContent('{"what":"a","who":["企业","个人"],"howToComment":"c"}').summarize({
+          title: 't',
+          url: 'u',
+          bodyText: 'b',
+        }),
+      /"who" 值不是字符串（array）/,
     );
     await assert.rejects(
       () =>
@@ -292,7 +312,7 @@ describe('LLM 响应处理：脏数据一律抛错，绝不落库', () => {
           url: 'u',
           bodyText: 'b',
         }),
-      /缺少非空字符串字段 "howToComment"/,
+      /"howToComment" 空串/,
     );
     // 原文可能确实没写的两段**不能**必填，否则只会逼模型编一句
     const sparse = await withContent('{"what":"a","who":"b","howToComment":"c"}').summarize({
