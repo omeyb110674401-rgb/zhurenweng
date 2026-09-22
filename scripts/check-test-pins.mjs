@@ -66,6 +66,16 @@ const CASES = [
     test: 'tests/unit/attachment-select.test.mjs',
   },
   {
+    // 2026-09-22 线上核对：samr 征集食品补充检验方法时随文只有空白申报书，两条各抽到
+    // 587 / 624 个汉字的表头，还把真正的通知挤在名额之外。撤掉这两个词，那条断言要红。
+    label: '申报书 / 报名表不再判为填报类（空白模板重占名额）',
+    file: 'select',
+    from: " '申报书', '报名表',",
+    to: ' ',
+    pattern: '空白申报书与报名表排不进名额',
+    test: 'tests/unit/attachment-select.test.mjs',
+  },
+  {
     label: '空白表阈值形同虚设',
     file: 'select',
     from: '  return countCjk(text) >= MIN_DRAFT_CJK_CHARS;',

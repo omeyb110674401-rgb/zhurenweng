@@ -15,6 +15,7 @@
  * 一轮墙钟与「同主机请求间隔」不在库里，看 worker 日志里那行「附件抽取（模式）本轮：…」。
  */
 import { Client } from 'pg';
+import { MAX_FILES_PER_NOTICE } from '../src/lib/attachment-select.ts';
 
 const client = new Client({ connectionString: process.env.DATABASE_URL });
 await client.connect();
@@ -36,7 +37,7 @@ for (const row of rows.rows) {
   byNotice.get(row.notice_id).push(row);
 }
 
-/** 抽取状态里哪些算「本轮已经给出结论」；pending 单列，它代表还没轮到而不是失败。 */
+/** 抽取状态里哪些算「本轮已经给出结论」；pending 单列 —— 它有两种含义，见下面的分列。 */
 const TERMINAL_FAILURES = new Set([
   'blocked',
   'not_a_file',
@@ -91,6 +92,7 @@ for (const notice of notices.rows) {
       okChars: 0,
       fedRows: 0,
       pending: 0,
+      unselected: 0,
       failures: new Map(),
       statuses: new Map(),
       whoAnswered: 0,
@@ -105,10 +107,15 @@ for (const notice of notices.rows) {
   if (attachmentCountOf(notice.attachments_json) > 0) s.withAttachments += 1;
 
   const attached = byNotice.get(notice.id) ?? [];
+  // 「pending」有两种含义，而且下一步动作相反：没轮到的等下一轮就行，超出每条公示
+  // 3 个名额的**永远等不到**（打分是稳定的，同一批附件每轮选出同样三个）。
+  // 2026-09-22 线上核对：mee 那 15 行全属后者，它们挂在一人 5～11 个附件的标准文本公示上。
+  const decided = attached.filter((row) => row.status !== 'pending').length;
   for (const row of attached) {
     s.statuses.set(row.status, (s.statuses.get(row.status) ?? 0) + 1);
     if (row.status === 'pending') {
-      s.pending += 1;
+      if (decided >= MAX_FILES_PER_NOTICE) s.unselected += 1;
+      else s.pending += 1;
       continue;
     }
     if (row.status === 'ok') {
@@ -156,7 +163,7 @@ console.log(
     'ok且≥3k',
     'ok均汉字',
     '失败面',
-    'pending',
+    '未入选/待轮',
     '已喂摘要',
     'who非空',
     'who=谁能提',
@@ -177,7 +184,7 @@ for (const [source, s] of [...stats].sort((a, b) => b[1].withAttachments - a[1].
       num(s.okUsable, 9),
       num(s.okRows === 0 ? '—' : Math.round(s.okChars / s.okRows), 9),
       (failures === '' ? '—' : failures).padStart(18).slice(0, 24),
-      num(s.pending, 8),
+      `${s.unselected}/${s.pending}`.padStart(9),
       num(s.fedRows, 11),
       `${s.whoAnswered}/${s.summarized}`.padStart(9),
       `${s.whoCopied}/${s.whoAnswered}`.padStart(11),

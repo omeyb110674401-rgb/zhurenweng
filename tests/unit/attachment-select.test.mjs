@@ -56,6 +56,22 @@ describe('文件名打分与选取', () => {
     assert.ok(scoreAttachmentName('某办法通知.docx') > scoreAttachmentName('某办法.txt'));
   });
 
+  it('空白申报书与报名表排不进名额（samr 征集检验方法时的真实形状）', () => {
+    assert.ok(scoreAttachmentName('食品补充检验方法立项申报书.docx') < 0, '那是要人填的模板，抽出来的字是表头');
+    assert.ok(scoreAttachmentName('参加国际标准化组织报名表.doc') < 0);
+    const picked = selectAttachmentCandidates([
+      { name: '附件1 食品补充检验方法立项申报书.docx', url: 'u1' },
+      { name: '附件2 食品快速检测方法立项申报书.docx', url: 'u2' },
+      { name: '附件3 征集通知.pdf', url: 'u3' },
+      { name: '附件4 方法清单.docx', url: 'u4' },
+    ]);
+    assert.deepEqual(
+      picked.map((item) => item.url),
+      ['u3', 'u4', 'u1'],
+      '两个申报书挤在中间的话，正文反而进不了前三',
+    );
+  });
+
   it('压缩包与表格根本不下载，无扩展名的照常候选', () => {
     assert.equal(shouldSkipByExtension('标准文本.zip'), true);
     assert.equal(shouldSkipByExtension('填报表xlsx.xlsx'), true);
