@@ -7,3 +7,13 @@
 #   2. shell 脚本带到 Linux 侧会因行尾 \r 报 bad interpreter。
 # text=auto 让 git 按内容判断文本 / 二进制，二进制文件不做转换。
 * text=auto eol=lf
+
+# 附件解析夹具（issue #57）按**原始字节**存，不做换行判断。
+#
+# 为什么不能交给 text=auto 猜：`draft.pdf` 是脚本手写的合法 PDF，全文只有 ASCII 与
+# 数字、**一个 NUL 字节都没有** —— 内容嗅探会把它当文本，于是换行归一化会改掉字节数，
+# 而 PDF 的 xref 表按字节偏移定位，差一个字节文件就废了。db6fd88 那次改坏 og-image.png
+# / favicon.ico 是同一类事故（PNG 里恰好出现 0D 0A 字节对），只是那次是同步脚本干的。
+fixtures/e2e-attachments/*.pdf binary
+fixtures/e2e-attachments/*.docx binary
+fixtures/e2e-attachments/*.doc binary

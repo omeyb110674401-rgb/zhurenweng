@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { after, before, describe, it } from 'node:test';
+import { before, describe, it } from 'node:test';
 
 /**
  * 仓库层（issue #57）：`notice_attachments` 的状态跨轮语义。

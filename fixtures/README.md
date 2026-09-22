@@ -83,6 +83,19 @@ fixtures/
         public/submission-service/column/getArticleDetail   # 第 3 跳：正文接口响应
       i5/                    #   i5 = 场景合成的「链断掉」锚点（access-url 响应缺
                              #   articleId → 抓取层记日志并降级保留列表层数据）
+  e2e-attachments/           # issue #57 附件读取场景专用：**真实二进制**附件（不是文本快照）
+    draft.pdf                #   手写合法 PDF（2 页 ASCII 条文，含 Scope of application 锚点）
+    cjk-text.pdf             #   真实中文文本 PDF —— 由同目录 cjk-text.source.html 经
+                             #     `msedge --headless --print-to-pdf` 打印（含「第二条 适用范围」
+                             #     「电子邮箱」「截止日期」，子集 CID 字体）。中文条文抽得出字
+                             #     这条主路径只有它能测，改内容要重新打印
+    draft.docx               #   中文条文草稿（fflate 现造，含邮箱 / 信函 / 电话三渠道）
+    blank-form.docx          #   空白意见表：解析成功但汉字数极低 → no_draft_text
+    scan-only.pdf            #   扫描型：5 页纯位图、零文本算子 → scanned_no_text
+    block.pdf                #   URL 以 .pdf 结尾、响应体是 403 拦截页 → 判型看文件头不看扩展名
+    broken.doc               #   OLE2 头 + WordDocument 流名（magic 认得）+ 垃圾扇区 → 解析抛错
+                             #   生成器：`node scripts/make-attachment-fixtures.mjs`（确定性，
+                             #   可重跑；cjk-text.pdf 例外，见上）
 ```
 
 无扩展名的快照文件（真实数据接口路径就无扩展名）由 fixture 源站按文本提供，
@@ -137,7 +150,9 @@ fixtures/
 
 快照只保留结构与关键文本（可脱敏、可截断），并在文件头注释 / `_snapshot`
 标注来源与快照日期。E2E 运行期间 fixture 由本地 HTTP 服务提供，不访问真实源站。
-附件文件本体不随快照提供（下载链接指向 fixture 源站会 404，仅断言其展示）。
+页面快照里的附件下载链接除 `e2e-attachments/` 外都不随快照提供（指向 fixture 源站
+会 404，只断言其展示）—— issue #57 起，附件**文件本体**要有真二进制才能测到抽取，
+故为它单开一个目录，见上文该目录的注释。
 
 抓回真实页面并裁剪的过程可复现：`node scripts/capture-m2-fixtures.mjs [源ID…]`
 （一次性脚本，只在更新快照时手动跑；需要联网访问真实政府站点）。它保留了
