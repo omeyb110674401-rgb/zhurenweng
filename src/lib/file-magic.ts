@@ -18,9 +18,6 @@ export const MAGIC_PROBE_BYTES = 8;
 
 /** docx 是 zip 容器。曾经想靠条目名嗅探来分 docx / xlsx，实测证明那条路不成立，见下。 */
 
-/** 旧版 Word 的主流名，UTF-16LE 写在 OLE2 头部（WPS 生成的 .doc 同样有）。 */
-const WORD_STREAM_MARKER = 'WordDocument';
-
 const PDF_SIGNATURE = [0x25, 0x50, 0x44, 0x46]; // %PDF
 const ZIP_SIGNATURE = [0x50, 0x4b, 0x03, 0x04]; // PK\x03\x04（本地文件头）
 const ZIP_EMPTY_SIGNATURE = [0x50, 0x4b, 0x05, 0x06]; // 空归档
@@ -31,39 +28,24 @@ function startsWith(head: Uint8Array, signature: readonly number[]): boolean {
   return signature.every((byte, index) => head[index] === byte);
 }
 
-/** OLE2 里的流名以 UTF-16LE 存放，逐字节比对（避免为一次判定构造一个大字符串）。 */
-function findUtf16Ascii(head: Uint8Array, marker: string): boolean {
-  for (let start = 0; start + marker.length * 2 <= head.length; start += 2) {
-    let matched = true;
-    for (let index = 0; index < marker.length; index += 1) {
-      if (head[start + index * 2] !== marker.charCodeAt(index) || head[start + index * 2 + 1] !== 0) {
-        matched = false;
-        break;
-      }
-    }
-    if (matched) return true;
-  }
-  return false;
-}
-
 /**
  * 判附件类型。入参是文件头（前若干 KiB 即可，不必整档）。
  *
- * **zip 一律当 docx 候选**，不在这里分 docx / xlsx —— 2026-09-22 生产影子轮实测：
- * 住建部 20 个附件（`fileName=` 参数明确写着 .docx，content-type 也是
- * wordprocessingml.document）被「前 1024 字节里找 `[Content_Types].xml`」这条判据全部
- * 拒掉。真实文件的本地条目顺序是 `docProps/` → `docProps/app.xml` → `word/styles.xml` …，
- * 那个标记根本不在开头。条目顺序不是可信信号，而中央目录在**文件末尾**、探测阶段拿不到。
+ * **zip 与 OLE2 都不在判型阶段细分**，同一理由（各被生产实测打过一次）：
+ * - zip：2026-09-22 影子轮，住建部 20 个真 docx 被「前 1024 字节找 `[Content_Types].xml`」
+ *   全部拒掉 —— 那个包的条目顺序是 `docProps/` 在前。条目顺序由打包器决定，规范没保证；
+ *   而中央目录在**文件末尾**，只有前 64KiB 的探测阶段根本读不到。
+ * - OLE2：同一轮里 caac / samr 的 .doc 与 .wps 被「前 4096 字节找 UTF-16LE 的
+ *   `WordDocument` 流名」拒掉 —— OLE 的流名在**目录项**里，目录项落在哪个扇区由 FAT
+ *   决定，不在文件头部固定位置。
  *
- * 代价可控：真 zip / xlsx 会走到解析层，由它给出准确结论（「zip 里没有
- * word/document.xml」），而打分层已经按扩展名把 zip / xls* 挡在下载之前。
+ * 细分留给解析层：它拿到整档，能给出准确结论（「zip 里没有 word/document.xml」、
+ * 「legacy .doc 解析失败：…」）。而打分层已按扩展名把 zip / xls* 挡在下载之前。
  */
 export function detectAttachmentKind(head: Uint8Array): AttachmentKind {
   if (startsWith(head, PDF_SIGNATURE)) return 'pdf';
   if (startsWith(head, ZIP_SIGNATURE) || startsWith(head, ZIP_EMPTY_SIGNATURE)) return 'docx';
-  if (startsWith(head, OLE2_SIGNATURE)) {
-    return findUtf16Ascii(head.subarray(0, 4096), WORD_STREAM_MARKER) ? 'doc' : 'other';
-  }
+  if (startsWith(head, OLE2_SIGNATURE)) return 'doc';
   return 'other';
 }
 

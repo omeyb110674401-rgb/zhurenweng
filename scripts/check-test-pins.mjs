@@ -126,6 +126,16 @@ const CASES = [
     test: 'tests/unit/file-magic.test.mjs',
   },
   {
+    // 同一类缺陷的第二发：OLE2 的流名在目录项里（扇区位置由 FAT 决定），头部找不到
+    // WordDocument 就把真 .doc / .wps 判成 other —— 影子轮因此白丢 9 个附件。
+    label: 'OLE2 退回「按头部流名猜 doc」',
+    file: 'magic',
+    from: '  if (startsWith(head, OLE2_SIGNATURE)) return \'doc\';',
+    to: '  if (startsWith(head, OLE2_SIGNATURE)) return \'other\';',
+    pattern: '当 doc 候选',
+    test: 'tests/unit/file-magic.test.mjs',
+  },
+  {
     label: 'HTML 判定不再锚定开头',
     file: 'magic',
     from: "    text.startsWith('<!doctype html') ||",

@@ -50,9 +50,12 @@ describe('detectAttachmentKind：只认文件头，不认扩展名', () => {
     assert.equal(detectAttachmentKind(fixtureHead('draft.docx')), 'docx');
   });
 
-  it('OLE2 容器要看到 UTF-16LE 的 WordDocument 流名才算 doc', () => {
+  it('OLE2 容器一律当 doc 候选 —— 流名在目录项里，不在文件头部（生产实测过）', () => {
+    // 原先在头 4096 字节里找 UTF-16LE 的 WordDocument，把 caac / samr 的真 .doc 与 .wps
+    // 拒了 9 个：OLE 的目录项落在哪个扇区由 FAT 决定，头部没有固定位置。
     assert.equal(detectAttachmentKind(concat(OLE2, new Uint8Array(500), utf16('WordDocument'))), 'doc');
-    assert.equal(detectAttachmentKind(concat(OLE2, new Uint8Array(500), utf16('Workbook'))), 'other');
+    assert.equal(detectAttachmentKind(concat(OLE2, new Uint8Array(500), utf16('Workbook'))), 'doc');
+    assert.equal(detectAttachmentKind(concat(OLE2, new Uint8Array(500))), 'doc');
   });
 
   it('真实夹具各判成自己的类型（含无扩展名可用的情形）', () => {
