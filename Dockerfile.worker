@@ -7,11 +7,33 @@ COPY package.json package-lock.json ./
 # better-sqlite3 自带预编译二进制，slim 镜像无 Python/工具链，跳过 install 脚本（ADR-0001 同源处理）
 RUN npm ci --ignore-scripts
 
+# 裁掉 pdfjs-dist 里 worker 用不到的产物：35MB 里约 29MB 是浏览器查看器、现代构建、
+# source map、图像解码器与内嵌 JS 沙箱 —— 我们只用 `legacy/build/pdf.mjs` 抽文字层。
+# 清单是**实测**出来的，不是猜的：把同一批文件挪走后，附件解析的单测与 e2e（31 条）
+# 全绿，而多删一个 `pdf.worker.mjs` 就会让每个 PDF 静默落成 unsupported_container
+# —— 所以删完必须紧跟下面那道构造期自检。
+RUN rm -rf node_modules/pdfjs-dist/build \
+      node_modules/pdfjs-dist/web \
+      node_modules/pdfjs-dist/image_decoders \
+      node_modules/pdfjs-dist/wasm \
+      node_modules/pdfjs-dist/iccs \
+      node_modules/pdfjs-dist/legacy/web \
+      node_modules/pdfjs-dist/legacy/image_decoders \
+      node_modules/pdfjs-dist/legacy/build/*.map \
+      node_modules/pdfjs-dist/legacy/build/*.min.mjs \
+      node_modules/pdfjs-dist/legacy/build/pdf.sandbox.mjs
+
 # worker 运行时依赖的源码、迁移与脚本（Node 24 原生类型剥离直接运行 TS）
 COPY src ./src
 COPY worker ./worker
 COPY drizzle ./drizzle
 COPY scripts ./scripts
+
+# 自检：裁包之后，真实解析路径（判型 → 动态 import → cMap/标准字体 → 扫描件判据）
+# 必须还能跑出字来。夹具只在构建期存在，跑完就删，别让它进镜像层。
+RUN node scripts/make-attachment-fixtures.mjs \
+  && node scripts/verify-attachment-parsers.mjs \
+  && rm -rf fixtures
 
 ENV NODE_ENV=production
 

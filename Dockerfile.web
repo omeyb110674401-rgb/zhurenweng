@@ -7,7 +7,24 @@ COPY package.json package-lock.json ./
 # better-sqlite3 自带预编译二进制，slim 镜像无 Python/工具链，跳过 install 脚本（ADR-0001 同源处理）
 RUN npm ci --ignore-scripts
 
+# 与 Dockerfile.worker 同一份裁剪清单（理由与实测见那边的注释）：web 其实连留下来的
+# 那部分都不导入，但两份 Dockerfile 用同一组路径比「一边裁一边不裁」好核对，也挡住了
+# 某个页面哪天静态引到 pdfjs 的情况。
+RUN rm -rf node_modules/pdfjs-dist/build \
+      node_modules/pdfjs-dist/web \
+      node_modules/pdfjs-dist/image_decoders \
+      node_modules/pdfjs-dist/wasm \
+      node_modules/pdfjs-dist/iccs \
+      node_modules/pdfjs-dist/legacy/web \
+      node_modules/pdfjs-dist/legacy/image_decoders \
+      node_modules/pdfjs-dist/legacy/build/*.map \
+      node_modules/pdfjs-dist/legacy/build/*.min.mjs \
+      node_modules/pdfjs-dist/legacy/build/pdf.sandbox.mjs
+
 COPY . .
+RUN node scripts/make-attachment-fixtures.mjs \
+  && node scripts/verify-attachment-parsers.mjs \
+  && rm -rf fixtures
 RUN npm run build
 
 ENV NODE_ENV=production
