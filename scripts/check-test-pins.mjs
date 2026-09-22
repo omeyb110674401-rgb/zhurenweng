@@ -88,11 +88,13 @@ const CASES = [
     test: 'tests/unit/attachment-parse.test.mjs',
   },
   {
-    label: '不再复制输入缓冲（pdfjs 移交）',
+    // 一行 `new Uint8Array(body)` 同时兜住两件事（pdfjs 的移交、以及它拒绝 Buffer），
+    // 所以两条断言都撤同一行 —— 撤掉任何一边都会红，这正是想要的冗余。
+    label: 'pdfjs 的 Buffer / 移交限制（撤掉那次复制）',
     file: 'parse',
-    from: '    data: body.slice(),',
+    from: '    data: new Uint8Array(body),',
     to: '    data: body,',
-    pattern: '不吃掉调用方的字节',
+    pattern: '接受下载侧那种字节',
     test: 'tests/unit/attachment-parse.test.mjs',
   },
   {

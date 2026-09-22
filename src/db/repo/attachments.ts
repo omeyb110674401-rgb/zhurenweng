@@ -240,6 +240,22 @@ export async function markAttachmentResult(
 }
 
 /**
+ * 一条公示的全部附件行（**不做**准入过滤）。
+ *
+ * 与 `listEligibleAttachments` 分开是必要的：那个函数按「本轮还要不要为它花请求」筛过，
+ * 所以终态行（扫描件 / 空白表 / 不支持的容器）在它的答案里根本不出现。而详情页的
+ * 「为什么读不到」（issue #57 的三分支文案）与审计脚本恰恰只关心那些终态。
+ */
+export async function listNoticeAttachments(noticeId: string): Promise<NoticeAttachmentRecord[]> {
+  const db = await getDb();
+  const rows = await db
+    .select()
+    .from(noticeAttachments)
+    .where(eq(noticeAttachments.noticeId, noticeId));
+  return rows.map(toRecord);
+}
+
+/**
  * 摘要任务用的输入：已抽出条文的行，按字数降序取前 `limit` 个。
  * 字数多更可能是草案本文 —— 打分在选择阶段（任务层）已经做过一次，这里刻意不再引入第二套排序。
  */

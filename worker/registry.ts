@@ -6,6 +6,7 @@
  */
 
 import { crawlNoticesJob } from './jobs/crawl-notices.ts';
+import { extractAttachmentsJob } from './jobs/extract-attachments.ts';
 import { summarizeNoticesJob } from './jobs/summarize-notices.ts';
 import { sendDeadlineRemindersJob } from './jobs/send-deadline-reminders.ts';
 import { reindexNoticesJob } from './jobs/reindex-notices.ts';
@@ -27,6 +28,9 @@ export interface Job {
 /** 注册表：所有 worker 任务在此登记，主循环按此数组调度。 */
 export const jobs: Job[] = [
   crawlNoticesJob,
+  // 附件条文抽取（issue #57）排在摘要之前：摘要那一轮要把附件文本当输入，
+  // 而附件表是跨轮存活的 —— 排在后面就等于摘要永远慢一轮。
+  extractAttachmentsJob,
   summarizeNoticesJob,
   sendDeadlineRemindersJob,
   // 检索索引全量重建（issue #8）注册在末位：每轮先抓取 / 摘要，最后重刷索引

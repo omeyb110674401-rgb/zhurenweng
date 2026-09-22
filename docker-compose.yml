@@ -123,6 +123,22 @@ services:
       # 调度间隔：默认每日一轮（86_400_000ms）。worker 代码内默认 60s 只适合本地，
       # 生产若沿用会把政府站点敲成每分钟一次，极易被限流封 IP。
       WORKER_INTERVAL_MS: ${WORKER_INTERVAL_MS:-86400000}
+      # 附件抽取（issue #57）让一轮可能比从前长：单个文件最坏是「探测 + 4MiB 整档 +
+      # 解析」几十秒。每个文件处理完整立刻写终态，所以被 SIGKILL 最多丢一个在途文件 ——
+      # 停止等待给到 60s（stop_grace_period 仍留一倍余量）就够。
+      WORKER_STOP_WAIT_MS: ${WORKER_STOP_WAIT_MS:-60000}
+      # 附件条文读取（issue #57）：off / shadow / on。数值项留空即按代码缺省，
+      # 所以这里只传空值占位——「填了就生效」必须是真话（契约由
+      # tests/unit/deploy-env-contract.test.mjs 守）。
+      ATTACHMENT_TEXT: ${ATTACHMENT_TEXT:-on}
+      ATTACHMENT_EXCLUDE_SOURCES: ${ATTACHMENT_EXCLUDE_SOURCES:-npc}
+      ATTACHMENT_MAX_FILES_PER_ROUND: ${ATTACHMENT_MAX_FILES_PER_ROUND:-}
+      ATTACHMENT_ROUND_BUDGET_MS: ${ATTACHMENT_ROUND_BUDGET_MS:-}
+      ATTACHMENT_HOST_INTERVAL_MS: ${ATTACHMENT_HOST_INTERVAL_MS:-}
+      ATTACHMENT_HOST_BLOCK_TRIP: ${ATTACHMENT_HOST_BLOCK_TRIP:-}
+      ATTACHMENT_BLOCKED_RETRY_DAYS: ${ATTACHMENT_BLOCKED_RETRY_DAYS:-}
+      ATTACHMENT_REFRESH_DAYS: ${ATTACHMENT_REFRESH_DAYS:-}
+      ATTACHMENT_MAX_BYTES: ${ATTACHMENT_MAX_BYTES:-}
     depends_on:
       db:
         condition: service_healthy
@@ -130,8 +146,8 @@ services:
     # 少一层进程，SIGTERM 直达 worker 的信号处理器（issue #51）。
     command: sh -c "node scripts/db-migrate.mjs && exec node worker/index.ts"
     # 一轮抓取是分钟级：给足在途轮次收尾的时间（worker 自己最多等
-    # WORKER_STOP_WAIT_MS=30s，这里留一倍余量），避免抓到一半被 SIGKILL。
-    stop_grace_period: 90s
+    # WORKER_STOP_WAIT_MS=60s，这里留一倍余量），避免抓到一半被 SIGKILL。
+    stop_grace_period: 150s
 
   db:
     image: postgres:17

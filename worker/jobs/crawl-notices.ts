@@ -198,28 +198,29 @@ async function guardedFetch(
   url: string,
   allowedOrigins: readonly string[],
   cookie: string,
+  extraHeaders: Record<string, string> = {},
 ): Promise<Response> {
   const verdict = isAllowedCrawlUrl(url, allowedOrigins);
   if (!verdict.ok) {
     throw new Error(`出网守卫拒绝（${verdict.reason}）：${url}`);
   }
-  const headers: Record<string, string> = { 'user-agent': USER_AGENT };
+  const headers: Record<string, string> = { 'user-agent': USER_AGENT, ...extraHeaders };
   if (cookie.length > 0) headers.cookie = cookie;
   return fetch(url, { headers, redirect: 'manual', signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) });
 }
 
 /**
- * 读取响应体为文本，超过 MAX_FETCH_BYTES 即中止（先看 content-length 快速失败，
+ * 读取响应体为字节，超过 maxBytes 即中止（先看 content-length 快速失败，
  * 再流式计数兜住「不报长度 / 谎报长度」的响应）。
  */
-async function readCappedText(response: Response): Promise<string> {
-  const limitText = `${Math.round(MAX_FETCH_BYTES / 1024 / 1024)} MiB`;
+export async function readCappedBuffer(response: Response, maxBytes: number): Promise<Uint8Array> {
+  const limitText = `${Math.round(maxBytes / 1024 / 1024)} MiB`;
   const declared = Number(response.headers.get('content-length') ?? '');
-  if (Number.isFinite(declared) && declared > MAX_FETCH_BYTES) {
+  if (Number.isFinite(declared) && declared > maxBytes) {
     await discard(response);
     throw new Error(`响应体超过 ${limitText} 上限（content-length=${declared}）`);
   }
-  if (response.body === null) return '';
+  if (response.body === null) return new Uint8Array(0);
 
   const reader = response.body.getReader();
   const chunks: Uint8Array[] = [];
@@ -228,23 +229,39 @@ async function readCappedText(response: Response): Promise<string> {
     const { done, value } = await reader.read();
     if (done) break;
     total += value.byteLength;
-    if (total > MAX_FETCH_BYTES) {
+    if (total > maxBytes) {
       await reader.cancel().catch(() => undefined);
       throw new Error(`响应体超过 ${limitText} 上限（已读取 ${total} 字节）`);
     }
     chunks.push(value);
   }
-  return Buffer.concat(chunks).toString('utf8');
+  return Buffer.concat(chunks);
+}
+
+/** 读取响应体为文本，上限见 MAX_FETCH_BYTES。 */
+async function readCappedText(response: Response): Promise<string> {
+  return Buffer.from(await readCappedBuffer(response, MAX_FETCH_BYTES)).toString('utf8');
+}
+
+export interface CrawlRequest {
+  /** 适配器声明的源级传输处置（cookieChallenge） */
+  fetchOptions?: SourceFetchOptions;
+  /** 额外请求头：附件请求要带 referer 与 range */
+  headers?: Record<string, string>;
+  /**
+   * 命中这些状态码时**原样返回响应**而不是抛错。
+   *
+   * 附件下载需要它：401/403/404 是「源站拒绝了我们」这个**结论**，要写进库里支撑
+   * 详情页「为什么读不到」的说明；当成异常抛出就会被记成抓取失败（issue #57）。
+   */
+  returnForStatus?: (status: number) => boolean;
 }
 
 /**
- * 抓取文本（HTML 或接口 JSON 原文）。options 为适配器声明的源级处置：
- * - 默认：普通请求，非 2xx 视为失败；
- * - cookieChallenge（司法部站点实测）：首个响应是 3xx + Set-Cookie 且 Location 指回
- *   同一地址的 WAF 挑战，必须带 cookie 重放一次；因此用 redirect: 'manual' 接住挑战，
- *   避免自动跟随重定向时陷入自我循环。
+ * 走完「守卫 + 手动跟随重定向 + WAF cookie」的整趟旅程，返回**最终响应**。
+ * 调用方负责消费响应体（readCappedText / readCappedBuffer / discard）。
  *
- * 注意两种 3xx 必须区分（issue #14 上线后实测踩到）：**带 Set-Cookie 的才是 WAF 挑战**；
+ * 两种 3xx 必须区分（issue #14 上线后实测踩到）：**带 Set-Cookie 的才是 WAF 挑战**；
  * 不带 Set-Cookie 的是普通重定向（司法部列表里的详情链接写成 http://，服务端 302 到
  * https 且无 cookie），必须跟着走 —— 否则整源详情静默退化为列表层数据（截断标题、
  * 无正文、无截止日期），且日志只留下一条「WAF 未下发 cookie」。
@@ -253,7 +270,7 @@ async function readCappedText(response: Response): Promise<string> {
  * WAF cookie 只在**同主机**时携带 —— 它由该主机下发，不该跟着重定向送给别的站点
  * （同主机的 http→https 升级仍带，那是司法部详情的真实路径）。
  */
-async function fetchText(url: string, options?: SourceFetchOptions): Promise<string> {
+export async function crawlFetch(url: string, request: CrawlRequest = {}): Promise<Response> {
   const allowedOrigins = allowedCrawlOrigins();
   let current = url;
   let cookies = '';
@@ -262,7 +279,7 @@ async function fetchText(url: string, options?: SourceFetchOptions): Promise<str
 
   for (;;) {
     const cookie = cookieHost !== null && sameHost(current, cookieHost) ? cookies : '';
-    const response = await guardedFetch(current, allowedOrigins, cookie);
+    const response = await guardedFetch(current, allowedOrigins, cookie, request.headers);
     // 只在「还没拿到 cookie」时接受挑战，否则源站每次都下发 Set-Cookie 会成死循环
     const granted = cookies.length === 0 ? cookieHeaderOf(response) : '';
 
@@ -286,17 +303,24 @@ async function fetchText(url: string, options?: SourceFetchOptions): Promise<str
       continue;
     }
 
+    if (!response.ok && request.returnForStatus?.(response.status) === true) return response;
+
     if (!response.ok) {
       throw new Error(
-        options?.cookieChallenge && cookies.length === 0
+        request.fetchOptions?.cookieChallenge && cookies.length === 0
           ? `HTTP ${response.status}（WAF 未下发 cookie）`
           : cookies.length > 0
             ? `HTTP ${response.status}（携带 WAF cookie 重放后仍失败）`
             : `HTTP ${response.status}`,
       );
     }
-    return readCappedText(response);
+    return response;
   }
+}
+
+/** 抓取文本（HTML 或接口 JSON 原文），处置见 crawlFetch。 */
+async function fetchText(url: string, options?: SourceFetchOptions): Promise<string> {
+  return readCappedText(await crawlFetch(url, { fetchOptions: options }));
 }
 
 /**
@@ -305,7 +329,6 @@ async function fetchText(url: string, options?: SourceFetchOptions): Promise<str
  * 适配器若因为页面改版而始终返回下一跳，整轮抓取会被拖死。
  */
 const MAX_DETAIL_HOPS = 4;
-
 /**
  * 取详情内容 body：先取首跳地址，再按适配器的 resolveDetailUrl 逐跳跟随，
  * 直到适配器返回 null（「当前 body 即详情内容」）或到达跳数上限。

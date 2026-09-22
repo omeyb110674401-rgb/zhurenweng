@@ -70,6 +70,19 @@ describe('PDF 抽取', () => {
     assert.ok(result.text.split('\n').length >= 5);
   });
 
+  it('接受下载侧那种字节（Buffer 分块拼接），不能只吃 readFileSync 的产物', async () => {
+    // 真实链路里字节是 `Buffer.concat(chunks)` 出来的（crawl-notices 的 readCappedBuffer）。
+    // pdfjs v6 见到 Buffer 会直接抛「provide binary data as Uint8Array, rather than Buffer」，
+    // 而单元测试原本一律传 readFileSync 的结果，看不出这个差别 —— 每个 PDF 都会被判
+    // unsupported_container 而测试全绿。
+    const whole = readFileSync(path.join(FIXTURES, 'draft.pdf'));
+    const chunked = Buffer.concat([whole.subarray(0, 700), whole.subarray(700)]);
+    assert.equal(chunked.constructor.name, 'Buffer', '夹具要是 Buffer，否则这条测不到那件事');
+    const result = await parseAttachment({ kind: 'pdf', body: chunked });
+    assert.equal(result.status, 'ok', result.error ?? '');
+    assert.ok(result.text.includes('Notice on Public Consultation'));
+  });
+
   it('坏 PDF 不抛异常，落到 unsupported_container', async () => {
     const body = new Uint8Array(2048).fill(0x41);
     body.set([0x25, 0x50, 0x44, 0x46], 0);

@@ -65,10 +65,14 @@ function pdfAssetUrl(subdir: string): string {
 async function extractPdf(body: Uint8Array): Promise<AttachmentParseResult> {
   const { getDocument, VerbosityLevel } = await import('pdfjs-dist/legacy/build/pdf.mjs');
   const loadingTask = getDocument({
-    // 实测：pdfjs 会把 `data` 这个 buffer **移交走**（解析后调用方的数组 byteLength 变 0）。
-    // 所以这里必须先复制一份 —— 任务层拿同一份字节算 content_hash 与 char 上限，
-    // 若被移走，每个 PDF 都会得到「空文件的同一个哈希」，跨轮缓存就会永久性假命中。
-    data: body.slice(),
+    // 必须是**朴素 Uint8Array**，两个理由都实测踩过：
+    // 1. pdfjs v6 见到 Buffer 直接抛「Please provide binary data as `Uint8Array`,
+    //    rather than `Buffer`」—— 而下载侧 `readCappedBuffer` 返回的正是 Buffer；
+    // 2. pdfjs 会把 `data` 这个缓冲**移交走**（解析后调用方那份的 byteLength 变 0）。
+    //    任务层拿同一份字节算 content_hash，被移走的话所有 PDF 会得到同一个「空文件哈希」，
+    //    跨轮缓存变成永久性假命中。
+    // `new Uint8Array(body)` 一次同时解决这两条：它是复制，不是视图。
+    data: new Uint8Array(body),
     disableFontFace: true,
     cMapUrl: pdfAssetUrl('cmaps'),
     cMapPacked: true,
