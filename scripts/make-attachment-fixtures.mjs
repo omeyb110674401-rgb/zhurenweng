@@ -176,8 +176,15 @@ function buildScanOnlyPdf(pageCount) {
   return assemblePdf(objects);
 }
 
-/** 最小可用 DOCX：正文段落 + 关系文件。 */
-function buildDocx(paragraphs) {
+/**
+ * 最小可用 DOCX：正文段落 + 关系文件。
+ *
+ * `entryOrder` 只为一个真实失效存在：2026-09-22 生产影子轮里，住建部的 20 个真 docx
+ * 被「zip 开头找 `[Content_Types].xml`」的嗅探全部拒掉 —— 那个包的条目顺序是
+ * `docProps/` 在前、`[Content_Types].xml` 不在开头。默认顺序（fflate 按写入顺序打包）
+ * 恰好是我们原先**假设**的形态，所以必须再有一份按真实顺序写的夹具。
+ */
+function buildDocx(paragraphs, entryOrder = 'content-types-first') {
   const body = paragraphs
     .map((text) => `<w:p><w:r><w:t xml:space="preserve">${escapeXml(text)}</w:t></w:r></w:p>`)
     .join('');
@@ -186,24 +193,38 @@ function buildDocx(paragraphs) {
     '<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">' +
     `<w:body>${body}</w:body></w:document>`;
 
+  const contentTypes = strToU8(
+    '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
+      '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">' +
+      '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>' +
+      '<Default Extension="xml" ContentType="application/xml"/>' +
+      '<Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>' +
+      '</Types>',
+  );
+  const relationships = strToU8(
+    '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
+      '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">' +
+      '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/>' +
+      '</Relationships>',
+  );
+  const docProps = strToU8('<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Properties/>');
+
   return Buffer.from(
-    zipSync({
-      '[Content_Types].xml': strToU8(
-        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
-          '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">' +
-          '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>' +
-          '<Default Extension="xml" ContentType="application/xml"/>' +
-          '<Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>' +
-          '</Types>',
-      ),
-      '_rels/.rels': strToU8(
-        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
-          '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">' +
-          '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/>' +
-          '</Relationships>',
-      ),
-      'word/document.xml': strToU8(document),
-    }),
+    zipSync(
+      entryOrder === 'content-types-last'
+        ? {
+            'docProps/app.xml': docProps,
+            'word/settings.xml': strToU8('<?xml version="1.0"?><w:settings xmlns:w="w"/>'),
+            'word/document.xml': strToU8(document),
+            '_rels/.rels': relationships,
+            '[Content_Types].xml': contentTypes,
+          }
+        : {
+            '[Content_Types].xml': contentTypes,
+            '_rels/.rels': relationships,
+            'word/document.xml': strToU8(document),
+          },
+    ),
   );
 }
 
@@ -228,6 +249,8 @@ function buildBrokenDoc() {
 const FILES = {
   'draft.pdf': buildTextPdf(PDF_PAGES),
   'draft.docx': buildDocx(DRAFT_DOCX),
+  // 住建部那批的真实形态：`[Content_Types].xml` 不在包开头（生产实测被误判 20 次）
+  'wps-order.docx': buildDocx(DRAFT_DOCX, 'content-types-last'),
   'blank-form.docx': buildDocx(BLANK_FORM_DOCX),
   'scan-only.pdf': buildScanOnlyPdf(5),
   'block.pdf': latin1(BLOCK_PAGE),

@@ -16,8 +16,8 @@ import type { AttachmentKind } from '../db/types.ts';
 /** 判型至少需要读的字节数（OLE2 的签名就有 8 字节）。 */
 export const MAGIC_PROBE_BYTES = 8;
 
-/** docx 是 zip 容器，靠首个条目名识别（Word 写文件时 `[Content_Types].xml` 总在开头）。 */
-const OOXML_MARKER = '[Content_Types].xml';
+/** docx 是 zip 容器。曾经想靠条目名嗅探来分 docx / xlsx，实测证明那条路不成立，见下。 */
+
 /** 旧版 Word 的主流名，UTF-16LE 写在 OLE2 头部（WPS 生成的 .doc 同样有）。 */
 const WORD_STREAM_MARKER = 'WordDocument';
 
@@ -29,18 +29,6 @@ const OLE2_SIGNATURE = [0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1];
 function startsWith(head: Uint8Array, signature: readonly number[]): boolean {
   if (head.length < signature.length) return false;
   return signature.every((byte, index) => head[index] === byte);
-}
-
-/**
- * 在前 `limit` 字节里找一段 ASCII 标记。
- *
- * 只用于 zip 条目名：它们在本地文件头里是明文，且我们最关心的两个条目
- * （`[Content_Types].xml` / `word/document.xml`）必然排在前面。不做完整中央目录
- * 解析 —— 那要为「区分 docx 和 xlsx」写一个 zip 阅读器，而打分层已经把 xls 丢了。
- */
-function findAscii(head: Uint8Array, marker: string, limit: number): boolean {
-  const bytes = new TextDecoder('latin1').decode(head.subarray(0, Math.min(head.length, limit)));
-  return bytes.includes(marker);
 }
 
 /** OLE2 里的流名以 UTF-16LE 存放，逐字节比对（避免为一次判定构造一个大字符串）。 */
@@ -61,14 +49,18 @@ function findUtf16Ascii(head: Uint8Array, marker: string): boolean {
 /**
  * 判附件类型。入参是文件头（前若干 KiB 即可，不必整档）。
  *
- * `docx` 的判定刻意保守：zip 里看不到 OOXML 标记就报 `other`，而不是猜一个 docx ——
- * 猜错的代价是白解析一次并给出一条 `unsupported_container` 的假失败记录。
+ * **zip 一律当 docx 候选**，不在这里分 docx / xlsx —— 2026-09-22 生产影子轮实测：
+ * 住建部 20 个附件（`fileName=` 参数明确写着 .docx，content-type 也是
+ * wordprocessingml.document）被「前 1024 字节里找 `[Content_Types].xml`」这条判据全部
+ * 拒掉。真实文件的本地条目顺序是 `docProps/` → `docProps/app.xml` → `word/styles.xml` …，
+ * 那个标记根本不在开头。条目顺序不是可信信号，而中央目录在**文件末尾**、探测阶段拿不到。
+ *
+ * 代价可控：真 zip / xlsx 会走到解析层，由它给出准确结论（「zip 里没有
+ * word/document.xml」），而打分层已经按扩展名把 zip / xls* 挡在下载之前。
  */
 export function detectAttachmentKind(head: Uint8Array): AttachmentKind {
   if (startsWith(head, PDF_SIGNATURE)) return 'pdf';
-  if (startsWith(head, ZIP_SIGNATURE) || startsWith(head, ZIP_EMPTY_SIGNATURE)) {
-    return findAscii(head, OOXML_MARKER, 1024) ? 'docx' : 'other';
-  }
+  if (startsWith(head, ZIP_SIGNATURE) || startsWith(head, ZIP_EMPTY_SIGNATURE)) return 'docx';
   if (startsWith(head, OLE2_SIGNATURE)) {
     return findUtf16Ascii(head.subarray(0, 4096), WORD_STREAM_MARKER) ? 'doc' : 'other';
   }

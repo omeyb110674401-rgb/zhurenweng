@@ -228,3 +228,11 @@ describe('清洗接在解析出口上（不是只有函数本身对）', () => {
     assert.ok(result.text.includes('适用范围'), '清洗不该顺手删掉正文');
   });
 });
+
+describe('docx 条目顺序不影响抽取（生产实测过的形态）', () => {
+  it('wps-order.docx（[Content_Types].xml 不在包开头）照样抽得出条文', async () => {
+    const { result } = await parseFixture('wps-order.docx');
+    assert.equal(result.status, 'ok');
+    assert.ok(result.text.includes('第二条 适用范围'), '住建部那 20 个附件卡的就是这一步');
+  });
+});

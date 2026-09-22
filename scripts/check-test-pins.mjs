@@ -116,11 +116,13 @@ const CASES = [
     test: 'tests/unit/attachment-parse.test.mjs',
   },
   {
-    label: 'zip 判型不再要求 OOXML 标记',
+    // 生产影子轮实测：按「包开头有没有 [Content_Types].xml」分 docx / xlsx 会把住建部
+    // 20 个真 docx 全部拒掉。撤掉判型（zip 一律当 docx 候选），两条断言都要红。
+    label: 'zip 判型退回「看条目名猜 docx」',
     file: 'magic',
-    from: "    return findAscii(head, OOXML_MARKER, 1024) ? 'docx' : 'other';",
-    to: "    return 'docx';",
-    pattern: 'OOXML 标记',
+    from: "  if (startsWith(head, ZIP_SIGNATURE) || startsWith(head, ZIP_EMPTY_SIGNATURE)) return 'docx';",
+    to: "  if (startsWith(head, ZIP_SIGNATURE) || startsWith(head, ZIP_EMPTY_SIGNATURE)) return 'other';",
+    pattern: 'docx 候选',
     test: 'tests/unit/file-magic.test.mjs',
   },
   {

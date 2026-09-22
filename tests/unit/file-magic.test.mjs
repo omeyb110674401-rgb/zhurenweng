@@ -32,19 +32,22 @@ const fixtureHead = (name, length = 4096) =>
 
 const OLE2 = Uint8Array.from([0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1]);
 const OOXML_ZIP = concat(ascii('PK\u0003\u0004'), new Uint8Array(26), ascii('[Content_Types].xml'));
+/** 住建部那种真实形态：首个条目是 docProps/app.xml，OOXML 标记不在开头。 */
+const WPS_ORDER_ZIP = concat(ascii('PK\u0003\u0004'), new Uint8Array(26), ascii('docProps/app.xml'));
 
 describe('detectAttachmentKind：只认文件头，不认扩展名', () => {
   it('%PDF 开头判成 pdf', () => {
     assert.equal(detectAttachmentKind(ascii('%PDF-1.7\n')), 'pdf');
   });
 
-  it('zip 容器要看到 OOXML 标记才算 docx；看不到就是 other，不猜', () => {
+  it('zip 容器一律当 docx 候选 —— 条目顺序不是可信信号（生产实测过）', () => {
+    // 曾经在这里靠「前 1024 字节找 [Content_Types].xml」分 docx / xlsx，结果把住建部
+    // 20 个真 docx 全部拒掉：那个包的顺序是 docProps/ 在前。真 xlsx 由解析层兜住
+    // （「zip 里没有 word/document.xml」），不在判型阶段猜。
     assert.equal(detectAttachmentKind(OOXML_ZIP), 'docx');
-    assert.equal(
-      detectAttachmentKind(concat(ascii('PK\u0003\u0004'), new Uint8Array(26), ascii('xl/workbook.xml'))),
-      'other',
-      '把 xlsx 猜成 docx 会白解析一次，并留下一条假的 unsupported_container 记录',
-    );
+    assert.equal(detectAttachmentKind(WPS_ORDER_ZIP), 'docx');
+    assert.equal(detectAttachmentKind(fixtureHead('wps-order.docx')), 'docx', '真实顺序的 docx 必须能过判型');
+    assert.equal(detectAttachmentKind(fixtureHead('draft.docx')), 'docx');
   });
 
   it('OLE2 容器要看到 UTF-16LE 的 WordDocument 流名才算 doc', () => {
