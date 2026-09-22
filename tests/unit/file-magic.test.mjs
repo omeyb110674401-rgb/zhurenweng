@@ -80,7 +80,10 @@ describe('looksLikeHtml：区分「源站给了个网页」与「给了个读不
   });
 
   it('PDF 字节里恰好出现 <body> 不算网页（必须开头是标签）', () => {
-    assert.equal(looksLikeHtml(concat(ascii('%PDF-1.7\n'), ascii('x'.repeat(300)), ascii('<body>'))), false);
+    // 要落在判定期扫描的前 256 字节**之内**：放更远处的话这条测试就只是在验窗口宽度，
+    // 而不是在验「锚定开头」这件事本身。
+    assert.equal(looksLikeHtml(concat(ascii('%PDF-1.7\n'), ascii('x'.repeat(60)), ascii('<body>x</body>'))), false);
+    assert.equal(looksLikeHtml(ascii('<body>直接以 body 开头拦截页</body>')), true);
   });
 
   it('空响应不算网页（要留给 error 而不是 not_a_file）', () => {
