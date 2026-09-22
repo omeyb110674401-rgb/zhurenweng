@@ -18,7 +18,8 @@ import { URL } from 'node:url';
  *   2. 打分与每条公示 3 个的上限真实生效：空白意见表**根本不该被下载**；
  *   3. 跨轮缓存命中：第二轮对已 ok 的文件不能再发请求 —— 这是「每轮 ≤120 个文件」
  *      这条礼貌预算成立的前提，也是 miit 那批 403 主机不被每天骚扰的保证；
- *   4. referer 与 Range 真的发出去了（referer 是 #57 唯一没被试过的一手）。
+ *   4. referer 与 Range 真的发出去了（referer 是 #57 唯一没被试过的一手）；
+ *   5. 附件主机整台拒绝时换到详情页 origin 再取一次（miit 的 14 份草案就卡在这一步）。
  *
  * 零外部依赖：临时 SQLite + 进程内 HTTP 服务，不起 web、不碰真实站点。
  */
@@ -41,13 +42,35 @@ const ROUTES = {
   'c3.docx': 'draft.docx',
   'c4.docx': 'blank-form.docx',
   'c5.png': 'scan-only.pdf',
+  // 第四类失败：附件主机整台拒绝、但同一条路径在详情页 origin 上取得到（miit 的真实形状）
+  'rewrite-draft.docx': 'draft.docx',
 };
 
 let server;
 let base;
+/** 扮演「整台主机拒绝」的附件主机（miit 的 jyhwzhq 子域就是这个行为）。 */
+let blockedServer;
+let blockedBase;
+/** 打到被拒主机上的请求，用来证明「先试页面里写的那个地址」。 */
+const blockedRequests = [];
 let job;
 let repo;
 let logs;
+
+/** 对任何路径都回 403 + HTML 拦截页的源站。 */
+function startBlockedServer() {
+  return new Promise((resolve) => {
+    const instance = createServer((request, response) => {
+      blockedRequests.push({ url: request.url, headers: request.headers });
+      response.writeHead(403, { 'content-type': 'text/html' });
+      response.end('<!DOCTYPE html><html><body>当前页面禁止访问，请稍后再试</body></html>');
+    });
+    instance.listen(0, '127.0.0.1', () => {
+      blockedBase = `http://127.0.0.1:${instance.address().port}`;
+      resolve(instance);
+    });
+  });
+}
 
 function startServer() {
   return new Promise((resolve) => {
@@ -98,6 +121,7 @@ function startServer() {
 }
 
 const urlOf = (name) => `${base}/${name}`;
+const blockedUrlOf = (name) => `${blockedBase}/${name}`;
 const hitsFor = (name) => requests.filter((entry) => entry.name === name).length;
 
 async function rowsOf(noticeId) {
@@ -124,11 +148,14 @@ async function seed(noticeId, attachments) {
 
 before(async () => {
   server = await startServer();
+  blockedServer = await startBlockedServer();
   const workDir = mkdtempSync(path.join(os.tmpdir(), 'zhurenweng-extract-job-'));
   process.env.DB_DRIVER = 'sqlite';
   process.env.DATABASE_URL = path.join(workDir, 'app.db');
-  // 出网守卫默认拦环回地址；SOURCES_FIXTURE_BASE 是既有的放行口径（issue #52）
+  // 出网守卫默认拦环回地址；SOURCES_FIXTURE_BASE 是既有的放行口径（issue #52）。
+  // 被拒主机也要放行 —— 否则它的 403 永远到不了我们，换域那一手就只在生产被验证过。
   process.env.SOURCES_FIXTURE_BASE = base;
+  process.env.SOURCES_FIXTURE_EXTRA_ORIGINS = blockedBase;
   // 礼貌间隔在测试里不该真的等（另有断言钉它的作用）
   process.env.ATTACHMENT_HOST_INTERVAL_MS = '0';
   process.env.ATTACHMENT_EXCLUDE_SOURCES = '';
@@ -162,11 +189,16 @@ before(async () => {
     { name: '意见征求表.docx', url: urlOf('c4.docx') },
     { name: '附图.png', url: urlOf('c5.png') },
   ]);
+  // 附件挂在另一台主机上，那台主机对一切都回 403；同一条路径在详情页 origin 上取得到
+  await seed('4'.repeat(32), [
+    { name: '管理办法（草案征求意见稿）.docx', url: blockedUrlOf('rewrite-draft.docx') },
+  ]);
   logs = [];
 });
 
 after(() => {
   server?.close();
+  blockedServer?.close();
 });
 
 const ctx = { logger: (message) => logs.push(message), now: () => new Date() };
@@ -208,8 +240,17 @@ describe('extract-attachments 单轮', () => {
     );
   });
 
-  it('空白意见表与图片根本不被下载（打分 + 每条 3 个的上限）', async () => {
-    assert.equal(hitsFor('c4.docx'), 0, '意见征求表若被下载，等于把预算花在下划线上');
+  it('附件主机整台拒绝时，换到详情页 origin 取同一条路径（miit 的形状）', async () => {
+    const rows = await rowsOf('4'.repeat(32));
+    const row = rows.get(blockedUrlOf('rewrite-draft.docx'));
+    assert.equal(row?.status, 'ok', `换域重试没生效：${row?.status}（${row?.error ?? '无'}）`);
+    assert.ok(row.extractedText.includes('第二条 适用范围'), '换域取回的必须是同一份文件');
+    assert.match(row.error ?? '', /改由/, '换域要在行上留痕，否则事后看不出文本来自哪台主机');
+    assert.equal(blockedRequests.length, 1, '先试页面里写的地址、被拒才换域 —— 换域不是默认路径');
+    assert.ok(hitsFor('rewrite-draft.docx') >= 2, '探测与整档下载都要走换后的地址');
+  });
+
+  it('空白意见表与图片根本不被下载（打分 + 每条 3 个的上限）', async () => {    assert.equal(hitsFor('c4.docx'), 0, '意见征求表若被下载，等于把预算花在下划线上');
     assert.equal(hitsFor('c5.png'), 0, '图片不是条文载体');
     assert.ok(hitsFor('c1.pdf') >= 1 && hitsFor('c2.docx') >= 1, '排在前列的草案要真被取到');
     const rows = await rowsOf('3'.repeat(32));
@@ -268,5 +309,26 @@ describe('跨轮行为', () => {
     assert.equal(stale.status, 'ok', '刷新失败把状态写成 blocked，摘要就再也读不到这份文本');
     assert.match(stale.error ?? '', /本轮未能刷新/, '但失败必须照实写在 error 里');
     ROUTES['form.docx'] = 'blank-form.docx';
+  });
+
+  it('刷新成功且内容没变，不算「未能刷新」', async () => {
+    // 把 draft.docx 变成「到期该刷新」，但这一轮取得到、字节也一样：走的是哈希命中那条路
+    const { getDb } = await import('../../src/db/client.ts');
+    const { noticeAttachments } = await import('../../src/db/schema/sqlite.ts');
+    const { and, eq } = await import('drizzle-orm');
+    const db = await getDb();
+    await db
+      .update(noticeAttachments)
+      .set({ lastFetchAt: new Date(Date.now() - 40 * 86_400_000).toISOString() })
+      .where(and(eq(noticeAttachments.noticeId, '1'.repeat(32)), eq(noticeAttachments.url, urlOf('draft.docx'))));
+
+    requests.length = 0;
+    const before = (await rowsOf('1'.repeat(32))).get(urlOf('draft.docx'));
+    await job.run(ctx);
+    const after = (await rowsOf('1'.repeat(32))).get(urlOf('draft.docx'));
+    assert.equal(after.status, 'ok');
+    assert.equal(after.error, null, `内容没变的一轮被写成了失败：${after.error}`);
+    assert.equal(after.extractedText, before.extractedText);
+    assert.equal(hitsFor('draft.docx'), 2, '到期要真去取一次（探测 + 整档），但也不许多发');
   });
 });

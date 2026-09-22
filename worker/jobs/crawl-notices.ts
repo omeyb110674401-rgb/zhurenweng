@@ -140,15 +140,28 @@ function mergeDetail(notice: NormalizedNotice, detail: ParsedDetail): Normalized
  * 本次运行显式放行的抓取 origin：E2E 的 fixture 源站跑在 `http://127.0.0.1:<port>`
  * 上（环回地址），守卫默认会拦掉它 —— 由 SOURCES_FIXTURE_BASE 推导后放行。
  * 生产不设该变量 → 返回空数组 → 所有内网 / 本机目标一律拒绝。
+ *
+ * `SOURCES_FIXTURE_EXTRA_ORIGINS`（逗号分隔）同样是**只有测试才设**的：有的链路要用
+ * 两台 fixture 源站才能扮演（issue #57 的「附件子域回 403、主域上是同一份文件」），
+ * 而单个 SOURCES_FIXTURE_BASE 只放行一个 origin。
  */
 function allowedCrawlOrigins(): string[] {
-  const fixtureBase = process.env.SOURCES_FIXTURE_BASE;
-  if (!fixtureBase) return [];
-  try {
-    return [new URL(fixtureBase).origin];
-  } catch {
-    return [];
+  const listed = [
+    process.env.SOURCES_FIXTURE_BASE ?? '',
+    ...(process.env.SOURCES_FIXTURE_EXTRA_ORIGINS ?? '').split(','),
+  ];
+  const origins: string[] = [];
+  for (const entry of listed) {
+    const value = entry.trim();
+    if (value === '') continue;
+    try {
+      const { origin } = new URL(value);
+      if (!origins.includes(origin)) origins.push(origin);
+    } catch {
+      // 某一项写坏就跳过它：其余项仍要放行，但绝不因解析失败而放宽成「全部放行」
+    }
   }
+  return origins;
 }
 
 /** 3xx：需要跟随的重定向（WAF 挑战也是一种 3xx，但由调用方按 Set-Cookie 区分）。 */

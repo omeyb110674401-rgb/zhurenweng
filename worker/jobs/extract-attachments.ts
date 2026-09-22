@@ -20,6 +20,7 @@ import {
   selectAttachmentCandidates,
 } from '../../src/lib/attachment-select.ts';
 import { envInt } from '../../src/lib/env-int.ts';
+import { attachmentUrlCandidates } from '../../src/lib/attachment-url.ts';
 import { crawlFetch, readCappedBuffer } from './crawl-notices.ts';
 import type { Job, JobContext } from '../registry.ts';
 
@@ -219,6 +220,66 @@ function attachmentHeaders(noticeUrl: string, range?: string): Record<string, st
   return headers;
 }
 
+/** 探测的两种停步：拿到可读响应（带**实际取回它的地址**），或者这一行本轮已有结论。 */
+type ProbeResult =
+  | { readonly probed: true; readonly response: Response; readonly servedUrl: string }
+  | { readonly probed: false; readonly outcome: Outcome };
+
+/**
+ * 依次试候选地址，读到文件前缀就停。
+ *
+ * 与改动前的差别只有一处，但那条决定 miit 能不能读到条文：**被拒不再立刻定性**，
+ * 先把同一条路径送到详情页主机上再试一次，两次都不行才写 blocked。
+ */
+async function probeAttachment(
+  urls: readonly string[],
+  noticeUrl: string,
+  policy: HostPolicy,
+  logger: (message: string) => void,
+): Promise<ProbeResult> {
+  let refusal: string | null = null;
+  for (const url of urls) {
+    const host = hostOf(url);
+    if (policy.tripped(host)) continue;
+    await policy.wait(host);
+    let response: Response;
+    try {
+      response = await crawlFetch(url, {
+        headers: attachmentHeaders(noticeUrl, `bytes=0-${PROBE_BYTES - 1}`),
+        returnForStatus: isRefusal,
+      });
+    } catch (error) {
+      // 守卫拒绝 / 超时 / 重定向环：这些是「还不知道结论」，留 error 让下轮重试
+      policy.record(host, false);
+      return {
+        probed: false,
+        outcome: { status: 'error', error: `探测失败：${errorMessage(error)}`, fetchedAt: new Date() },
+      };
+    }
+    if (isRefusal(response.status)) {
+      const tripped = policy.record(host, true);
+      if (tripped) logger(`  主机 ${host} 连续被拒 ${HOST_BLOCK_TRIP} 次，本轮不再请求它的附件`);
+      refusal = `HTTP ${response.status}（${host}）`;
+      continue;
+    }
+    policy.record(host, false);
+    return { probed: true, response, servedUrl: url };
+  }
+  if (refusal !== null) {
+    return { probed: false, outcome: { status: 'blocked', bytes: 0, error: refusal, fetchedAt: new Date() } };
+  }
+  // 候选全被本轮熔断挡住：一个请求都没发，所以 fetchedAt 留 null。写成时间戳会把
+  // blocked 的退避窗口重置，于是这台主机每天重新排队、熔断永远解不开。
+  return {
+    probed: false,
+    outcome: {
+      status: 'blocked',
+      error: `主机 ${urls.map(hostOf).join(' / ')} 本轮已连续被拒，跳过（未发请求）`,
+      fetchedAt: null,
+    },
+  };
+}
+
 /**
  * 处理一个附件：探 → 判型 → 整档 → 解析 → 写终态。
  *
@@ -241,8 +302,11 @@ async function extractOne(
    * 而且是**因为我们的机房今天不顺利**而退化。失败照实在 error 里写清，状态仍为 ok。
    *
    * 这只适用于「本来就有文本」的行；从没读到的行照常记 blocked，审计脚本才看得见失败面。
+   * 判据看的是**本轮结论是不是失败**：内容没变时本轮也是 ok，那时候要写的是「取到了、
+   * 没变」，不是「未能刷新」。
    */
   const keepStale = (outcome: Outcome): Outcome => {
+    if (outcome.status === 'ok') return outcome;
     if (existing?.status !== 'ok' || (existing.extractedText ?? '') === '') return outcome;
     return {
       status: 'ok',
@@ -255,40 +319,34 @@ async function extractOne(
       fetchedAt: outcome.fetchedAt,
     };
   };
-  const settle = (outcome: Outcome): Promise<void> => record(notice.id, attachment.url, keepStale(outcome), tally);
+  /**
+   * 直连被拒、换同站主机才取到时要留痕：这一行的 `url` 仍是页面里写的那个地址，
+   * 不留痕就事后看不出文本其实取自另一台主机。只补 error 的空缺 —— 失败行自己的
+   * 原因优先，那个字段是审计脚本的读数列。
+   */
+  let viaNote: string | null = null;
+  const settle = (outcome: Outcome): Promise<void> => record(
+    notice.id,
+    attachment.url,
+    keepStale(viaNote === null || outcome.error != null ? outcome : { ...outcome, error: viaNote }),
+    tally,
+  );
 
-  const host = hostOf(attachment.url);
-  if (policy.tripped(host)) {
-    // 熔断跳过：**没发请求**，所以 fetchedAt 留 null。写成时间戳会把 blocked 的退避
-    // 窗口重置，于是这个主机每天重新排队、熔断永远解不开。
-    await settle({
-      status: 'blocked',
-      error: `主机 ${host} 本轮已连续被拒，跳过（未发请求）`,
-      fetchedAt: null,
-    });
+  const probed = await probeAttachment(
+    attachmentUrlCandidates(attachment.url, notice.url),
+    notice.url,
+    policy,
+    logger,
+  );
+  if (!probed.probed) {
+    await settle(probed.outcome);
     return;
   }
-
-  await policy.wait(host);
-  let probe: Response;
-  try {
-    probe = await crawlFetch(attachment.url, {
-      headers: attachmentHeaders(notice.url, `bytes=0-${PROBE_BYTES - 1}`),
-      returnForStatus: isRefusal,
-    });
-  } catch (error) {
-    // 守卫拒绝 / 超时 / 重定向环：这些是「还不知道结论」，留 error 让下轮重试
-    policy.record(host, false);
-    await settle({ status: 'error', error: `探测失败：${errorMessage(error)}`, fetchedAt: new Date() });
-    return;
-  }
-
-  if (isRefusal(probe.status)) {
-    const tripped = policy.record(host, true);
-    if (tripped) logger(`  主机 ${host} 连续被拒 ${HOST_BLOCK_TRIP} 次，本轮不再请求它的附件`);
-    await settle({ status: 'blocked', bytes: 0, error: `HTTP ${probe.status}`, fetchedAt: new Date() });
-    return;
-  }
+  const { response: probe, servedUrl } = probed;
+  const host = hostOf(servedUrl);
+  viaNote = servedUrl === attachment.url
+    ? null
+    : `直连 ${hostOf(attachment.url)} 未取到，改由 ${host} 取回同一路径`;
 
   const { head, truncated } = await readPrefix(probe, PROBE_BYTES);
   const total = declaredTotalBytes(probe, truncated);
@@ -330,7 +388,7 @@ async function extractOne(
 
   let body: Uint8Array;
   try {
-    const full = await crawlFetch(attachment.url, {
+    const full = await crawlFetch(servedUrl, {
       headers: attachmentHeaders(notice.url),
       returnForStatus: isRefusal,
     });

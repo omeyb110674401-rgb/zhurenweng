@@ -20,6 +20,8 @@ const TARGETS = {
   select: 'src/lib/attachment-select.ts',
   parse: 'src/lib/attachments/parse.ts',
   magic: 'src/lib/file-magic.ts',
+  url: 'src/lib/attachment-url.ts',
+  extract: 'worker/jobs/extract-attachments.ts',
 };
 
 const CASES = [
@@ -142,6 +144,48 @@ const CASES = [
     to: "    text.includes('<!doctype html') || text.includes('<body') ||",
     pattern: '恰好出现 <body>',
     test: 'tests/unit/file-magic.test.mjs',
+  },
+  {
+    // 影子轮结论：miit 16 条带附件的公示 ok=0，全是 jyhwzhq 子域整台主机 403。
+    // 撤掉换域这一手，那 14 份草案就又读不到了。
+    label: '被拒后不换到详情页 origin（直连一拒就落 blocked）',
+    file: 'extract',
+    from: '      refusal = `HTTP ${response.status}（${host}）`;\n      continue;',
+    to: '      return {\n        probed: false,\n        outcome: { status: \'blocked\', bytes: 0, error: `HTTP ${response.status}`, fetchedAt: new Date() },\n      };',
+    pattern: '换到详情页 origin',
+    test: 'tests/e2e/attachment-extract-job.test.mjs',
+  },
+  {
+    label: '换域取回不留出处痕（事后看不出文本来自哪台主机）',
+    file: 'extract',
+    from: '    : `直连 ${hostOf(attachment.url)} 未取到，改由 ${host} 取回同一路径`;',
+    to: '    : null;',
+    pattern: '换到详情页 origin',
+    test: 'tests/e2e/attachment-extract-job.test.mjs',
+  },
+  {
+    label: '沿用旧文本的判据不看本轮结论（成功的一轮被写成刷新失败）',
+    file: 'extract',
+    from: "    if (outcome.status === 'ok') return outcome;",
+    to: '    // 撤掉这一行',
+    pattern: '不算「未能刷新」',
+    test: 'tests/e2e/attachment-extract-job.test.mjs',
+  },
+  {
+    label: '同 origin 也补第二条候选（正常源站白多一个请求）',
+    file: 'url',
+    from: '  if (file.origin === page.origin) return [attachmentUrl];',
+    to: '  if (false) return [attachmentUrl];',
+    pattern: '也算同一处',
+    test: 'tests/unit/attachment-url.test.mjs',
+  },
+  {
+    label: '同站判据放宽到两段后缀（公共后缀下把不相干的站判成同站）',
+    file: 'url',
+    from: '  if (commonSuffixLabels(file.hostname, page.hostname) < 3) return [attachmentUrl];',
+    to: '  if (false) return [attachmentUrl];',
+    pattern: '只共享两段后缀不算同站',
+    test: 'tests/unit/attachment-url.test.mjs',
   },
 ];
 
