@@ -48,13 +48,20 @@ export const GLM_DEFAULT_MODEL = 'glm-4-flash';
  * 参与信息，并明确禁止条文式输出。
  *
  * 逐字引用的要求原样保留（PRD：引用可核对），渠道清单同样每项配一段原文。
+ *
+ * 「影响谁」为什么是**可缺段**（issue #56 第八节的实测）：这一段要的是「受这份文件影响的
+ * 具体主体」，而公告壳里没有这句话 —— 它在附件的草案里。把它列为必填的两种下场都测到了：
+ * 模型要么按「宁可留空也不要凑」返回空串（整条作废转人工复核，第一轮 15/50 条就是这么掉的），
+ * 要么把壳里的「有关单位和公众 / 社会公众」填进来（35 条成功摘要里 26 条如此，正是提示词
+ * 原本禁止写泛称的那类答案）。前者诚实但失败，后者通过但答非所问，且与「谁能提」重复。
+ * 现在明确写成可缺段，并要求泛称留空。
  */
 const SYSTEM_PROMPT = [
   '你是政府公示的「参与导引」助手。用户会给出一份公示的标题与网页正文纯文本。',
   '重要背景：这类页面的正文通常只是公告本身，真正的草案条文、标准文本、名单在附件里，不在给你的文本中。',
   '因此：不要编写、推测或概括任何「条款内容」，只回答公告里真实存在的参与信息。',
   '请只输出一个 JSON 对象（不要输出任何解释、markdown 代码围栏或其他文字），字段如下：',
-  '{"what":"这是什么：一句话概括这份公示在做什么，40 字以内","who":"影响谁：受这份文件影响的具体主体（如运输机场运营人、医疗器械注册人、标准起草单位），不要只写社会公众","whoCanSubmit":"谁能提：原文写明的可提出意见的主体或范围；原文未提及则留空字符串","afterDeadline":"逾期会怎样：原文写明超过截止日期后如何处理（如逾期视为无意见、不再受理）；原文未提及则留空字符串","deadline":"截止日期：YYYY-MM-DD，原文未明确则为 null","howToComment":"如何提意见：一句话概述提交途径，40 字以内","channels":[{"kind":"email|phone|mail|online|other","value":"可直接使用的具体值"}],"quotes":{"what":"what 对应的原文引用片段（逐字摘录，不超过100字）","who":"who 对应的原文引用片段","whoCanSubmit":"谁能提对应的原文片段，没有则空字符串","afterDeadline":"逾期会怎样对应的原文片段，没有则空字符串","deadline":"截止日期对应的原文引用片段","howToComment":"如何提意见对应的原文引用片段","channels":["每条渠道对应的原文片段，顺序与 channels 严格一致"]}}',
+  '{"what":"这是什么：一句话概括这份公示在做什么，40 字以内","who":"影响谁：只有原文明确写出受这份文件影响的主体时才写（如运输机场运营人、医疗器械注册人、标准起草单位）；原文只写「社会公众」「有关单位和个人」这类泛称时**留空字符串** —— 那是「谁能提」，不是「影响谁」。这类页面的正文通常不含受影响主体（它在附件的草案里），宁可留空也不要推断","whoCanSubmit":"谁能提：原文写明的可提出意见的主体或范围；原文未提及则留空字符串","afterDeadline":"逾期会怎样：原文写明超过截止日期后如何处理（如逾期视为无意见、不再受理）；原文未提及则留空字符串","deadline":"截止日期：YYYY-MM-DD，原文未明确则为 null","howToComment":"如何提意见：一句话概述提交途径，40 字以内","channels":[{"kind":"email|phone|mail|online|other","value":"可直接使用的具体值"}],"quotes":{"what":"what 对应的原文引用片段（逐字摘录，不超过100字）","who":"who 对应的原文引用片段，留空时空字符串","whoCanSubmit":"谁能提对应的原文片段，没有则空字符串","afterDeadline":"逾期会怎样对应的原文片段，没有则空字符串","deadline":"截止日期对应的原文引用片段","howToComment":"如何提意见对应的原文引用片段","channels":["每条渠道对应的原文片段，顺序与 channels 严格一致"]}}',
   '要求：',
   '1. 只依据给定原文，不编造、不猜测；原文没有的字段留空字符串或 null，宁可留空也不要凑。',
   '2. 引用必须是原文中的逐字连续片段。',
@@ -190,14 +197,14 @@ export function parseModelJson(content: string): unknown {
  * 校验并归一化模型输出的摘要 JSON；形状不合法抛错（由摘要任务的重试策略兜底）。
  *
  * 三条有意的规则：
- * 1. **必填三段必须非空** —— 此前只校验「是不是字符串」，于是 `"who": ""` 也能落库，
- *    页面上「影响谁」标题下面空无一物（生产实测 mimo-v2.5 有 1 条这样，glm 0 条）。
- *    答不上就抛错，交给重试 / 转人工复核，比留一个空段落诚实。
- *    不合格时**一次报全三段**并分开写清是缺字段、值不是字符串还是空串：三者的成因
- *    与处置完全不同，合成一句就会把「校验器按顺序先撞上哪个」误读成「只有那个字段
- *    有问题」（issue #56 的 30% 失败率就是这么被误判成模型抖动的）。
- * 2. 原文可能确实没有的段（谁能提 / 逾期会怎样）缺省为空串，不算形状异常 ——
- *    把它们变成必填只会逼模型编一句。
+ * 1. **必填两段必须非空**（what / howToComment）—— 此前只校验「是不是字符串」，于是
+ *    `"who": ""` 也能落库，页面上「影响谁」标题下面空无一物（生产实测 mimo-v2.5 有 1 条
+ *    这样，glm 0 条）。答不上就抛错，交给重试 / 转人工复核，比留一个空段落诚实。
+ *    不合格时**一次报全**并分开写清是缺字段、值不是字符串还是空串：三者的成因与处置
+ *    完全不同，合成一句就会把「校验器按顺序先撞上哪个」误读成「只有那个字段有问题」
+ *    （issue #56 的 30% 失败率就是这么被误判成模型抖动的）。
+ * 2. 原文可能确实没有的段（**影响谁** / 谁能提 / 逾期会怎样）缺省为空串，不算形状异常 ——
+ *    把它们变成必填只会逼模型编一句；「影响谁」原本在必填里，实测后降级（见 SYSTEM_PROMPT 注释）。
  * 3. 渠道数组**一项都不删**：`quotes.channels` 按原始下标与渠道配对，这里删一项
  *    就会让后面的渠道挂上前面的引用。去空 / 去重 / 截断统一由 buildQuotedSummary
  *    里的 normalizeChannels 在配好引用之后做。
@@ -219,7 +226,7 @@ export function normalizeModelSummary(raw: unknown): QuotedStructuredSummary {
   };
 
   const problems: string[] = [];
-  const take = (key: 'what' | 'who' | 'howToComment'): string => {
+  const take = (key: 'what' | 'howToComment'): string => {
     const value = record[key];
     const problem = shapeProblem(value);
     if (problem !== null) {
@@ -229,7 +236,6 @@ export function normalizeModelSummary(raw: unknown): QuotedStructuredSummary {
     return (value as string).trim();
   };
   const what = take('what');
-  const who = take('who');
   const howToComment = take('howToComment');
   if (problems.length > 0) {
     throw new Error(`摘要输出的必填段不合格：${problems.join('、')}`);
@@ -261,7 +267,7 @@ export function normalizeModelSummary(raw: unknown): QuotedStructuredSummary {
   const quotes = readQuotes(record.quotes);
   return {
     what,
-    who,
+    who: optionalText('who'),
     whoCanSubmit: optionalText('whoCanSubmit'),
     afterDeadline: optionalText('afterDeadline'),
     deadline,

@@ -47,10 +47,23 @@ describe('摘要形状：旧行向后兼容（重刷窗口内不得掉回占位�
     assert.deepEqual(parsed.channels, []);
   });
 
-  it('必填三段仍然必填：缺任何一段就判为形状异常', () => {
+  it('必填两段仍然必填：缺任何一段就判为形状异常', () => {
     const { what: _what, ...withoutWhat } = LEGACY_SUMMARY;
     assert.equal(parseQuotedSummary(withoutWhat), null);
-    assert.equal(parseQuotedSummary({ ...LEGACY_SUMMARY, who: { quote: null } }), null);
+    assert.equal(parseQuotedSummary({ ...LEGACY_SUMMARY, howToComment: null }), null);
+  });
+
+  /*
+   * 「影响谁」自 issue #56 第八节起是可缺段：整段缺失或没有 text 都解析成空段，
+   * **不能**判成形状异常 —— 那会让详情页掉回「待人工复核」占位，
+   * 而库里真有一批这种行（模型答不上时返回空串，重刷第一轮 15/50 条）。
+   */
+  it('影响谁整段缺失仍解析成功，该段为空', () => {
+    const { who: _who, ...withoutWho } = LEGACY_SUMMARY;
+    const parsedWithoutWho = parseQuotedSummary(withoutWho);
+    assert.ok(parsedWithoutWho, '缺 who 不该判异常');
+    assert.deepEqual(parsedWithoutWho.who, { text: '', quote: null });
+    assert.equal(parseQuotedSummary({ ...LEGACY_SUMMARY, who: { quote: null } }).who.text, '');
   });
 });
 

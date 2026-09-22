@@ -16,8 +16,8 @@ import { createFixtureServer } from './helpers/fixture-server.mjs';
  *   → 失败路径：LLM_STUB_FAILURES=always —— 每条目首调 + 3 次重试全部失败
  *     （stub 调用日志 JSONL 精确断言 4 次尝试）→ summary_status=failed_review，
  *     详情页显示「摘要生成中（待人工复核）」占位；后续正常轮次不再自动重试；
- *   → 成功路径：向 fixture 列表追加第 4 条（未截止）→ 再跑一轮 → 五段式摘要
- *     （这是什么 / 影响谁 / 关键条款 / 截止日期 / 如何提意见）+ 每段原文引用
+ *   → 成功路径：向 fixture 列表追加第 4 条（未截止）→ 再跑一轮 → 参与导引摘要
+ *     （这是什么 / 影响谁 / 谁能提 / 逾期会怎样 / 截止日期 / 如何提意见）+ 每段原文引用
  *     （可点击跳转官方原文）+ 显著 AI 标注，占位消失。
  *
  * 全程零外部依赖（ADR-0001）：SQLite 临时文件库 + 本地 fixture 源站 + stub LLM。

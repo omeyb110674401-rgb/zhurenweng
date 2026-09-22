@@ -188,9 +188,10 @@ export function buildQuotedSummary(
  * 安全校验 ai_summary_json（详情页渲染与检索索引前的防御性解析）：
  * 形状不符合 QuotedSummary 时返回 null，页面回退到占位文案，绝不让脏数据抛错打断渲染。
  *
- * 必填只有三段（what / who / howToComment）：**旧形状的行也要能解析**，否则摘要
+ * 必填只有两段（what / howToComment）：**旧形状的行也要能解析**，否则摘要
  * 重刷的那一两个小时里，存量 58 条会从「有摘要」掉回「待人工复核」占位 —— 那比
  * 字段少更难看。所以 `keyPoints` 与新增的几段都按可选处理：有就带出来，没有就空。
+ * 「影响谁」同样按可缺段处理（issue #56 第八节降级）。
  */
 export function parseQuotedSummary(value: unknown): QuotedSummary | null {
   if (typeof value !== 'object' || value === null) return null;
@@ -220,10 +221,9 @@ export function parseQuotedSummary(value: unknown): QuotedSummary | null {
   };
 
   const what = section(record.what);
-  const who = section(record.who);
   const deadline = deadlineSection(record.deadline);
   const howToComment = section(record.howToComment);
-  if (!what || !who || !deadline || !howToComment) return null;
+  if (!what || !deadline || !howToComment) return null;
 
   const keyPoints: SummarySection[] = [];
   if (Array.isArray(record.keyPoints)) {
@@ -240,7 +240,7 @@ export function parseQuotedSummary(value: unknown): QuotedSummary | null {
 
   return {
     what,
-    who,
+    who: optionalSection(record.who),
     whoCanSubmit: optionalSection(record.whoCanSubmit),
     afterDeadline: optionalSection(record.afterDeadline),
     keyPoints,

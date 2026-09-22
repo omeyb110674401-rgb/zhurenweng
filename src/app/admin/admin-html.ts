@@ -226,7 +226,7 @@ function reviewItem(item: ReviewQueueItem): string {
     '<p class="muted">或直接人工修订摘要（参与导引口径），保存后详情页立即展示（不再自动重试）：</p>',
     '<div class="review-grid">',
     '<label>这是什么（必填）<input name="what" required></label>',
-    '<label>影响谁（必填）<input name="who" required></label>',
+    '<label>影响谁（可空：原文没写受影响主体就留空，泛称不算）<input name="who"></label>',
     '<label>谁能提（可空）<input name="whoCanSubmit"></label>',
     '<label>逾期会怎样（可空）<input name="afterDeadline"></label>',
     '<label>截止日期（可空）<input type="date" name="deadline"></label>',

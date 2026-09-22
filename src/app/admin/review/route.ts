@@ -76,7 +76,8 @@ export async function POST(request: Request): Promise<Response> {
     const who = String(form.get('who') ?? '').trim();
     const howToComment = String(form.get('howToComment') ?? '').trim();
     const deadlineInput = String(form.get('deadline') ?? '').trim();
-    if (!what || !who || !howToComment) {
+    // 「影响谁」可空（issue #56 第八节：公告壳里通常没有受影响主体，与模型侧同一口径）
+    if (!what || !howToComment) {
       return redirectToAdmin('error=missing_fields');
     }
     const deadline = deadlineInput ? normalizeDateText(deadlineInput) : null;
