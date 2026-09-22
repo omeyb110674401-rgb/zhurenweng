@@ -204,6 +204,13 @@ for (const [source, s] of stats) {
   console.log(`  ${source.padEnd(12)} ${text2}`);
 }
 
+console.log('\n## unsupported_container 明细（判型只看文件头；这里要核实是不是我们把类型认窄了）');
+const unsupported = rows.rows.filter((row) => row.status === 'unsupported_container');
+if (unsupported.length === 0) console.log('  （无）');
+for (const row of unsupported.slice(0, 20)) {
+  console.log(`  ${text(row.name).slice(0, 40).padEnd(42)} ${text(row.error).slice(0, 52)}`);
+}
+
 console.log('\n## 空白表是否被 no_draft_text 正确挡掉（抽查最多 8 行）');
 const blank = rows.rows.filter((row) => row.status === 'no_draft_text');
 if (blank.length === 0) console.log('  （没有 no_draft_text 行 —— 要么还没轮到，要么阈值没起作用）');

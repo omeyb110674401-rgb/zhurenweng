@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { describe, it } from 'node:test';
-import { MAX_STORED_TEXT_CHARS, parseAttachment } from '../../src/lib/attachments/parse.ts';
+import { MAX_STORED_TEXT_CHARS, parseAttachment, sanitizeExtractedText } from '../../src/lib/attachments/parse.ts';
 import { detectAttachmentKind } from '../../src/lib/file-magic.ts';
 
 /**
@@ -190,3 +190,41 @@ async function buildDocxAsync(paragraphs) {
     }),
   );
 }
+
+describe('抽取文本的入库前清洗（影子轮实测的两个失效）', () => {
+  it('删掉 NUL 与其它控制符 —— PostgreSQL 的 text 不收 NUL，一条 UPDATE 失败会带走整轮', () => {
+    // 生态环境部一份 11 页标准 PDF 抽出 8 个 U+0000（字体映射失败时 pdfjs 吐空字符）
+    const clean = sanitizeExtractedText('第一条\u0000 适用范围\u0007：本办法\u0085适用于');
+    assert.equal(clean, '第一条 适用范围：本办法适用于');
+  });
+
+  it('保留制表与换行（截取的段落结构与「第X条」锚点都依赖它们）', () => {
+    const kept = '第二条\t适用范围：\n适用于全部单位\r\n第三条';
+    assert.equal(sanitizeExtractedText(kept), kept);
+  });
+
+  it('增补平面的汉字不被误删，落单的代理对被删（后者编码成 UTF-8 会失败）', () => {
+    assert.equal(sanitizeExtractedText('㐀䶿𠀀𪚯'), '㐀䶿𠀀𪚯');
+    const lone = `前${String.fromCharCode(0xd83d)}后`;
+    assert.equal(sanitizeExtractedText(lone), '前后');
+  });
+
+  it('清洗发生在扫描件判定之前：只有空字符的 PDF 不能算 ok', async () => {
+    // 判据顺序错了就会得到「status=ok 且文本为空」——摘要读到的是空输入，页面却显示已读附件
+    assert.equal(sanitizeExtractedText('\u0000\u0000\u0000'), '');
+  });
+});
+
+describe('清洗接在解析出口上（不是只有函数本身对）', () => {
+  it('parseAttachment 的出口文本不含 NUL 与其它控制符', async () => {
+    // 撤掉 finish() 里那次清洗，这条会红；只测 sanitizeExtractedText 是测不出「没接上」的
+    const body = await buildDocxAsync([
+      `第二条${String.fromCharCode(0)} 适用范围：本办法适用于${String.fromCharCode(7)}全部单位。`,
+    ]);
+    const result = await parseAttachment({ kind: 'docx', body });
+    assert.equal(result.status, 'ok');
+    assert.ok(!result.text.includes(String.fromCharCode(0)), 'NUL 仍留在文本里：PostgreSQL 会拒绝这条 UPDATE');
+    assert.ok(!result.text.includes(String.fromCharCode(7)));
+    assert.ok(result.text.includes('适用范围'), '清洗不该顺手删掉正文');
+  });
+});

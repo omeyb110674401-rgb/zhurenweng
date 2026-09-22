@@ -88,8 +88,18 @@ const CASES = [
     test: 'tests/unit/attachment-parse.test.mjs',
   },
   {
-    // 一行 `new Uint8Array(body)` 同时兜住两件事（pdfjs 的移交、以及它拒绝 Buffer），
-    // 所以两条断言都撤同一行 —— 撤掉任何一边都会红，这正是想要的冗余。
+    // 生产影子轮的真实失效：一份 mee 的 PDF 抽出 8 个 U+0000，PostgreSQL 的 text 不收 NUL，
+    // 那条 UPDATE 抛错、整轮中断。撤掉出口处的清洗，接在出口上的那条断言要变红。
+    label: '解析出口不再清洗控制字符（NUL 写库失败）',
+    file: 'parse',
+    from: '  const clean = sanitizeExtractedText(text);',
+    to: '  const clean = text;',
+    pattern: '不含 NUL 与其它控制符',
+    test: 'tests/unit/attachment-parse.test.mjs',
+  },
+  {
+    // 一行 `new Uint8Array(body)` 同时兜住两件事（pdfjs 移交缓冲、以及它拒绝 Buffer），
+    // 两条断言都撤同一行 —— 撤掉任何一边都会红，这正是想要的冗余。
     label: 'pdfjs 的 Buffer / 移交限制（撤掉那次复制）',
     file: 'parse',
     from: '    data: new Uint8Array(body),',

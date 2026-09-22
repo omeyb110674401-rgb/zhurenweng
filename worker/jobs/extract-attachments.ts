@@ -462,14 +462,27 @@ export const extractAttachmentsJob: Job = {
           break outer;
         }
         const existing = eligible.find((row) => row.url === candidate.url);
-        await extractOne(
-          { id: manifest.id, url: manifest.url },
-          { name: candidate.name, url: candidate.url },
-          existing,
-          policy,
-          tally,
-          ctx.logger,
-        );
+        try {
+          await extractOne(
+            { id: manifest.id, url: manifest.url },
+            { name: candidate.name, url: candidate.url },
+            existing,
+            policy,
+            tally,
+            ctx.logger,
+          );
+        } catch (error) {
+          /**
+           * 单个文件的处理失败**不能带走整轮**。
+           *
+           * 影子轮实测：一份 mee 的 PDF 抽出 8 个 U+0000，PostgreSQL 的 text 不收 NUL，
+           * 那条 UPDATE 抛错 —— 当时没有这层隔离，任务直接中断，剩下几十条公示一轮白跑。
+           * 写库失败连状态都记不上，但至少下一个文件还有机会；根因在 parse 侧清洗，
+           * 这里是兜住「根因之外的第三种意外」。
+           */
+          tally.byStatus.set('error', (tally.byStatus.get('error') ?? 0) + 1);
+          ctx.logger(`  附件处理异常（跳过该文件）：${candidate.url.slice(0, 90)} —— ${errorMessage(error)}`);
+        }
       }
     }
 

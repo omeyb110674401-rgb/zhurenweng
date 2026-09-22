@@ -47,13 +47,39 @@ function charCountOf(text: string): number {
   return text.replace(/\s/g, '').length;
 }
 
+/**
+ * 清洗抽取文本里的非文字字符。
+ *
+ * 生产实测（2026-09-22 影子轮）：生态环境部一份 11 页标准 PDF 抽出 8 个 U+0000 ——
+ * 字体映射失败时 pdfjs 会吐空字符 —— 而 **PostgreSQL 的 text 不允许 NUL**，于是那条
+ * UPDATE 直接失败、整个抽取任务中断。孤立代理对同理（编码成 UTF-8 会失败）。
+ * 这些字符对摘要毫无信息量，删掉没有损失；不删就会让一个坏文件拖垮一整轮。
+ */
+export function sanitizeExtractedText(text: string): string {
+  let out = '';
+  // 必须按**码点**迭代：按 code unit 迭代会把增补平面的合法代理对也当成孤立代理删掉
+  for (const char of text) {
+    const code = char.codePointAt(0) ?? 0;
+    if (char.length === 2) {
+      out += char;
+      continue;
+    }
+    if (code >= 0xd800 && code <= 0xdfff) continue;
+    if (code < 0x20 && code !== 0x09 && code !== 0x0a && code !== 0x0d) continue;
+    if (code >= 0x80 && code <= 0x9f) continue;
+    out += char;
+  }
+  return out;
+}
+
 function finish(
   status: AttachmentParseResult['status'],
   text: string,
   pages: number | null,
   error: string | null = null,
 ): AttachmentParseResult {
-  const clipped = text.length > MAX_STORED_TEXT_CHARS ? text.slice(0, MAX_STORED_TEXT_CHARS) : text;
+  const clean = sanitizeExtractedText(text);
+  const clipped = clean.length > MAX_STORED_TEXT_CHARS ? clean.slice(0, MAX_STORED_TEXT_CHARS) : clean;
   return { status, text: clipped, charCount: charCountOf(clipped), pages, error };
 }
 
@@ -99,7 +125,9 @@ async function extractPdf(body: Uint8Array): Promise<AttachmentParseResult> {
       if (line !== '') parts.push(line);
       parts.push('');
     }
-    const text = parts.join('\n').replace(/\n{3,}/g, '\n\n').trim();
+    // 先清洗再判扫描件：一份「全文只有空字符」的 PDF 如果按清洗后的长度算，会被判成
+    // scanned_no_text；按清洗前算则成了 ok 但文本是空的 —— 后者正是我们要杜绝的静默失效。
+    const text = sanitizeExtractedText(parts.join('\n').replace(/\n{3,}/g, '\n\n').trim());
     const chars = charCountOf(text);
     if (pages >= SCANNED_MIN_PAGES && chars / pages < SCANNED_MAX_CHARS_PER_PAGE) {
       return finish('scanned_no_text', text, pages, `每页平均 ${Math.round(chars / pages)} 字，判为扫描版`);
