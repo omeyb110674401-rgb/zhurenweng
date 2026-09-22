@@ -8,14 +8,15 @@ import { getSourceById } from '@/db/repo/sources';
 import { Countdown, StatusBadge, formatDate } from '@/app/_lib/notice-display';
 import { NoticeBriefView, SubmissionChannels } from '@/app/_lib/notice-brief-view';
 import { SummaryPlaceholder, SummaryUnavailable, SummaryView } from '@/app/_lib/summary-view';
-import { buildNoticeBrief } from '@/lib/notice-brief';
+import { buildNoticeBrief, mergeSubmissionChannels } from '@/lib/notice-brief';
+import { parseQuotedSummary } from '@/lib/summary-content';
 import { buildNoticeJsonLd, serializeJsonLd } from '@/lib/notice-jsonld';
 import { effectiveStatus } from '@/lib/notice-status';
 import { llmReady } from '@/lib/llm-availability';
 import { mailerReady } from '@/lib/mailer-availability';
 import { OG_IMAGE } from '@/lib/page-metadata';
 import { siteUrl } from '@/lib/site-url';
-import type { NoticeRecord } from '@/db/types';
+import { safeParseJson, type NoticeRecord } from '@/db/types';
 import { SiteFooter } from '@/app/_lib/site-footer';
 
 // 详情数据随抓取管线更新，服务端实时渲染。
@@ -103,6 +104,15 @@ export default async function NoticeDetailPage({ params }: NoticeDetailPageProps
     bodyText: notice.bodyText,
     url: notice.url,
   });
+  // 渠道在页面上只有一个渲染位置（issue #56）：程序逐字抽取的是权威源，AI 摘要抽到的
+  // 地址并入同一份清单并标「摘要补充」。摘要卡不再自己列一份 —— 同一个邮箱在一屏出现
+  // 两遍（且第二份出处更弱）是这次重构实测出来的问题，不是假想。
+  const submissionChannels = mergeSubmissionChannels(
+    brief.channels,
+    summaryInfo?.aiSummaryJson
+      ? (parseQuotedSummary(safeParseJson(summaryInfo.aiSummaryJson))?.channels ?? [])
+      : [],
+  );
   // 结构化数据（issue #39）：与 metadata 用同一份摘要，避免两处描述分叉。
   const jsonLd = serializeJsonLd(
     buildNoticeJsonLd({
@@ -196,7 +206,7 @@ export default async function NoticeDetailPage({ params }: NoticeDetailPageProps
           </a>
           {/* 提交方式（issue #27）：原文里写着的具体渠道。放在按钮旁——读者点了
               按钮要跳走，此处先给「跳过去之后往哪儿提」。取不到时整块不渲染。 */}
-          <SubmissionChannels channels={brief.channels} />
+          <SubmissionChannels channels={submissionChannels} />
           <div className="how-to" data-testid="how-to-comment">
             <p className="how-to-title">分步提意指引</p>
             <ol>
@@ -207,7 +217,7 @@ export default async function NoticeDetailPage({ params }: NoticeDetailPageProps
               </li>
               <li>在官方页面阅读公告全文，确认征求意见的截止日期与受理范围。</li>
               <li>
-                {brief.channels.length > 0
+                {submissionChannels.length > 0
                   ? '本公示已在原文中注明具体提交方式（见上方「意见提交方式」），按其办理；建议附上具体条款与修改建议。'
                   : '按官方页面指引提交意见：通常可通过在线表单、电子邮件或信函提出，建议附上具体条款与修改建议。'}
               </li>

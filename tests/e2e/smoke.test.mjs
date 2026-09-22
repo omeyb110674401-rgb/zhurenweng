@@ -180,7 +180,9 @@ describe('冒烟：脚手架与端到端骨架', () => {
       url: 'https://example.gov/sample',
     });
     assert.equal(typeof summary.what, 'string');
-    assert.ok(Array.isArray(summary.keyPoints) && summary.keyPoints.length > 0);
+    assert.ok(Array.isArray(summary.channels) && summary.channels.length > 0, '参与导引形状：渠道清单');
+    assert.equal(typeof summary.whoCanSubmit, 'string', '谁能提：可缺段也应存在');
+    assert.equal(summary.keyPoints, undefined, '新输出不再产生关键条款（公告壳里没有条款）');
     assert.equal(summary.deadline, '2026-12-31');
     assert.match(summary.howToComment, /官方/);
 

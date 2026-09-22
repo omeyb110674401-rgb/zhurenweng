@@ -1,5 +1,9 @@
-import type { LlmPort, LlmSummarizeInput } from '../ports.ts';
-import type { QuotedStructuredSummary, SummaryQuotes } from '../summary-content.ts';
+import type { LlmPort, LlmSummarizeInput, SummaryChannel, SummaryChannelKind } from '../ports.ts';
+import {
+  SUMMARY_CHANNEL_KINDS,
+  type QuotedStructuredSummary,
+  type SummaryQuotes,
+} from '../summary-content.ts';
 
 /**
  * OpenAI 兼容 chat/completions 适配器（issue #25）—— LlmPort 的生产实现。
@@ -33,11 +37,29 @@ const MAX_BODY_CHARS = 12_000;
 export const GLM_DEFAULT_API_BASE = 'https://open.bigmodel.cn/api/paas/v4';
 export const GLM_DEFAULT_MODEL = 'glm-4-flash';
 
+/**
+ * 提示词（issue #55 重构为「参与导引」口径）。
+ *
+ * 为什么不再要「关键条款」：生产实测抓取到的正文均值 443 字，是「谁、就哪个文件、
+ * 征求到什么时候、通过什么方式反馈」的公告壳，草案条文与标准文本在**附件**里
+ * （77 条未截止条目中 65 条带附件清单）。让模型从壳里「概括 2-5 条关键条款」，
+ * 它只能把「公示期 30 日」「可邮件反馈」重排成看着像条款的句子 —— 输入里没有的东西，
+ * 再怎么收口措辞都变不出来，反而会诱导编造。所以这一段删掉，改为只问公告里真实存在的
+ * 参与信息，并明确禁止条文式输出。
+ *
+ * 逐字引用的要求原样保留（PRD：引用可核对），渠道清单同样每项配一段原文。
+ */
 const SYSTEM_PROMPT = [
-  '你是政府公示信息解读助手。用户会给出一份政府公示/征求意见稿的标题与正文纯文本。',
+  '你是政府公示的「参与导引」助手。用户会给出一份公示的标题与网页正文纯文本。',
+  '重要背景：这类页面的正文通常只是公告本身，真正的草案条文、标准文本、名单在附件里，不在给你的文本中。',
+  '因此：不要编写、推测或概括任何「条款内容」，只回答公告里真实存在的参与信息。',
   '请只输出一个 JSON 对象（不要输出任何解释、markdown 代码围栏或其他文字），字段如下：',
-  '{"what":"这是什么：一句话概括这份公示是什么","who":"影响谁：受影响的公众/主体","keyPoints":["关键条款：2-5 条，每条概括一个关键条款"],"deadline":"截止日期：YYYY-MM-DD，原文未明确则为 null","howToComment":"如何提意见：指引用户到官方渠道提交意见","quotes":{"what":"what 对应的原文引用片段（逐字摘录原文，不超过100字）","who":"who 对应的原文引用片段","keyPoints":["每条关键条款对应的原文引用片段，顺序与 keyPoints 一致"],"deadline":"截止日期对应的原文引用片段","howToComment":"提意见方式对应的原文引用片段"}}',
-  '要求：只依据给定原文，不编造；引用必须是原文的逐字连续片段；原文未提及的信息用空字符串或 null 表达，不得猜测。',
+  '{"what":"这是什么：一句话概括这份公示在做什么，40 字以内","who":"影响谁：受这份文件影响的具体主体（如运输机场运营人、医疗器械注册人、标准起草单位），不要只写社会公众","whoCanSubmit":"谁能提：原文写明的可提出意见的主体或范围；原文未提及则留空字符串","afterDeadline":"逾期会怎样：原文写明超过截止日期后如何处理（如逾期视为无意见、不再受理）；原文未提及则留空字符串","deadline":"截止日期：YYYY-MM-DD，原文未明确则为 null","howToComment":"如何提意见：一句话概述提交途径，40 字以内","channels":[{"kind":"email|phone|mail|online|other","value":"可直接使用的具体值"}],"quotes":{"what":"what 对应的原文引用片段（逐字摘录，不超过100字）","who":"who 对应的原文引用片段","whoCanSubmit":"谁能提对应的原文片段，没有则空字符串","afterDeadline":"逾期会怎样对应的原文片段，没有则空字符串","deadline":"截止日期对应的原文引用片段","howToComment":"如何提意见对应的原文引用片段","channels":["每条渠道对应的原文片段，顺序与 channels 严格一致"]}}',
+  '要求：',
+  '1. 只依据给定原文，不编造、不猜测；原文没有的字段留空字符串或 null，宁可留空也不要凑。',
+  '2. 引用必须是原文中的逐字连续片段。',
+  '3. channels 的 value 只放地址本身（如 xxx@yyy.gov.cn、010-6601xxxx、含邮编的邮寄地址、网址），说明性文字放 howToComment；一份公示常同时给邮件、信函、传真、网址几种渠道，应全部列出。',
+  '4. channels 没有可列的渠道时输出空数组。',
 ].join('\n');
 
 /** 已解析并校验通过的模型配置（工厂与门控共用）。 */
@@ -164,29 +186,35 @@ export function parseModelJson(content: string): unknown {
   }
 }
 
-/** 校验并归一化模型输出的摘要 JSON；形状不合法抛错（由重试策略兜底）。 */
+/**
+ * 校验并归一化模型输出的摘要 JSON；形状不合法抛错（由摘要任务的重试策略兜底）。
+ *
+ * 三条有意的规则：
+ * 1. **必填三段必须非空** —— 此前只校验「是不是字符串」，于是 `"who": ""` 也能落库，
+ *    页面上「影响谁」标题下面空无一物（生产实测 mimo-v2.5 有 1 条这样，glm 0 条）。
+ *    答不上就抛错，交给重试 / 转人工复核，比留一个空段落诚实。
+ * 2. 原文可能确实没有的段（谁能提 / 逾期会怎样）缺省为空串，不算形状异常 ——
+ *    把它们变成必填只会逼模型编一句。
+ * 3. 渠道数组**一项都不删**：`quotes.channels` 按原始下标与渠道配对，这里删一项
+ *    就会让后面的渠道挂上前面的引用。去空 / 去重 / 截断统一由 buildQuotedSummary
+ *    里的 normalizeChannels 在配好引用之后做。
+ */
 export function normalizeModelSummary(raw: unknown): QuotedStructuredSummary {
   if (typeof raw !== 'object' || raw === null) {
     throw new Error('摘要输出不是 JSON 对象');
   }
   const record = raw as Record<string, unknown>;
-  const text = (key: string): string => {
+  const requiredText = (key: string): string => {
     const value = record[key];
-    if (typeof value !== 'string') {
-      throw new Error(`摘要输出缺少字符串字段 "${key}"`);
+    if (typeof value !== 'string' || value.trim().length === 0) {
+      throw new Error(`摘要输出缺少非空字符串字段 "${key}"`);
     }
     return value.trim();
   };
-  const keyPoints = record.keyPoints;
-  if (!Array.isArray(keyPoints) || keyPoints.length === 0) {
-    throw new Error('摘要输出缺少非空数组字段 "keyPoints"');
-  }
-  const points = keyPoints.map((point) => {
-    if (typeof point !== 'string' || point.trim().length === 0) {
-      throw new Error('摘要输出的 keyPoints 含空项');
-    }
-    return point.trim();
-  });
+  const optionalText = (key: string): string => {
+    const value = record[key];
+    return typeof value === 'string' ? value.trim() : '';
+  };
 
   const deadlineRaw = record.deadline;
   let deadline: string | null = null;
@@ -194,37 +222,52 @@ export function normalizeModelSummary(raw: unknown): QuotedStructuredSummary {
     deadline = deadlineRaw.trim();
   }
 
-  const quotes = readQuotes(record.quotes, points.length);
+  const rawChannels = Array.isArray(record.channels) ? record.channels : [];
+  const channels: SummaryChannel[] = rawChannels.map((raw) => {
+    const item = (typeof raw === 'object' && raw !== null ? raw : {}) as Record<string, unknown>;
+    const kind = typeof item.kind === 'string' ? item.kind.trim() : '';
+    return {
+      kind: (SUMMARY_CHANNEL_KINDS as readonly string[]).includes(kind)
+        ? (kind as SummaryChannelKind)
+        : 'other',
+      value: typeof item.value === 'string' ? item.value.trim() : '',
+    };
+  });
+
+  const quotes = readQuotes(record.quotes);
   return {
-    what: text('what'),
-    who: text('who'),
-    keyPoints: points,
+    what: requiredText('what'),
+    who: requiredText('who'),
+    whoCanSubmit: optionalText('whoCanSubmit'),
+    afterDeadline: optionalText('afterDeadline'),
     deadline,
-    howToComment: text('howToComment'),
+    howToComment: requiredText('howToComment'),
+    channels,
     ...(quotes ? { quotes } : {}),
   };
 }
 
-function readQuotes(raw: unknown, pointCount: number): SummaryQuotes | undefined {
+/** 读取模型输出的 quotes 扩展；不是对象则返回 undefined（该适配器不提供引用时同样成立） */
+function readQuotes(raw: unknown): SummaryQuotes | undefined {
   if (typeof raw !== 'object' || raw === null) return undefined;
   const record = raw as Record<string, unknown>;
   const quote = (key: string): string | null =>
     typeof record[key] === 'string' && (record[key] as string).trim().length > 0
       ? (record[key] as string).trim()
       : null;
-  const keyPointQuotes = Array.isArray(record.keyPoints)
-    ? record.keyPoints.map((item) =>
+  const channelQuotes = Array.isArray(record.channels)
+    ? record.channels.map((item) =>
         typeof item === 'string' && item.trim().length > 0 ? item.trim() : null,
       )
-    : [];
-  // 引用条数与关键条款对齐，缺省补 null
-  while (keyPointQuotes.length < pointCount) keyPointQuotes.push(null);
+    : undefined;
   return {
     what: quote('what'),
     who: quote('who'),
-    keyPoints: keyPointQuotes.slice(0, pointCount),
+    whoCanSubmit: quote('whoCanSubmit'),
+    afterDeadline: quote('afterDeadline'),
     deadline: quote('deadline'),
     howToComment: quote('howToComment'),
+    ...(channelQuotes ? { channels: channelQuotes } : {}),
   };
 }
 

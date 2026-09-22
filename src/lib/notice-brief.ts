@@ -19,8 +19,21 @@
  * 分层：src/lib 不反向依赖 src/sources（适配器层），故本文件自带 collapse()。
  */
 
-/** 渠道类型：在线入口 / 电子邮箱 / 通信地址 / 电话 / 传真 */
-export type NoticeChannelKind = 'online' | 'email' | 'address' | 'phone' | 'fax';
+/** 渠道类型：在线入口 / 电子邮箱 / 通信地址 / 电话 / 传真 / 其他 */
+export type NoticeChannelKind = 'online' | 'email' | 'address' | 'phone' | 'fax' | 'other';
+
+/**
+ * 渠道的出处（issue #56）。
+ *
+ * - `program`：`notice-brief.ts` 的正则抽取，值是官方原文的逐字片段；
+ * - `summary`：本条摘要里定位出来的地址（模型抽取，或后台人工录入），
+ *   附带的 context 是摘要给出的原文引用。
+ *
+ * 之所以非要标出来：详情页这块的标题写着「摘自官方原文，本站未做改写」，
+ * 让摘要定位的地址混进去冒充原句，是这个站最不该犯的一类错 —— 哪怕它附了引用也一样。
+ * 刻意不叫「AI 抽取」：人工复核录入的走的是同一条通路，把人的工作标成模型输出也是失真。
+ */
+export type NoticeChannelSource = 'program' | 'summary';
 
 /**
  * 渠道类型的中文标签（详情页渲染用；顺序即展示顺序）。
@@ -36,6 +49,7 @@ export const CHANNEL_LABELS: Record<NoticeChannelKind, string> = {
   address: '通信地址',
   phone: '联系电话',
   fax: '传真',
+  other: '其他方式',
 };
 
 /** 一条原文注明的提交渠道 */
@@ -47,6 +61,8 @@ export interface NoticeChannel {
   href: string | null;
   /** 原文上下文片段（截断），用于核对；取不到为 null */
   context: string | null;
+  /** 出处；缺省等同 'program'（合并函数总是显式写死） */
+  source?: NoticeChannelSource;
 }
 
 /** 结构化速读结果 */
@@ -438,4 +454,92 @@ export function hasBriefContent(brief: NoticeBrief): boolean {
     brief.leadParagraph !== null ||
     brief.keyItems.length > 0
   );
+}
+
+/** 摘要的渠道类型 → 本站渠道类型（`mail` 就是通信地址，两边同一个意思两种叫法） */
+const SUMMARY_KIND_TO_NOTICE: Record<string, NoticeChannelKind> = {
+  email: 'email',
+  phone: 'phone',
+  mail: 'address',
+  online: 'online',
+  other: 'other',
+};
+
+/** 整段是干净邮箱 / 纯号码 / 域名或网址时才生成可点链接（假可点击比不可点击更坏） */
+const SUMMARY_EMAIL = /^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$/;
+const SUMMARY_DIALABLE = /^[\d+()（）\-–—\s,，、.。]{6,}$/;
+const SUMMARY_HOST_OR_URL =
+  /^(?:https?:\/\/[^\s，。；]+|[A-Za-z0-9][A-Za-z0-9-]*(?:\.[A-Za-z0-9-]+)+(?:\/[^\s，。；]*)?)$/;
+
+function summaryChannelHref(kind: NoticeChannelKind, value: string): string | null {
+  if (kind === 'email' && SUMMARY_EMAIL.test(value)) return `mailto:${value}`;
+  if (kind === 'phone' && SUMMARY_DIALABLE.test(value)) {
+    const digits = value.replace(/[^\d+]/g, '');
+    return digits.length >= 6 ? `tel:${digits}` : null;
+  }
+  if (kind === 'online' && SUMMARY_HOST_OR_URL.test(value)) {
+    return value.startsWith('http') ? value : `https://${value}`;
+  }
+  return null;
+}
+
+/** 比对用的归一化：去空白与中文标点、转小写 —— 地址类两端写法常差一个标点 */
+function dedupeKey(value: string): string {
+  return value.toLowerCase().replace(/[\s，,。.、；;：:（）()【】[\]-]/g, '');
+}
+
+/**
+ * 包含判重所需的最短长度。短串（如「6666」）几乎会命中任何地址，
+ * 只有两边都不短于这个长度时包含关系才算同一个渠道；等值判重不受限制。
+ */
+const MIN_CONTAINMENT_LENGTH = 8;
+
+/**
+ * 把摘要里的渠道清单并入程序抽取的渠道清单（issue #56：两边解耦、单一渲染）。
+ *
+ * 背景：详情页的「意见提交方式」块（#27）抽的就是同一批地址，摘要再加一份
+ * 渠道清单的结果是**同一个邮箱在一屏里出现两遍**，而且第二份出处更弱。所以
+ * 渠道只有一个渲染位置：程序抽取的是权威源，摘要只用来补程序没抽到的
+ * （传真、写法别扭的网址等）。
+ *
+ * 三条规则：
+ * 1. 程序抽取的排前面、原样保留，摘要项按归一化值去重后再追加；
+ * 2. 摘要项一律标 `source: 'summary'`，渲染层据此挂「摘要补充」标签 —— 本块的标题写着
+ *    「摘自官方原文，本站未做改写」，摘要定位的地址不能混进去冒充原句；
+ * 3. 合并后仍受 MAX_CHANNELS 约束（沿用抽取侧的上限，不因多一个来源就放宽）。
+ */
+export function mergeSubmissionChannels(
+  program: NoticeChannel[],
+  summary: { kind: string; value: string; quote: string | null }[] = [],
+): NoticeChannel[] {
+  const merged: NoticeChannel[] = program.map((channel) => ({
+    ...channel,
+    source: 'program' as const,
+  }));
+  const seen = new Set(merged.map((channel) => dedupeKey(channel.value)));
+
+  for (const channel of summary) {
+    if (merged.length >= MAX_CHANNELS) break;
+    const value = channel.value.trim();
+    const key = dedupeKey(value);
+    if (key === '' || seen.has(key)) continue;
+    // 地址类两端常是「同一段话多写了邮编」这种包含关系
+    const duplicated = [...seen].some(
+      (existing) =>
+        Math.min(existing.length, key.length) >= MIN_CONTAINMENT_LENGTH &&
+        (existing.includes(key) || key.includes(existing)),
+    );
+    if (duplicated) continue;
+    const kind = SUMMARY_KIND_TO_NOTICE[channel.kind] ?? 'other';
+    seen.add(key);
+    merged.push({
+      kind,
+      value,
+      href: summaryChannelHref(kind, value),
+      // 引用本身就是原文片段，直接当核对上下文（同样折叠空白并截到块内一致的长度）
+      context: channel.quote ? truncate(channel.quote, MAX_CONTEXT_LENGTH) : null,
+      source: 'summary',
+    });
+  }
+  return merged;
 }

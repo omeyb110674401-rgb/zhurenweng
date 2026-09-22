@@ -344,7 +344,9 @@ describe('issue #12：管理后台与健康告警', () => {
       action: 'save',
       what: '【人工】这是企业破产法草案的征求意见公告。',
       who: '【人工】受草案影响的破产企业与债权人。',
-      keyPoints: '【人工】第一条 规范医疗保障关系\n【人工】第二条 健全多层次保障体系',
+      whoCanSubmit: '【人工】社会各界均可提出意见。',
+      afterDeadline: '',
+      channels: '电子邮箱|yjzj@npc.gov.cn\nwww.npc.gov.cn',
       deadline: isoDatePlus(20),
       howToComment: '【人工】请前往中国人大网征求意见页面提交意见。',
     });
@@ -360,7 +362,20 @@ describe('issue #12：管理后台与健康告警', () => {
     const readable = stripSsrComments(detail);
     assert.match(detail, /data-testid="ai-summary"/, '详情页渲染人工摘要');
     assert.match(readable, /【人工】这是企业破产法草案的征求意见公告。/, '人工摘要内容（这是什么）');
-    assert.match(readable, /【人工】第二条 健全多层次保障体系/, '人工摘要关键条款');
+    assert.match(readable, /【人工】社会各界均可提出意见。/, '人工摘要「谁能提」');
+    // 渠道两行：一行显式给类型，一行省略由值推断（省略路径只在后台用得上）
+    assert.match(readable, /yjzj@npc\.gov\.cn/, '人工摘要的邮箱渠道');
+    assert.match(readable, /www\.npc\.gov\.cn/, '省略类型的那行按值判成在线提交');
+    // 渠道只渲染在「意见提交方式」块（issue #56）：人工/模型补出的地址并入程序抽取的那一份
+    assert.match(detail, /data-testid="submission-channels"/, '渠道块在场');
+    assert.ok(!detail.includes('data-testid="summary-channels"'), '摘要卡不再自带渠道清单');
+    assert.match(
+      detail,
+      /data-channel-kind="email"[^>]*data-channel-source="summary"/,
+      '人工补出的邮箱带出处标注（不能混进逐字摘录）',
+    );
+    // 空段（逾期会怎样留空）整段不出现，而不是留一个光秃秃的标题
+    assert.ok(!readable.includes('逾期会怎样'), '留空的段不渲染');
     assert.match(readable, /摘要模型：manual/, '人工摘要与自动摘要可区分');
     assert.ok(!readable.includes('摘要生成中'), '占位消失');
   });

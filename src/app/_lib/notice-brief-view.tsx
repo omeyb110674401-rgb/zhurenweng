@@ -10,11 +10,12 @@ import {
  * 结构化速读与提交方式（issue #27）——把 issue #26 的确定性抽取渲染出来。
  *
  * 两块内容、两个支柱，刻意不重复：
- * - `SubmissionChannels`（行动）：原文注明的提交渠道，放在「去官方渠道提意见」
- *   按钮旁。**只要有就渲染，与 AI 摘要无关**——它是原文原句，比模型叙述更该
- *   被放在行动位置；
+ * - `SubmissionChannels`（行动）：提交渠道清单，放在「去官方渠道提意见」按钮旁。
+ *   **渠道在页面上只有这一个位置**（issue #56）：程序逐字抽取的是权威源，AI 摘要
+ *   抽到的地址只作为补充并入同一份清单，并逐行标「摘要补充」——摘要卡自己不再列一份，
+ *   否则同一个邮箱会在一屏里出现两遍，且第二份出处更弱。取不到时整块不渲染，绝不编一条凑数；
  * - `NoticeBriefView`（读懂）：一句话速读 + 文件名 + 原文分条要点。**只在没有
- *   AI 摘要时渲染**——有摘要时五段式已覆盖同样内容，重复展示只会稀释页面。
+ *   AI 摘要时渲染**——有摘要时同样内容重复展示只会稀释页面。
  *
  * 视觉上刻意与 AI 摘要区分：AI 摘要是琥珀色 + 「AI 摘要」标签，本块是中性灰蓝 +
  * 「结构化速读」标签 + 「非 AI 生成」说明。读者一眼能看出这段话是谁说的——
@@ -41,8 +42,20 @@ function ChannelItem({ channel }: { channel: NoticeChannel }): ReactNode {
     );
 
   return (
-    <li className="channel-item" data-testid="submission-channel" data-channel-kind={channel.kind}>
+    <li
+      className="channel-item"
+      data-testid="submission-channel"
+      data-channel-kind={channel.kind}
+      data-channel-source={channel.source ?? 'program'}
+    >
       <span className="channel-kind">{CHANNEL_LABELS[channel.kind]}</span>
+      {/* 摘要补出的那几条标出来：本块标题写着「摘自官方原文」，摘要定位的地址
+          不能混进去冒充原句（issue #56） */}
+      {channel.source === 'summary' ? (
+        <span className="channel-source" data-testid="submission-channel-source">
+          摘要补充
+        </span>
+      ) : null}
       {value}
       {channel.context === null ? null : <p className="channel-context">原文：{channel.context}</p>}
     </li>
@@ -58,6 +71,7 @@ function ChannelItem({ channel }: { channel: NoticeChannel }): ReactNode {
  */
 export function SubmissionChannels({ channels }: { channels: NoticeChannel[] }): ReactNode {
   if (channels.length === 0) return null;
+  const hasSummaryChannel = channels.some((channel) => channel.source === 'summary');
 
   return (
     <div className="channels" data-testid="submission-channels">
@@ -68,7 +82,9 @@ export function SubmissionChannels({ channels }: { channels: NoticeChannel[] }):
         ))}
       </ul>
       <p className="channels-note">
-        以上为官方原文中的原句摘录，本站未做改写；提交请以官方渠道为准。
+        {hasSummaryChannel
+          ? '标注「摘要补充」的行来自本条 AI 摘要（或人工复核录入），其余为原句逐字摘录；两者文字均未改写，提交请以官方渠道为准。'
+          : '以上为官方原文中的原句摘录，本站未做改写；提交请以官方渠道为准。'}
       </p>
     </div>
   );

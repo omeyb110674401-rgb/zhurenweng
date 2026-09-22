@@ -8,6 +8,7 @@ import {
   resolveGlmConfig,
   resolveOpenAiLlmConfig,
 } from '../../src/lib/adapters/openai-compatible-llm.ts';
+import { buildQuotedSummary } from '../../src/lib/summary-content.ts';
 
 /**
  * 单元：LLM 服务商配置与请求/响应处理（issue #25）。
@@ -28,18 +29,26 @@ import {
  * 全程零网络：用假 fetch 断言请求，用固定响应断言解析。
  */
 
+/** 参与导引形状的一份合法模型输出（issue #55：没有 keyPoints，多了谁能提 / 逾期 / 渠道） */
 const VALID_CONTENT = JSON.stringify({
   what: '某征求意见稿公开征求意见',
-  who: '社会公众',
-  keyPoints: ['明确了适用范围', '规定了反馈渠道'],
+  who: '运输机场运营人',
+  whoCanSubmit: '社会各界均可提出意见',
+  afterDeadline: '逾期视为无意见',
   deadline: '2026-10-07',
-  howToComment: '通过电子邮箱反馈',
+  howToComment: '通过电子邮箱或信函反馈',
+  channels: [
+    { kind: 'email', value: 'a@b.gov.cn' },
+    { kind: 'online', value: 'www.b.gov.cn' },
+  ],
   quotes: {
     what: '现向社会公开征求意见',
-    who: '社会公众可通过以下途径反馈',
-    keyPoints: ['本规定适用于运输机场', '一、电子邮箱：a@b.gov.cn'],
+    who: '本规定适用于运输机场运营人',
+    whoCanSubmit: '社会各界均可向本机关反馈意见',
+    afterDeadline: '逾期不再受理',
     deadline: '截止日期为：2026年10月7日',
     howToComment: '一、电子邮箱：a@b.gov.cn',
+    channels: ['一、电子邮箱：a@b.gov.cn', '二、登录本网站 www.b.gov.cn 留言'],
   },
 });
 
@@ -140,7 +149,11 @@ describe('LLM 请求形状（假 fetch，零网络）', () => {
     const body = JSON.parse(init.body);
     assert.equal(body.model, 'flash-x');
     assert.equal(body.messages.length, 2);
-    assert.match(body.messages[0].content, /政府公示信息解读助手/);
+    assert.match(body.messages[0].content, /政府公示的「参与导引」助手/);
+    // 提示词必须明写「不要编造条文」：抓取到的正文是公告壳，条款在附件里，
+    // 这是本次摘要重构的立论，退回去就会重新产出看着像条款的元信息复述
+    assert.match(body.messages[0].content, /不要编写、推测或概括任何「条款内容」/);
+    assert.match(body.messages[0].content, /正文通常只是公告本身/);
     assert.match(body.messages[1].content, /标题：标题/);
     assert.match(body.messages[1].content, /正文内容/);
   });
@@ -188,9 +201,39 @@ describe('LLM 响应处理：脏数据一律抛错，绝不落库', () => {
       bodyText: 'b',
     });
     assert.equal(summary.deadline, '2026-10-07');
-    assert.equal(summary.keyPoints.length, 2);
-    assert.equal(summary.quotes?.keyPoints.length, 2, '引用条数与关键条款对齐');
+    assert.equal('keyPoints' in summary, false, '新输出不再产生 keyPoints（公告壳里没有条款可概括）');
+    assert.equal(summary.whoCanSubmit, '社会各界均可提出意见');
+    assert.equal(summary.afterDeadline, '逾期视为无意见');
+    assert.deepEqual(
+      summary.channels.map((channel) => channel.kind),
+      ['email', 'online'],
+    );
+    assert.equal(summary.quotes?.channels?.length, 2, '引用与渠道条数一致');
     assert.equal(summary.quotes?.deadline, '截止日期为：2026年10月7日');
+  });
+
+  it('渠道：适配器一项都不删，未知 kind 归 other（删项会让引用与渠道错位）', async () => {
+    const summary = await withContent(
+      JSON.stringify({
+        what: 'a',
+        who: 'b',
+        howToComment: 'c',
+        channels: [
+          { kind: 'email', value: ' a@b.gov.cn ' },
+          { kind: '传真', value: '010-66010000' },
+          { kind: 'bogus', value: '' },
+        ],
+        quotes: { channels: ['一、电子邮箱 a@b.gov.cn', '二、传真：010-66010000', '三、其他'] },
+      }),
+    ).summarize({ title: 't', url: 'u', bodyText: 'b' });
+    assert.equal(summary.channels.length, 3, '三条原样保留（含空值那条）');
+    assert.equal(summary.channels[0].value, 'a@b.gov.cn', '值 trim');
+    assert.equal(summary.channels[1].kind, 'other', '不认识的 kind 归为 other，不猜');
+    assert.equal(summary.channels[2].value, '');
+    assert.equal(summary.quotes?.channels?.[2], '三、其他', '下标对齐未被破坏');
+    const quoted = buildQuotedSummary(summary, summary.quotes);
+    assert.equal(quoted.channels.length, 2, '空值那条在归一化为落库形状时才被丢弃');
+    assert.equal(quoted.channels[1].quote, '二、传真：010-66010000', '丢弃后引用仍对得上');
   });
 
   it('markdown 围栏包裹的 JSON 也能解析', async () => {
@@ -227,35 +270,48 @@ describe('LLM 响应处理：脏数据一律抛错，绝不落库', () => {
     );
     await assert.rejects(
       () => withContent('{"what":"只有一段"}').summarize({ title: 't', url: 'u', bodyText: 'b' }),
-      /缺少非空数组字段 "keyPoints"/,
-      '先校验 keyPoints，再逐字段读字符串',
+      /缺少非空字符串字段 "who"/,
+      '必填三段按 what → who → howToComment 顺序校验',
     );
+    // 这是 issue #55 修掉的真实缺陷：此前只校验「是不是字符串」，`"who": ""` 照样落库，
+    // 线上出现过「影响谁」标题下空无一物的详情页（mimo-v2.5 一条）。空串即没答上 → 重试。
     await assert.rejects(
       () =>
-        withContent('{"what":"a","keyPoints":["c"],"howToComment":"d"}').summarize({
+        withContent('{"what":"a","who":"","howToComment":"c"}').summarize({
           title: 't',
           url: 'u',
           bodyText: 'b',
         }),
-      /缺少字符串字段 "who"/,
+      /缺少非空字符串字段 "who"/,
+      '空串（含只有空白）也算没答上，不落空段',
     );
     await assert.rejects(
-      () => withContent('{"what":"a","who":"b","keyPoints":[],"howToComment":"c"}').summarize({
-        title: 't',
-        url: 'u',
-        bodyText: 'b',
-      }),
-      /缺少非空数组字段 "keyPoints"/,
+      () =>
+        withContent('{"what":"a","who":"b","howToComment":"   "}').summarize({
+          title: 't',
+          url: 'u',
+          bodyText: 'b',
+        }),
+      /缺少非空字符串字段 "howToComment"/,
     );
+    // 原文可能确实没写的两段**不能**必填，否则只会逼模型编一句
+    const sparse = await withContent('{"what":"a","who":"b","howToComment":"c"}').summarize({
+      title: 't',
+      url: 'u',
+      bodyText: 'b',
+    });
+    assert.equal(sparse.whoCanSubmit, '', '谁能提缺省为空串');
+    assert.equal(sparse.afterDeadline, '', '逾期会怎样缺省为空串');
+    assert.deepEqual(sparse.channels, [], '渠道缺省为空数组');
   });
 
   it('deadline 不是 YYYY-MM-DD 时归一为 null（不猜日期）', () => {
     const summary = normalizeModelSummary({
       what: 'a',
       who: 'b',
-      keyPoints: ['c'],
       deadline: '2026年10月7日',
       howToComment: 'd',
+      channels: [],
     });
     assert.equal(summary.deadline, null);
   });

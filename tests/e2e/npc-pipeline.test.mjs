@@ -246,6 +246,8 @@ describe('issue #3：全国人大源 → 入库 → 列表/详情 → 出站跳�
     assert.match(html, /征求意见期限为30日/, '正文纯文本');
     // 本源详情接口不提供附件字段（见适配器文件头「已知取舍」）：附件留空、不臆造文件名
     assert.ok(!html.includes('附件清单'), '无附件条目不应渲染附件清单区');
+    // 摘要卡的「条文在哪」说明也跟着改口径 —— 指向一个不存在的附件清单等于骗人
+    assert.match(html, /没有随文附件/, '无附件时应说明以官方原文为准');
 
     // 官方原文链接 = fixture 源站上的条目人工页地址（不是接口地址）
     const officialUrl = officialUrlOf(LIDS.open1);

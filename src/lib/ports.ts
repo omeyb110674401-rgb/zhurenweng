@@ -16,18 +16,50 @@ import { createMeilisearchSearchFromEnv } from './search/meilisearch-search.ts';
  * - 测试环境通过 LLM_PROVIDER=stub / MAILER_PROVIDER=stub 注入固定行为。
  */
 
-/** 结构化 AI 摘要（PRD：这是什么 / 影响谁 / 关键条款 / 截止日期 / 如何提意见） */
+/**
+ * 结构化摘要（issue #55 重构为「参与导引」口径）。
+ *
+ * 为什么没有「关键条款」这一段（此前的五段式是 这是什么 / 影响谁 / 关键条款 /
+ * 截止日期 / 如何提意见）：生产实测 77 条未截止条目的**正文均值只有 443 字**
+ * （76 条落在 207–1283 字区间），装的是「谁、就哪个文件、征求到什么时候、通过什么
+ * 方式反馈」这个公告壳，草案条文与标准文本在**附件**里、不在抓取到的正文中
+ * （65/77 条带附件清单）。让模型从公告壳里「概括 2-5 条关键条款」，它只能把
+ * 「公示期 30 日」「可邮件反馈」这类元信息重排成看着像条款的句子 —— 不是措辞不好，
+ * 是输入里根本没有条款。这一段于是被删掉，改为只回答公告里真实存在的参与信息。
+ *
+ * 必填三段的口径与后台人工复核一致：这三段任何公示都该有，缺了就是模型没答上，
+ * 该重试而不是落一个空段让页面上出现「标题下有内容无」。
+ */
+
+/** 提交渠道的类型（决定详情页怎么渲染：能不能 mailto: / tel: 直接点） */
+export type SummaryChannelKind = 'email' | 'phone' | 'mail' | 'online' | 'other';
+
+/**
+ * 一条可操作的提交渠道。`value` 只放地址本身（邮箱 / 电话 / 含邮编的邮寄地址 / 网址），
+ * 说明性文字归 `howToComment` —— 否则渠道清单又退化成一段糊在一起的话。
+ */
+export interface SummaryChannel {
+  kind: SummaryChannelKind;
+  value: string;
+}
+
 export interface StructuredSummary {
-  /** 这是什么 */
+  /** 这是什么（一句话） */
   what: string;
-  /** 影响谁 */
+  /** 影响谁（要给出具体主体，不接受只写「社会公众」） */
   who: string;
-  /** 关键条款 */
-  keyPoints: string[];
+  /** 谁能提（原文未提及则为空串） */
+  whoCanSubmit: string;
+  /** 逾期会怎样（原文未提及则为空串） */
+  afterDeadline: string;
+  /** 关键条款的历史字段：新输出不再产生，仅为重刷期间读旧数据保留 */
+  keyPoints?: string[];
   /** 截止日期（ISO 8601），未知为 null */
   deadline: string | null;
-  /** 如何提意见（指回官方渠道的指引） */
+  /** 如何提意见（一句话概述途径） */
   howToComment: string;
+  /** 提交渠道清单（可为空数组） */
+  channels: SummaryChannel[];
 }
 
 export interface LlmSummarizeInput {

@@ -540,6 +540,16 @@ body {
   color: #92400e;
 }
 
+/* 「具体条文在附件里」的明示：与其让摘要装作总结了条文，
+   不如把读者准确地送到条文所在 */
+.summary-sources {
+  margin: 12px 0 0;
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+  font-size: 13px;
+  color: var(--ink-soft);
+}
+
 /* 原文引用块：与摘要正文区分的浅色引用样式，可点击跳转官方原文 */
 .summary-quote {
   display: inline-flex;
@@ -1363,6 +1373,16 @@ body {
   background: #dcfce7;
   border-radius: 3px;
   padding: 1px 6px;
+}
+
+.channel-source {
+  flex: 0 0 auto;
+  font-size: 11px;
+  font-weight: 600;
+  color: #92400e;
+  background: #fef3c7;
+  border-radius: 3px;
+  padding: 1px 5px;
 }
 
 .channel-value {

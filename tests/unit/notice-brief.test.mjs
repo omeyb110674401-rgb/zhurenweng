@@ -8,6 +8,7 @@ import {
   extractKeyItems,
   extractLeadParagraph,
   hasBriefContent,
+  mergeSubmissionChannels,
 } from '../../src/lib/notice-brief.ts';
 
 /**
@@ -330,7 +331,109 @@ describe('extractKeyItems：原文分条要点（逐字，不改写）', () => {
   });
 });
 
-describe('buildNoticeBrief：整卡组装', () => {  it('把文件名、性质、渠道、首段组装成速读卡', () => {
+/** 构造一条摘要侧的渠道（`normalizeChannels` 的输出形状）。 */
+function summaryChannel(kind, value, quote = null) {
+  return { kind, value, quote };
+}
+
+describe('mergeSubmissionChannels：渠道只有一个渲染位置（issue #56）', () => {
+  const program = extractChannels(MOJ_BODY);
+
+  it('程序抽取的排前面并标 program，摘要补出的追加并标 summary', () => {
+    const merged = mergeSubmissionChannels(program, [
+      summaryChannel('mail', '北京市西城区朝阳门南大街6号司法部法规司（邮编：100020）'),
+    ]);
+
+    assert.deepEqual(
+      merged.map((channel) => channel.source),
+      ['program', 'program', 'summary'],
+    );
+    assert.equal(merged[2].kind, 'address', '摘要侧的 mail 就是本站的通信地址');
+    assert.equal(merged[2].href, null, '邮寄地址不可点击');
+  });
+
+  it('同一个地址两边都写到时只留程序那份（判重忽略大小写与协议写法）', () => {
+    const merged = mergeSubmissionChannels(program, [
+      summaryChannel('online', 'WWW.MOJ.GOV.CN'),
+      summaryChannel('email', 'LSSF@MOJ.GOV.CN'),
+    ]);
+
+    assert.equal(merged.length, program.length, '两条都是重复项');
+    assert.deepEqual(
+      merged.map((channel) => channel.source),
+      ['program', 'program'],
+    );
+  });
+
+  it('写法差一个标点的同一条渠道也算重复（判重键去掉标点与空白）', () => {
+    const merged = mergeSubmissionChannels(
+      [{ kind: 'phone', value: '010-65111234', href: 'tel:01065111234', context: null }],
+      [summaryChannel('phone', '010 6511 1234')],
+    );
+
+    assert.equal(merged.length, 1);
+  });
+
+  it('同一段地址多写了邮编时按包含判重，但短串不会被误判成重复', () => {
+    const withPostcode = mergeSubmissionChannels(
+      [{ kind: 'address', value: '北京市朝阳区朝阳门南大街10号', href: null, context: null }],
+      [summaryChannel('mail', '北京市朝阳区朝阳门南大街10号（邮编：100736）')],
+    );
+    assert.equal(withPostcode.length, 1, '地址与「地址+邮编」是同一条渠道');
+
+    const shortValue = mergeSubmissionChannels(
+      [{ kind: 'phone', value: '010-65111234', href: null, context: null }],
+      [summaryChannel('other', '6511')],
+    );
+    assert.equal(shortValue.length, 2, '短串落在长值里不构成重复');
+
+    // 短于包含判重下限时，只有等值判重能挡住重复 —— 这条钉住那个分支
+    const shortExact = mergeSubmissionChannels(
+      [{ kind: 'phone', value: '1234567', href: null, context: null }],
+      [summaryChannel('phone', '1234567')],
+    );
+    assert.equal(shortExact.length, 1, '等值的短串仍是同一条渠道');
+  });
+
+  it('摘要给的原文引用跟到渠道行上当核对上下文', () => {
+    const merged = mergeSubmissionChannels(program, [
+      summaryChannel('email', 'fawugui@moj.gov.cn', '二、通过电子邮件方式将意见发送至：fawugui@moj.gov.cn。'),
+    ]);
+
+    assert.equal(merged[2].context, '二、通过电子邮件方式将意见发送至：fawugui@moj.gov.cn。');
+    assert.equal(merged[2].href, 'mailto:fawugui@moj.gov.cn');
+  });
+
+  it('值不整段是地址时不给可点击链接（假可点击比不可点击更坏）', () => {
+    const merged = mergeSubmissionChannels(program, [
+      summaryChannel('email', '司法部法规司 收 fawugui@moj.gov.cn'),
+      summaryChannel('phone', '010-65111234（工作时间）'),
+    ]);
+
+    assert.equal(merged[2].href, null, '邮箱前后有汉字 → 不生成 mailto');
+    assert.equal(merged[3].href, null, '号码带说明文字 → 不生成 tel');
+  });
+
+  it('合并后仍受块内上限约束（不因多一个来源就放宽）', () => {
+    const many = Array.from({ length: 12 }, (_, i) =>
+      summaryChannel('email', `channel${i}@moj.gov.cn`),
+    );
+
+    assert.equal(mergeSubmissionChannels(program, many).length, 8);
+    assert.equal(mergeSubmissionChannels([], many).length, 8);
+  });
+
+  it('摘要没有渠道时逐字透过程序抽取结果（缺省即旧行为）', () => {
+    const merged = mergeSubmissionChannels(program);
+
+    assert.deepEqual(
+      merged.map((channel) => channel.value),
+      program.map((channel) => channel.value),
+    );
+  });
+});
+describe('buildNoticeBrief：整卡组装', () => {
+  it('把文件名、性质、渠道、首段组装成速读卡', () => {
     const brief = buildNoticeBrief({
       title: MOT_TITLE,
       bodyText: MOT_BODY,

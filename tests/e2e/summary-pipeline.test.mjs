@@ -228,26 +228,59 @@ describe('issue #4：AI 摘要器 → 五段式摘要展示（失败重试与成
     assert.ok(!html.includes('摘要生成中'), '占位消失');
     assert.match(html, /AI 生成，仅供参考，以官方原文为准/, '显著的 AI 生成标注');
 
-    // 五段式内容（stub 固定摘要基准）
+    // 参与导引各段（stub 固定摘要基准，issue #55）
     assert.match(html, /【stub】这是一份政府公示征求意见稿（固定测试摘要）。/, '这是什么');
     assert.match(html, /【stub】受该草案影响的公众与相关主体（固定测试文案）。/, '影响谁');
-    assert.match(html, /【stub】关键条款一/, '关键条款一');
-    assert.match(html, /【stub】关键条款二/, '关键条款二');
+    assert.match(html, /【stub】社会各界均可就草案提出意见（固定测试文案）。/, '谁能提');
+    assert.match(html, /【stub】逾期未反馈将视为无意见（固定测试文案）。/, '逾期会怎样');
     assert.match(html, /【stub】请前往官方原文页面按指引提交意见。/, '如何提意见');
     assert.match(html, /2026-12-31/, '截止日期段展示摘要中的截止日期');
+    assert.ok(!html.includes('关键条款'), '不再渲染「关键条款」：公告壳里没有条款可概括');
     for (const testId of [
       'summary-what',
       'summary-who',
-      'summary-key-points',
+      'summary-who-can-submit',
+      'summary-after-deadline',
       'summary-deadline',
       'summary-how-to-comment',
     ]) {
-      assert.match(rawHtml, new RegExp(`data-testid="${testId}"`), `五段式段落：${testId}`);
+      assert.match(rawHtml, new RegExp(`data-testid="${testId}"`), `参与导引段落：${testId}`);
     }
 
-    // 每段附原文引用：2 关键条款 + 4 正文段 = 6 处引用，全部一键跳转官方原文
+    // 渠道在页面上只有一个位置（issue #56）：摘要卡不再自带清单，抽到的地址并入
+    // 「意见提交方式」块并按来源标注 —— 此前同一个邮箱一屏出现两遍，且两份出处不同
+    assert.ok(
+      !rawHtml.includes('data-testid="summary-channels"'),
+      '摘要卡不应再渲染第二份渠道清单',
+    );
+    assert.match(rawHtml, /data-testid="submission-channels"/, '渠道块在场');
+    assert.equal(
+      [...rawHtml.matchAll(/href="mailto:yjzj@npc\.gov\.cn"/g)].length,
+      1,
+      'AI 抽到的邮箱在页面上只出现一次',
+    );
+    // 正文里写着 www.npc.gov.cn，程序抽取先命中 → AI 那条按值判重丢弃，出处仍是 program
+    assert.match(
+      rawHtml,
+      /data-channel-kind="online"[^>]*data-channel-source="program"/,
+      '程序抽到的渠道标 program',
+    );
+    assert.match(
+      rawHtml,
+      /data-channel-kind="email"[^>]*data-channel-source="summary"/,
+      '摘要补出的邮箱标 summary',
+    );
+    assert.equal(
+      [...rawHtml.matchAll(/data-testid="submission-channel-source"/g)].length,
+      1,
+      '只有摘要补出的那一条挂「摘要补充」标签',
+    );
+    assert.match(html, /摘要补充/, '标签文字对读者可见');
+
+    // 引用：6 个正文段（这是什么/影响谁/谁能提/逾期/截止/如何提意见）
+    // 渠道的引用不再走 summary-quote —— 它作为「原文：…」小字跟在渠道行下方
     const quoteAnchors = [...rawHtml.matchAll(/<a\b[^>]*data-testid="summary-quote"[^>]*>/g)];
-    assert.equal(quoteAnchors.length, 6, '五段式各段均带原文引用块');
+    assert.equal(quoteAnchors.length, 6, '各段都附原文引用块');
     for (const anchor of quoteAnchors) {
       assert.ok(
         anchor[0].includes(`href="${officialUrl}"`),
@@ -255,6 +288,10 @@ describe('issue #4：AI 摘要器 → 五段式摘要展示（失败重试与成
       );
     }
     assert.match(html, /「社会公开征求意见。」/, '引用展示原文片段');
+
+    // 明写条文在哪：这是本次重构的落脚点 —— 读者该被准确地送到附件与官方原文
+    // 两分支共用的那半句：有附件才指向附件清单，无附件时不能说「下方附件清单」
+    assert.match(html, /本站索引的是公告本身/, '明示摘要不总结条文');
 
     // 摘要模型名随标注展示（stub 场景即 provider 名）
     assert.match(html, /摘要模型：stub/);

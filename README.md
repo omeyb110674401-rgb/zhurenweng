@@ -98,8 +98,9 @@ npm test               # 等价命令：依次跑上面两层
   计数 → 重复抓取条目数不变。
 - **issue #4 摘要双路径场景**（`tests/e2e/summary-pipeline.test.mjs`）：stub LLM
   全部失败 → 每条目首调 + 3 次重试（调用日志精确计数）→ `failed_review` 转人工
-  复核占位，且不再自动重试；追加新条目 → 成功路径 → 详情页五段式摘要 + 显著
-  AI 标注 + 各段原文引用（一键跳官方原文）+ 占位消失。
+  复核占位，且不再自动重试；追加新条目 → 成功路径 → 详情页参与导引摘要 + 显著
+  AI 标注 + 各段原文引用（一键跳官方原文）+ 摘要抽到的地址并入页面上唯一的
+  「意见提交方式」块 + 占位消失。
 - **issue #5 多源聚合场景**（`tests/e2e/sources-aggregation.test.mjs`）：在 npc
   之上新增司法部（`moj`）与生态环境部（`mee`，issue #14 起替代已下线的中国政府网
   「意见征集」栏目）两个源适配器（列表时间轴 / 正文句截止日期 / 两套详情模板等
@@ -245,16 +246,24 @@ lint 与 e2e 两个 job，同样只依赖 npm。
 
 worker 注册表中的 `summarize-notices` 任务（`worker/jobs/summarize-notices.ts`）
 对 `ai_summary_json` 为空、状态 `pending` 且**未截止**的条目调用 LLM 端口
-（`LlmPort`，输入正文纯文本），输出五段式结构化摘要（这是什么 / 影响谁 /
-关键条款 / 截止日期 / 如何提意见），每段附**原文引用片段**，连同 `summary_model`
-落库（`notices.ai_summary_json`，形状见 `src/lib/summary-content.ts`）。
+（`LlmPort`，输入正文纯文本），输出**参与导引**结构化摘要（这是什么 / 影响谁 /
+谁能提 / 逾期会怎样 / 截止日期 / 如何提意见 + 提交渠道清单），每段附**原文引用片段**，连同 `summary_model`
+落库（`notices.ai_summary_json`，形状见 `src/lib/summary-content.ts`）。摘要不概括条文 ——
+抓取到的正文是公告壳（生产实测均值 443 字），草案全文在附件里，卡片底部因此明写条文在哪（issue #55）。
+抽到的渠道**不在摘要卡里渲染**，而是并入页面上唯一的「意见提交方式」块（issue #56，见下）。
 
 - **失败策略**：单条条目失败后重试 `SUMMARY_MAX_RETRIES` 次（默认 3，指数退避），
   仍失败置 `summary_status=failed_review` 转人工复核，worker 不再自动重试；
   已截止条目不生成摘要。
-- **详情页**（`src/app/_lib/summary-view.tsx`）：`done` → 五段式摘要卡片 + 显著
-  「AI 生成，仅供参考，以官方原文为准」标注 + 各段引用块（点击跳官方原文）；
-  `pending` → 「摘要生成中」占位；`failed_review` → 「摘要生成中（待人工复核）」。
+- **详情页**（`src/app/_lib/summary-view.tsx`）：`done` → 参与导引摘要卡片 + 显著
+  「AI 生成，仅供参考，以官方原文为准」标注 + 各段引用块（点击跳官方原文）；空段整段不出现
+  （issue #55 线上真有一条空的「影响谁」）。`pending` → 「摘要生成中」占位；
+  `failed_review` → 「摘要生成中（待人工复核）」。
+- **渠道只有一个渲染位置**（issue #56）：`mergeSubmissionChannels`（`src/lib/notice-brief.ts`）
+  把程序逐字抽取的渠道当权威源，摘要抽到的按值判重后追加，并逐行标「摘要补充」——
+  两块各列一份的结果是同一个邮箱一屏出现两遍、且第二份出处更弱。可点链接保守：
+  整段是干净邮箱/纯号码/域名才给 `mailto:` `tel:` `https:`，值里混了说明文字就退回纯文本
+  （假可点击比不可点击更坏）。
 - **服务商切换**：`LLM_PROVIDER=stub`（默认，测试永远走 stub）或 `glm`（生产，
   智谱开放平台 OpenAI 兼容端点，`GLM_API_KEY` / `GLM_API_BASE` / `GLM_MODEL`
   配置，模型被要求只输出 JSON，解析做防御性校验）。本地不配 Key 联调 GLM 适配器
@@ -340,7 +349,7 @@ worker 注册表中的 `summarize-notices` 任务（`worker/jobs/summarize-notic
 判定在 `src/lib/llm-availability.ts`（口径与 `glm-llm.ts` 的构造校验一致：glm 端口
 缺 API Key 即不可用），三处生效：
 
-- **详情页摘要区**：已有摘要照常渲染五段式（**绝不隐藏库内已有内容**）；未生成时按
+- **详情页摘要区**：已有摘要照常渲染（**绝不隐藏库内已有内容**，含重刷期间仍是旧五段式的行）；未生成时按
   端口可用性二选一 —— 可用 → 「生成中」占位（进行时状态是可信的），不可用 →
   「暂未启用」说明块（`data-testid="summary-unavailable"`，如实说明并把人引向官方原文）；
 - **worker 摘要任务**：端口未配置时**整轮跳过**并说明原因，不再表现为
@@ -507,7 +516,7 @@ worker 注册表中的 `summarize-notices` 任务（`worker/jobs/summarize-notic
   启停开关（`POST /admin/sources`）即时生效：抓取任务整轮跳过停用源。
 - **摘要人工复核队列**：`summary_status='failed_review'` 的条目两种处置 ——
   「重置并重试」清空摘要列并置回 pending（摘要任务下一轮自动重新生成）；或
-  直接编辑五段式摘要文本保存为 done（`summary_model=manual`，详情页立即展示
+  直接编辑参与导引各段与渠道清单保存为 done（`summary_model=manual`，详情页立即展示
   并同步检索索引）。
 - **手动补录**：结构化表单（标题 / 发布机关 / 原文 URL / 发布与截止日期 /
   正文纯文本）→ 与爬虫完全相同的管线：以原文 URL 为唯一键幂等 upsert
