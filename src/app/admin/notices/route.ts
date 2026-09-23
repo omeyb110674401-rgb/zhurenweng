@@ -1,5 +1,5 @@
 import { upsertNotice } from '@/db/repo/notices';
-import { upsertSource } from '@/db/repo/sources';
+import { recordSourceSuccess } from '@/db/repo/sources';
 import { daysUntil, normalizeDateText } from '@/lib/dates';
 import { noticeIdForUrl } from '@/lib/notice-id';
 import { syncNoticesToSearchIndex } from '@/lib/search/sync';
@@ -62,12 +62,11 @@ export async function POST(request: Request): Promise<Response> {
   const id = noticeIdForUrl(officialUrl.toString());
 
   // 补录源行（notices.source_id 外键要求先存在）；最近成功时间 = 本次补录时间
-  await upsertSource({
+  await recordSourceSuccess({
     id: MANUAL_SOURCE_ID,
     name: '人工补录',
     adapterType: 'manual',
-    healthy: true,
-    lastSuccessAt: now.toISOString(),
+    now: now.toISOString(),
   });
 
   const result = await upsertNotice({

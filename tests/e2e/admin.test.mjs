@@ -16,8 +16,9 @@ import { sourceAdapters } from '../../src/sources/registry.ts';
  * 测试装置：只复制 npc 源的 fixture 快照到临时目录 —— 注册表里其余源
  * 在 fixture 源站上 404，天然构造「部分源失败」的抓取局面
  * （缺失源清单从注册表推导，见 MISSING_SOURCES）：
- *   → 源健康看板展示 npc 健康（有最近成功时间）、其余源异常（有最近错误）；
- *   → 每个失败源触发告警邮件（stub 经 MAILER_OUTBOX_FILE 捕获），同日重复失败去重；
+ *   → 源健康看板展示 npc 健康（有最近成功时间）、其余源异常（连续 2 轮 + 当前错误）；
+ *   → 抓取告警按轮次降噪（issue #58）：首轮失败只记不发，第二轮起每源一封，
+ *     同日重复再被日历日去重挡住（stub 经 MAILER_OUTBOX_FILE 捕获）；
  *   → stub LLM 注入失败（LLM_STUB_FAILURES=always）→ failed_review 条目出现在
  *     复核队列 → 重置重试（stub 恢复）后摘要自动补齐；或人工编辑摘要直接保存 done；
  *   → 手动补录条目走与爬虫相同的入库 / 摘要 / 检索索引管线。
@@ -239,7 +240,7 @@ describe('issue #12：管理后台与健康告警', () => {
     assert.ok(cookie, '重新登录成功');
   });
 
-  it('失败告警：抓取失败（缺失 fixture 的源 404）与摘要失败（stub 注入）各触发一封告警邮件', async () => {
+  it('告警降噪：抓取首轮只记不发，满两轮每源恰好一封（缺失 fixture 的源 404）', async () => {
     const first = await runWorkerOnce({ LLM_STUB_FAILURES: 'always' });
     assert.equal(first.code, 0, `worker 应正常退出，输出：${first.output}`);
     assert.match(first.output, /源 npc 抓取完成：列表 3 条，新增 3，更新 0/);
@@ -248,10 +249,33 @@ describe('issue #12：管理后台与健康告警', () => {
       MISSING_SOURCES.length,
       `${MISSING_SOURCES.length} 个缺失 fixture 的源抓取失败`,
     );
+    assert.match(
+      first.output,
+      /源 \w+ 抓取失败（连续第 1 轮）/,
+      `首轮失败要写明是第 1 轮：${first.output}`,
+    );
     assert.match(first.output, /摘要任务完成：成功 0 条，转人工复核 2 条/);
     assert.match(first.output, /任务失败告警已发送/, '告警发送日志');
 
-    // 每个失败源一封抓取告警 + 摘要任务一封（任务级 × npc 源），同日去重
+    // 首轮：抓取类一封都不发（间歇性抖动的第一响不该打扰人）；摘要任务那封照发 ——
+    // 那条路径没有「抖动」概念，一次失败就是真的没生成出来。
+    const afterFirst = readOutbox();
+    assert.equal(
+      afterFirst.length,
+      1,
+      `首轮只该有摘要任务那一封，实际 ${JSON.stringify(afterFirst.map((m) => m.subject))}`,
+    );
+    assert.equal(countAlerts(afterFirst, 'summarize-notices', 'npc'), 1);
+    for (const id of MISSING_SOURCES) {
+      assert.equal(countAlerts(afterFirst, 'crawl-notices', id), 0, `源 ${id} 首轮不该发信`);
+    }
+
+    // 第二轮仍失败 → 满门槛：判红 + 每源一封（这是「真出事最坏晚一天」的代价上限）
+    const second = await runWorkerOnce({ LLM_STUB_FAILURES: 'always' });
+    assert.equal(second.code, 0, `worker 应正常退出，输出：${second.output}`);
+    assert.match(second.output, /源 \w+ 抓取失败（连续第 2 轮）/);
+
+    // 每个失败源一封抓取告警 + 摘要任务一封（任务级 × npc 源，同日去重不重复发）
     const alerts = readOutbox();
     assert.equal(
       alerts.length,
@@ -269,9 +293,14 @@ describe('issue #12：管理后台与健康告警', () => {
     assert.equal(countAlerts(alerts, 'summarize-notices', 'npc'), 1);
     const crawlAlert = alerts.find((mail) => mail.subject.includes('crawl-notices（源：'));
     assert.match(crawlAlert.text, /HTTP 404/, '告警正文含失败原因');
+    assert.match(
+      crawlAlert.text,
+      /上一轮：/,
+      '错误列成功即清，跨轮来路只能写进这第二封邮件里',
+    );
   });
 
-  it('源健康看板：展示各源最近成功时间与最近错误（fixture 抓取后）', async () => {
+  it('源健康看板：展示各源连续失败轮数、最近成功时间与当前错误（fixture 抓取后）', async () => {
     const response = await getAdmin();
     assert.equal(response.status, 200);
     const html = await response.text();
@@ -285,12 +314,18 @@ describe('issue #12：管理后台与健康告警', () => {
       'npc 有最近成功抓取时间（ISO 8601）',
     );
     assert.match(npcRow, /data-field="enabled">启用</, 'npc 处于启用状态');
+    assert.match(npcRow, /data-field="recent-failures">—</, '成功的源不该挂着失败计数');
 
     const mojRow = /data-testid="source-health-row" data-source-id="moj"[\s\S]*?<\/tr>/.exec(html)?.[0] ?? '';
     assert.ok(mojRow, '看板包含 moj 源行');
     assert.match(mojRow, /data-field="status">异常</, 'moj 抓取失败 → 异常');
+    assert.match(
+      mojRow,
+      /data-field="recent-failures">连续 2 轮</,
+      '连续失败列要给出轮数（降噪后这是「坏到什么程度」的唯一去处）',
+    );
     const lastError = /data-field="last-error">([^<]+)</.exec(mojRow)?.[1] ?? '';
-    assert.match(lastError, /HTTP 404/, 'moj 展示最近错误信息');
+    assert.match(lastError, /HTTP 404/, 'moj 展示当前错误信息');
     assert.match(
       mojRow,
       /data-field="last-error-at"><span class="mono">\d{4}-\d{2}-\d{2}T/,
@@ -447,7 +482,7 @@ describe('issue #12：管理后台与健康告警', () => {
     assert.equal(badUrl.headers.get('location'), '/admin?error=invalid_url');
   });
 
-  it('告警去重：同一天同一源同一任务重复失败不再发；任务级失败同样去重', async () => {
+  it('告警不再重复：抓取类由轮次门槛闭嘴，任务级仍由同日去重闭嘴', async () => {
     const outboxBefore = readOutbox().length;
     assert.ok(outboxBefore >= 3, '前置：此前已有 3 封告警');
 
@@ -455,8 +490,18 @@ describe('issue #12：管理后台与健康告警', () => {
     const repeat = await runWorkerOnce({ LLM_STUB_FAILURES: 'always' });
     assert.equal(repeat.code, 0, `worker 应正常退出，输出：${repeat.output}`);
     assert.equal((repeat.output.match(/源 (moj|mee) 抓取失败/g) ?? []).length, 2, '重复失败确实发生');
-    assert.match(repeat.output, /告警去重：.+当日已发过，跳过/, '去重日志');
-    assert.equal(readOutbox().length, outboxBefore, '同日同源同任务重复失败不再发邮件');
+    assert.match(
+      repeat.output,
+      /源 moj 抓取失败（连续第 [3-9]\d* 轮）/,
+      `满门槛之后仍要接着数上去（降噪不等于遗忘）：${repeat.output}`,
+    );
+    // issue #58：降噪之后让这一封邮件消失的是**轮次门槛**，不是日历日去重 —— 所以这里
+    // 连「去重」日志都不该出现（根本没走到发信）。去重那条路径由下面的任务级失败钉。
+    assert.ok(
+      !/告警去重/.test(repeat.output),
+      `不该靠日历日去重才不发信：${repeat.output}`,
+    );
+    assert.equal(readOutbox().length, outboxBefore, '不在重发线上的轮次不发邮件');
 
     // 任务级失败：SEARCH_PROVIDER 非法使 reindex-notices 整任务抛错 → 告警一封
     const jobLevel = await runWorkerOnce({ SEARCH_PROVIDER: 'bogus-provider' });

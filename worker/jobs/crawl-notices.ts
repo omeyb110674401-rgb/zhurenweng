@@ -2,11 +2,21 @@ import type { NoticeStatus } from '../../src/db/types.ts';
 import { sendTaskFailureAlert } from '../../src/lib/alerts.ts';
 import { noticeIdForUrl } from '../../src/lib/notice-id.ts';
 import { getNoticeById, upsertNotice } from '../../src/db/repo/notices.ts';
-import { getSourceById, recordSourceFailure, upsertSource } from '../../src/db/repo/sources.ts';
+import {
+  getSourceById,
+  recordSourceFailure,
+  recordSourceSuccess,
+  registerSource,
+} from '../../src/db/repo/sources.ts';
 import { syncNoticesToSearchIndex } from '../../src/lib/search/sync.ts';
 import { siteDateIso } from '../../src/lib/dates.ts';
-import { isSourceDegraded } from '../../src/lib/source-health.ts';
+import {
+  SOURCE_UNHEALTHY_AFTER_CONSECUTIVE_FAILURES,
+  isSourceDegraded,
+  shouldAlertForSourceFailure,
+} from '../../src/lib/source-health.ts';
 import { isAllowedCrawlUrl } from '../../src/lib/net-guard.ts';
+import { envInt } from '../../src/lib/env-int.ts';
 import { CRAWLER_USER_AGENT } from '../../src/lib/site-identity.ts';
 import {
   sourceAdapters,
@@ -49,7 +59,12 @@ import type { Job, JobContext } from '../registry.ts';
  * 并限制响应体大小。这是抓取侧唯一的信任边界：源站被挂马不该变成打内网的跳板。
  */
 
-const FETCH_TIMEOUT_MS = 15_000;
+/**
+ * 单次请求的超时预算（毫秒）。全局缺省 15s，个别源按 `SourceFetchOptions.timeoutMs`
+ * 单独放宽 —— 放大全局值会让九个源为最慢那一个买单（每轮每跳都多等），所以放大的是
+ * 单个源的声明而不是全站常量。用 envInt：写错立刻在启动时抛，而不是带着 NaN 的节奏跑一天。
+ */
+const DEFAULT_CRAWL_TIMEOUT_MS = envInt('CRAWL_TIMEOUT_MS', 15_000, { min: 1_000 });
 /**
  * 重定向的最大跟随跳数（防异常站点造成无限跟随）。**所有源**共用 —— 从前只有
  * cookieChallenge 源手动跟随，其余交给 fetch 自动跟（≤20 跳、且不看目标），
@@ -212,6 +227,7 @@ async function guardedFetch(
   allowedOrigins: readonly string[],
   cookie: string,
   extraHeaders: Record<string, string> = {},
+  timeoutMs = DEFAULT_CRAWL_TIMEOUT_MS,
 ): Promise<Response> {
   const verdict = isAllowedCrawlUrl(url, allowedOrigins);
   if (!verdict.ok) {
@@ -219,7 +235,9 @@ async function guardedFetch(
   }
   const headers: Record<string, string> = { 'user-agent': USER_AGENT, ...extraHeaders };
   if (cookie.length > 0) headers.cookie = cookie;
-  return fetch(url, { headers, redirect: 'manual', signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) });
+  // 同一个 signal 也约束响应体：实测（Node 24）「headers 之后不发」与「半截 body 后
+  // 卡住」两种停摆都在预算点抛 TimeoutError，因此不需要给读循环另加第二个计时器。
+  return fetch(url, { headers, redirect: 'manual', signal: AbortSignal.timeout(timeoutMs) });
 }
 
 /**
@@ -257,10 +275,15 @@ async function readCappedText(response: Response): Promise<string> {
 }
 
 export interface CrawlRequest {
-  /** 适配器声明的源级传输处置（cookieChallenge） */
+  /** 适配器声明的源级传输处置（cookieChallenge / timeoutMs） */
   fetchOptions?: SourceFetchOptions;
   /** 额外请求头：附件请求要带 referer 与 range */
   headers?: Record<string, string>;
+  /**
+   * 本次请求的超时预算，优先级高于 `fetchOptions.timeoutMs`。
+   * 留给「明知这一类请求更慢」的调用方（如整档下载）显式覆盖，日常抓取不传。
+   */
+  timeoutMs?: number;
   /**
    * 命中这些状态码时**原样返回响应**而不是抛错。
    *
@@ -268,6 +291,15 @@ export interface CrawlRequest {
    * 详情页「为什么读不到」的说明；当成异常抛出就会被记成抓取失败（issue #57）。
    */
   returnForStatus?: (status: number) => boolean;
+}
+
+/**
+ * 本次请求实际生效的超时预算：显式传参 > 适配器声明 > 全局缺省。
+ * 收成一处是因为挂 signal 的 `crawlFetch` 与写错误消息的 `fetchText` 必须用同一个数，
+ * 否则消息里报的预算是假的。
+ */
+function crawlTimeoutMs(request: CrawlRequest): number {
+  return request.timeoutMs ?? request.fetchOptions?.timeoutMs ?? DEFAULT_CRAWL_TIMEOUT_MS;
 }
 
 /**
@@ -292,7 +324,13 @@ export async function crawlFetch(url: string, request: CrawlRequest = {}): Promi
 
   for (;;) {
     const cookie = cookieHost !== null && sameHost(current, cookieHost) ? cookies : '';
-    const response = await guardedFetch(current, allowedOrigins, cookie, request.headers);
+    const response = await guardedFetch(
+      current,
+      allowedOrigins,
+      cookie,
+      request.headers,
+      crawlTimeoutMs(request),
+    );
     // 只在「还没拿到 cookie」时接受挑战，否则源站每次都下发 Set-Cookie 会成死循环
     const granted = cookies.length === 0 ? cookieHeaderOf(response) : '';
 
@@ -331,9 +369,25 @@ export async function crawlFetch(url: string, request: CrawlRequest = {}): Promi
   }
 }
 
-/** 抓取文本（HTML 或接口 JSON 原文），处置见 crawlFetch。 */
-async function fetchText(url: string, options?: SourceFetchOptions): Promise<string> {
-  return readCappedText(await crawlFetch(url, { fetchOptions: options }));
+/**
+ * 抓取文本（HTML 或接口 JSON 原文），处置见 crawlFetch。
+ *
+ * 超时在这一层归因：原始的 `The operation was aborted due to timeout` 不带地址也不带
+ * 预算，事后既看不出是哪个源、也看不出这个源声明的是 15s 还是 30s —— 按源配置没有可
+ * 归因的信息就等于没配（issue #58）。放这里而不是 `readCappedBuffer`：那是附件整档也
+ * 复用的公共件，语义只有「上限字节数」；也覆盖得到 headers 阶段的超时。
+ */
+export async function fetchText(url: string, options?: SourceFetchOptions): Promise<string> {
+  const request: CrawlRequest = { fetchOptions: options };
+  const timeoutMs = crawlTimeoutMs(request);
+  try {
+    return await readCappedText(await crawlFetch(url, { ...request, timeoutMs }));
+  } catch (error) {
+    if (error instanceof Error && /^(TimeoutError|AbortError)$/.test(error.name)) {
+      throw new Error(`抓取超时（>${timeoutMs}ms 未取完响应体）：${url}（${error.message}）`);
+    }
+    throw error;
+  }
 }
 
 /**
@@ -442,13 +496,13 @@ export const crawlNoticesJob: Job = {
         continue;
       }
       try {
-        // 先登记源行（notices.source_id 外键引用 sources.id，必须先于条目入库存在）；
-        // 健康状态乐观置为 true，本轮失败再翻回 false。
-        await upsertSource({
+        // 先保证源行存在（notices.source_id 外键引用 sources.id，必须先于条目入库存在）。
+        // 这里**不**再乐观写 healthy=true：那样一来本轮失败若没能落库（下面所有健康登记
+        // 都带 .catch，登记失败不掩盖原始错误），源就整天假绿（issue #58）。
+        await registerSource({
           id: adapter.id,
           name: adapter.name,
           adapterType: adapter.id,
-          healthy: true,
         });
 
         // 列表同样要走源级处置（司法部站点的 WAF cookie 挑战对列表请求也生效）
@@ -524,6 +578,8 @@ export const crawlNoticesJob: Job = {
             adapterType: adapter.id,
             error: message,
             now: now.toISOString(),
+            // 过半条目失败是事件不是抖动，当场判红，不去数「连续第几轮」（issue #58）
+            immediateUnhealthy: true,
           }).catch(() => {
             // 健康状态登记失败不掩盖本轮的数据质量事实
           });
@@ -536,12 +592,11 @@ export const crawlNoticesJob: Job = {
           });
           ctx.logger(`源 ${adapter.id} 数据质量降级：${message}`);
         } else {
-          await upsertSource({
+          await recordSourceSuccess({
             id: adapter.id,
             name: adapter.name,
             adapterType: adapter.id,
-            healthy: true,
-            lastSuccessAt: now.toISOString(),
+            now: now.toISOString(),
           });
         }
         ctx.logger(
@@ -558,24 +613,33 @@ export const crawlNoticesJob: Job = {
         }
       } catch (error) {
         const message = errorMessage(error);
-        await recordSourceFailure({
+        const outcome = await recordSourceFailure({
           id: adapter.id,
           name: adapter.name,
           adapterType: adapter.id,
           error: message,
           now: now.toISOString(),
-        }).catch(() => {
-          // 健康状态登记失败不掩盖原始抓取错误
-        });
-        // 源健康告警（issue #12）：同日 × 任务 × 源去重，邮件失败不影响本轮
-        await sendTaskFailureAlert({
-          jobName: 'crawl-notices',
-          sourceId: adapter.id,
-          error: message,
-          now,
-          log: ctx.logger,
-        });
-        ctx.logger(`源 ${adapter.id} 抓取失败（listUrl=${listUrl}）：${message}`);
+        }).catch(() => null);
+        // 计数登记失败时按「该发」处理：漏掉一封真断流的邮件，代价高于一封重复的
+        const consecutive = outcome?.consecutiveFailures ?? SOURCE_UNHEALTHY_AFTER_CONSECUTIVE_FAILURES;
+        // 源健康告警（issue #12 去重 + issue #58 降噪）：首轮抖动只记不发，
+        // 满门槛必发，之后每 7 轮重发一次；邮件本身仍按日历日去重。
+        if (shouldAlertForSourceFailure(consecutive)) {
+          // 错误列现在成功即清，跨轮的来路只能在这一句里带：第二封邮件仍能看到第一次
+          // 的原始错误 —— 那正是「成功不清空」当初想要的排查线索。
+          const previous = outcome?.previousErrorMessage ?? null;
+          await sendTaskFailureAlert({
+            jobName: 'crawl-notices',
+            sourceId: adapter.id,
+            error: previous === null ? message : `${message}（上一轮：${previous}）`,
+            now,
+            log: ctx.logger,
+          });
+        }
+        ctx.logger(
+          `源 ${adapter.id} 抓取失败（连续第 ${consecutive} 轮${outcome === null ? '，计数登记失败' : ''}）` +
+            `：${message}（listUrl=${listUrl}）`,
+        );
       }
     }
   },

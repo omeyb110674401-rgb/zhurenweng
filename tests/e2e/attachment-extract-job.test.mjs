@@ -163,12 +163,11 @@ before(async () => {
   // 客户端是进程内单例：env 就位之前不能 import（档位常量在模块顶层读）
   job = (await import('../../worker/jobs/extract-attachments.ts')).extractAttachmentsJob;
   repo = await import('../../src/db/repo/attachments.ts');
-  const { upsertSource } = await import('../../src/db/repo/sources.ts');
-  await upsertSource({
+  const { registerSource } = await import('../../src/db/repo/sources.ts');
+  await registerSource({
     id: 'e2e-attachments',
     name: '附件抽取测试源',
     adapterType: 'fixture',
-    scheduleConfig: {},
   });
 
   // 三条公示分别服务三组断言：一条公示一轮最多下 3 个文件，混在一起就分不清是谁的功劳

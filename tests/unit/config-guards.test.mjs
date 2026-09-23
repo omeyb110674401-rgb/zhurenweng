@@ -1,10 +1,15 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import { envInt } from '../../src/lib/env-int.ts';
-import { DEGRADED_MIN_LIST, isSourceDegraded } from '../../src/lib/source-health.ts';
+import {
+  DEGRADED_MIN_LIST,
+  isSourceDegraded,
+  isSourceUnhealthy,
+  shouldAlertForSourceFailure,
+} from '../../src/lib/source-health.ts';
 
 /**
- * 单元：两个「配置与判据」的守卫（issue #51）。
+ * 单元：「配置与判据」的守卫（issue #51 建立，issue #58 追加跨轮判据）。
  *
  * envInt：环境变量里的整数不能直接 Number() —— `Number('abc')` 是 NaN，而 NaN 会
  * 静默穿过大多数用法，把「配置写错」变成「看起来在跑的错误行为」：
@@ -95,5 +100,44 @@ describe('isSourceDegraded：过半逐条失败才报', () => {
     assert.equal(isSourceDegraded(Number.NaN, 3), false);
     assert.equal(isSourceDegraded(7, Number.NaN), false);
     assert.equal(isSourceDegraded(7, -1), false);
+  });
+});
+
+/**
+ * issue #58 的第二根轴：跨轮连着坏了多久。与上面的 isSourceDegraded（一轮内坏多少）
+ * 正交，两条判据各管一件事，别合并。
+ */
+describe('isSourceUnhealthy：连续失败满 2 轮才判红', () => {
+  it('第 1 轮不算出事（抖动），第 2 轮起算', () => {
+    assert.equal(isSourceUnhealthy(0), false);
+    assert.equal(isSourceUnhealthy(1), false, '首轮失败只记不发：变红是第二轮的事');
+    assert.equal(isSourceUnhealthy(2), true);
+    assert.equal(isSourceUnhealthy(3), true);
+    assert.equal(isSourceUnhealthy(99), true);
+  });
+});
+
+describe('shouldAlertForSourceFailure：第 2 轮必发，之后每 7 轮封顶重发', () => {
+  it('真出事当天必发', () => {
+    assert.equal(shouldAlertForSourceFailure(1), false, '首轮抖动不发信');
+    assert.equal(shouldAlertForSourceFailure(2), true, '第 2 轮是「真出事」的判定线，必须发');
+  });
+
+  it('持续故障按 7 轮重发，其余轮次静默', () => {
+    const alerting = [];
+    for (let n = 2; n <= 30; n += 1) {
+      if (shouldAlertForSourceFailure(n)) alerting.push(n);
+    }
+    assert.deepEqual(alerting, [2, 9, 16, 23, 30], '第 2 轮之后每隔 7 轮一封');
+  });
+
+  it('坏着的源不会哑火（日历日去重之外还有一条重发线）', () => {
+    assert.equal(shouldAlertForSourceFailure(9), true, '一直坏着就得继续说话');
+    assert.equal(shouldAlertForSourceFailure(8), false, '但也不必每天一封');
+  });
+
+  it('异常入参不发信', () => {
+    assert.equal(shouldAlertForSourceFailure(Number.NaN), false);
+    assert.equal(shouldAlertForSourceFailure(-1), false);
   });
 });

@@ -5,7 +5,7 @@ import { index, integer, primaryKey, sqliteTable, text } from 'drizzle-orm/sqlit
  *
  * 方言交集约定：
  * - 只使用 TEXT / INTEGER 列，不用任何 PG 专属类型；
- * - JSON（领域标签、AI 摘要、调度配置等）一律存 TEXT 列，由应用层序列化；
+ * - JSON（领域标签、AI 摘要、附件清单等）一律存 TEXT 列，由应用层序列化；
  * - 时间戳存 ISO 8601 字符串。
  *
  * PostgreSQL 镜像 schema 见 ./postgres.ts，两者列名与语义必须保持一致。
@@ -15,12 +15,23 @@ export const sources = sqliteTable('sources', {
   id: text('id').primaryKey(),
   name: text('name').notNull(),
   adapterType: text('adapter_type').notNull(),
-  /** JSON 存 TEXT：调度配置（如 { "cron": "0 6 * * *" }） */
-  scheduleConfigJson: text('schedule_config_json').notNull().default('{}'),
   /** 0 = 不健康 / 1 = 健康（双方言交集内没有 boolean，用 INTEGER 表达） */
   healthy: integer('healthy').notNull().default(1),
+  /**
+   * 连续失败轮数（issue #58）：判「红」的**唯一**依据是它过门槛（见 source-health 的
+   * `isSourceUnhealthy`），而不是「本轮抛了一次错」。抓取失败一次就翻红、又只有日历日
+   * 去重，会让一个间歇性慢源每天红一次、每天一封告警，永远不收敛。成功即归零。
+   */
+  consecutiveFailures: integer('consecutive_failures').notNull().default(0),
   lastSuccessAt: text('last_success_at'),
-  /** 最近一次管线错误信息（issue #12 源健康看板；成功不清空，保留最近一次错误便于排查） */
+  /**
+   * 最近一次管线错误信息 / 时间（issue #12 源健康看板）。
+   *
+   * 语义在 issue #58 收窄为「**当前**故障态」：抓取成功即清空。原先「成功不清空，便于
+   * 排查曾停摆的源」把「现在有没有事」和「上次出了什么事」压进同一对列，代价是看板
+   * 永远挂着一条几周前的红字。历史不丢 —— worker 日志每轮都带原因，`consecutive_failures`
+   * 就是「曾停摆」的持久化替身。
+   */
   lastErrorMessage: text('last_error_message'),
   /** 最近一次错误时间，ISO 8601 */
   lastErrorAt: text('last_error_at'),

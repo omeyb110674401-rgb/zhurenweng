@@ -12,6 +12,16 @@
  * 或者某个 `from` 片段在源码里找不到（说明代码改过、这条用例已经过期）。
  *
  * 注意：每次都会把源码原样写回，所以只读不脏工作区；但**别在它跑的时候改同一批文件**。
+ *
+ * 选测试的两条硬规则：
+ * 1. 被撤的实现必须**从源码被执行**。e2e 里 `startAppServer` 跑的是 `.next` 构建产物，
+ *    改 `src/app/**` 与 SSR 侧 lib 对它无效（撤了也不红 = 假绿）。因此页面/组件的判据
+ *    一律配单测（`node --test` 直读 .ts），只有 worker 侧与仓储侧的改动才走 e2e ——
+ *    worker 子进程是 `node worker/index.ts`，跑的就是源码。
+ * 2. 名字模式**不能只选中多轮状态型套件里的一个 it**。`--test-name-pattern` 会跳过
+ *    前面的用例，而那些用例正是「造成被断言的那个状态」的轮次（实测踩过：撤掉
+ *    「成功清错误列」，只跑第 3 轮的断言照样绿 —— 因为第 1、2 轮没跑，那列本来就是空的）。
+ *    这种套件要按 **describe 名**匹配，让整组按顺序跑完。
  */
 import { readFileSync, writeFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
@@ -22,6 +32,10 @@ const TARGETS = {
   magic: 'src/lib/file-magic.ts',
   url: 'src/lib/attachment-url.ts',
   extract: 'worker/jobs/extract-attachments.ts',
+  crawl: 'worker/jobs/crawl-notices.ts',
+  sourcesRepo: 'src/db/repo/sources.ts',
+  sourceHealth: 'src/lib/source-health.ts',
+  summaryDisplay: 'src/lib/summary-display.ts',
 };
 
 const CASES = [
@@ -196,6 +210,110 @@ const CASES = [
     to: '  if (false) return [attachmentUrl];',
     pattern: '只共享两段后缀不算同站',
     test: 'tests/unit/attachment-url.test.mjs',
+  },
+  // ── issue #58 ───────────────────────────────────────────────
+  // 超时这件事有三处可撤：挂 signal、按源解析预算、把预算写进错误消息。各自单钉一条，
+  // 因为失效方式不同 —— 少 signal 是「整轮卡住」，少档位是「慢源照样只有全局值」，
+  // 少消息是「知道超时却不知道是谁、按多少预算超的」。
+  {
+    label: '请求不挂超时 signal（停滞的响应体永远等下去）',
+    file: 'crawl',
+    from: "  return fetch(url, { headers, redirect: 'manual', signal: AbortSignal.timeout(timeoutMs) });",
+    to: "  return fetch(url, { headers, redirect: 'manual' });",
+    pattern: 'CRAWL_TIMEOUT_MS 掐断',
+    test: 'tests/e2e/crawl-timeout-guard.test.mjs',
+  },
+  {
+    label: '适配器声明的预算被忽略（慢源只能靠抬全局值）',
+    file: 'crawl',
+    from: '  return request.timeoutMs ?? request.fetchOptions?.timeoutMs ?? DEFAULT_CRAWL_TIMEOUT_MS;',
+    to: '  return request.timeoutMs ?? DEFAULT_CRAWL_TIMEOUT_MS;',
+    pattern: '适配器档',
+    test: 'tests/e2e/crawl-timeout-guard.test.mjs',
+  },
+  {
+    label: '超时不再归因（消息里没有预算与 URL）',
+    file: 'crawl',
+    from: '    if (error instanceof Error && /^(TimeoutError|AbortError)$/.test(error.name)) {',
+    to: '    if (false) {',
+    pattern: 'CRAWL_TIMEOUT_MS 掐断',
+    test: 'tests/e2e/crawl-timeout-guard.test.mjs',
+  },
+  {
+    // #51 的成果：降级当场判红。#58 引入「满 2 轮才判红」之后少了这个钳制，
+    // 「一轮内过半条目失败」就会被当成第一轮抖动而静默为健康 —— 两条判据必须正交地都生效。
+    label: '数据质量降级不再当场判红（被跨轮门槛吞掉）',
+    file: 'crawl',
+    from: '            immediateUnhealthy: true,',
+    to: '            // 撤掉：不钳到门槛',
+    pattern: '判降级 —— 日志写明',
+    test: 'tests/e2e/crawl-source-degraded.test.mjs',
+  },
+  {
+    label: '首轮失败也发信（间歇性慢源每天一封，噪声日常化）',
+    file: 'crawl',
+    from: '        if (shouldAlertForSourceFailure(consecutive)) {',
+    to: '        if (true) {',
+    pattern: '管理后台与健康告警',
+    test: 'tests/e2e/admin.test.mjs',
+  },
+  {
+    label: '满门槛也不发信（真断流没人知道）',
+    file: 'crawl',
+    from: '        if (shouldAlertForSourceFailure(consecutive)) {',
+    to: '        if (false) {',
+    pattern: '满两轮每源恰好一封',
+    test: 'tests/e2e/admin.test.mjs',
+  },
+  {
+    // 这两条是同一处改动的两半：错误两列现在只描述**当前**故障态。少任何一半，看板都会
+    // 退回「一个早已恢复的源永远像正在出事」。
+    label: '成功后不清当前故障态的错误信息',
+    file: 'sourcesRepo',
+    from: '    lastErrorMessage: null,',
+    to: '    // 撤掉：留着上一次错误',
+    pattern: '不再每天红、每天发信',
+    test: 'tests/e2e/crawl-flaky-source.test.mjs',
+  },
+  {
+    label: '成功后计数不归零（恢复后再抖一次仍背着旧账）',
+    file: 'sourcesRepo',
+    from: '    consecutiveFailures: 0,',
+    to: '    // 撤掉：计数不清零',
+    pattern: '不再每天红、每天发信',
+    test: 'tests/e2e/crawl-flaky-source.test.mjs',
+  },
+  {
+    label: '门槛判据形同虚设（失败一次即判红）',
+    file: 'sourceHealth',
+    from: '  return consecutiveFailures >= SOURCE_UNHEALTHY_AFTER_CONSECUTIVE_FAILURES;',
+    to: '  return true;',
+    pattern: '连续失败满 2 轮才判红',
+    test: 'tests/unit/config-guards.test.mjs',
+  },
+  {
+    label: '持续故障每轮都重发（红着的源每天一封）',
+    file: 'sourceHealth',
+    from: '  return since % ALERT_REPEAT_EVERY_ROUNDS === 0;',
+    to: '  return true;',
+    pattern: '每 7 轮封顶重发',
+    test: 'tests/unit/config-guards.test.mjs',
+  },
+  {
+    label: '已有摘要不再第一优先（已截止条目的摘要被界面藏起来）',
+    file: 'summaryDisplay',
+    from: "  if (input.hasSummary) return 'view';",
+    to: "  if (false) return 'view';",
+    pattern: '哪怕条目已截止',
+    test: 'tests/unit/summary-display.test.mjs',
+  },
+  {
+    label: '截止判据失效（已截止条目重新被承诺「生成中」）',
+    file: 'summaryDisplay',
+    from: "  if (input.summaryStatus === 'pending' && input.noticeStatus === SUMMARY_NOT_SUMMARIZED_STATUS) {",
+    to: "  if (input.summaryStatus === 'pending' && false) {",
+    pattern: '已截止且 pending',
+    test: 'tests/unit/summary-display.test.mjs',
   },
 ];
 

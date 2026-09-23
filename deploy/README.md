@@ -27,5 +27,10 @@ bash deploy/sync-files-local.sh src/app/page.tsx src/lib/dates.ts
 ## 其他文件
 
 - `Caddyfile` —— 反向代理与证书（见 `docs/deploy.md` 第 5 节）
+- `audit-sources-flaky.sql` —— **只读**：间歇性慢源的信号、死源与摘要文案口径核对
+  （issue #58）。每段开头标了该在迁移前还是迁移后跑：DROP COLUMN 之前要确认
+  `schedule_config_json` 无人用过，删除死行之前要确认它名下 0 条目
+- `cleanup-govcn-source.sql` —— **一次性写入**：删掉注册表已删适配器留下的 `govcn` 死行
+  （issue #58）。删除条件把「名下 0 条目」写进 `WHERE` 当保险，情况有变就一行都不删
 - `preflight-23.sh` / `verify-23-plumbing.sh` / `audit-data-23*.sql` —— 首次上线
   前的预检、链路核验与数据审计，同样是一次性脚本（同属历史留档）

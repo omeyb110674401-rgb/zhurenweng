@@ -165,7 +165,12 @@ docker compose run --rm -e WORKER_ONCE=1 worker npm run worker
   `U+FFFD` 存进库（issue #55 实测踩过）。用 `-F "name=<文件"` 从 UTF-8 文件逐字节送。
   退订链路：`POST /unsubscribe/one-click?token=<库里的 unsubscribe_token>` 应回
   `/unsubscribe/done?ok=1` 并写下 `unsubscribed_at`。
-- 管理后台看板：各源最近成功时间非空；配置 `ALERT_EMAIL` 后人为触发一次失败应收到告警
+- 管理后台看板：各源最近成功时间非空。告警（issue #58 后按轮次降噪）要这样验：
+  人为让某源失败**一轮**只会在看板上留下「连续失败 1 轮」，**不发邮件**；
+  连续两轮才收到该源那一封（此后每 7 轮一封）。想当场看到邮件，触发数据质量降级
+  （一轮内过半条目失败）或任务级失败（把 docker-compose.yml 里 worker 的检索服务商临时改成
+  一个未知值就能造出来，验完改回来）—— 这两类不等门槛。
+  **别为了测试去手动多跑几轮抓取**：那是在多打政府站点；等一次自然调度即可（每日一轮）。
 - 出站按钮 `/go/<id>` 正常 302 到官方原文（北极星指标埋点）
 - 安全响应头（issue #52）——五条都应出现，且**不应**出现 `X-Powered-By`：
   ```bash

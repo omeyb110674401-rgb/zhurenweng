@@ -22,7 +22,13 @@ import type { LlmPort, StructuredSummary, SummaryChannel, SummaryChannelKind } f
 /** 摘要状态（notices.summary_status） */
 export type SummaryStatus = 'pending' | 'done' | 'failed_review';
 
-/** 详情页占位文案：done 渲染摘要本体，pending / failed_review 显示占位 */
+/**
+ * 摘要状态标签（`SummaryPlaceholder` 用）。
+ *
+ * 这**不是**「摘要区该显示什么」的判据 —— 那在 `summary-display.ts`
+ * （issue #58）：本表只是 `summary_status` 的中文名字，管不到「已截止的条目根本
+ * 不会入队」这类页面级事实。把标签表当真相来源，就等于对着永不生成的小队说「生成中」。
+ */
 export const SUMMARY_STATUS_LABELS: Record<SummaryStatus, string> = {
   pending: '摘要生成中',
   done: '摘要已生成',

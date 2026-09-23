@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
+import Database from 'better-sqlite3';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -7,6 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { after, before, describe, it } from 'node:test';
 import { startAppServer } from './helpers/app-server.mjs';
 import { createFixtureServer } from './helpers/fixture-server.mjs';
+import { SOURCE_UNHEALTHY_AFTER_CONSECUTIVE_FAILURES } from '../../src/lib/source-health.ts';
 
 /**
  * E2E（issue #51）：源站改版让详情全部抓不到时，不能再报「抓取完成、源健康」。
@@ -79,6 +81,18 @@ function npcAlerts() {
   );
 }
 
+/** 读某一行的源健康状态（issue #58 后健康判定看 consecutive_failures，不只看 healthy）。 */
+function sourceRow(id) {
+  const db = new Database(dbFile, { readonly: true });
+  try {
+    return db
+      .prepare('select healthy, consecutive_failures, last_error_message from sources where id = ?')
+      .get(id);
+  } finally {
+    db.close();
+  }
+}
+
 /** 删掉该源全部详情快照（模拟源站改版 / 详情页全挂）。返回删掉的文件数。 */
 function removeAllDetailFiles() {
   const detailRoot = path.join(fixturesDir, 'npc', 'flca');
@@ -142,6 +156,16 @@ describe('issue #51：源数据质量降级必须说话', () => {
     const alertText = `${alerts[0].subject ?? ''}\n${alerts[0].text ?? ''}`;
     assert.match(alertText, /详情失败/, '告警要说清是「详情大面积失败」而非笼统失败');
     assert.match(alertText, /数据可能已停止更新/, '告警要说明后果，而不只是报个错');
+
+    // issue #58：降级走 immediateUnhealthy —— 它是「事件」，不该被「连续两轮才判红」的
+    // 抖动门槛吞掉。少了钳制，这里会是 healthy=1（第一轮降级静默），#51 的成果就白做。
+    const degradedRow = sourceRow('npc');
+    assert.equal(degradedRow.healthy, 0, '过半条目失败必须当场判红');
+    assert.equal(
+      degradedRow.consecutive_failures,
+      SOURCE_UNHEALTHY_AFTER_CONSECUTIVE_FAILURES,
+      '计数应被钳到门槛，而不是停在「第 1 次」',
+    );
   });
 
   it('第三轮（详情恢复）：回到健康 —— 降级不是单向标记', async () => {
@@ -151,5 +175,12 @@ describe('issue #51：源数据质量降级必须说话', () => {
     assert.equal(run.code, 0, `worker 应正常退出：${run.output}`);
     assert.ok(!/源 npc 数据质量降级/.test(run.output), `恢复后不该再报降级：${run.output}`);
     assert.match(run.output, new RegExp(`源 npc 抓取完成：列表 ${LIST_COUNT} 条`));
+
+    // 成功清的是「当前故障态」三件套（issue #58）：留着会让看板永远像正在出事。
+    // 历史不丢 —— 每轮日志与告警邮件都带原因。
+    const recovered = sourceRow('npc');
+    assert.equal(recovered.healthy, 1);
+    assert.equal(recovered.consecutive_failures, 0, '恢复必须让计数归零');
+    assert.equal(recovered.last_error_message, null);
   });
 });

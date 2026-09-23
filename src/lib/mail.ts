@@ -162,7 +162,7 @@ export function buildTaskFailureAlertEmail(input: {
       `时间：${occurredAt}`,
       `错误摘要：${errorSummary}`,
       '',
-      '同一任务同一源同一天只发送一封告警；修复后下一轮调度会自动重试。',
+      '同一任务同一源同一天至多一封；持续故障按抓取轮次重发（连续第 2 轮一封，之后每 7 轮一封），首轮抖动只记录不发信；修复后下一轮调度会自动重试。',
       '',
       `——`,
       SITE_FOOTER,
@@ -171,7 +171,7 @@ export function buildTaskFailureAlertEmail(input: {
       '<p>主人翁数据管线任务失败：</p>',
       `<p>任务：<strong>${escapeHtml(input.jobName)}</strong><br>源：<strong>${escapeHtml(sourceLabel)}</strong><br>时间：${escapeHtml(occurredAt)}</p>`,
       `<pre>${escapeHtml(errorSummary)}</pre>`,
-      '<p>同一任务同一源同一天只发送一封告警；修复后下一轮调度会自动重试。</p>',
+      '<p>同一任务同一源同一天至多一封；持续故障按抓取轮次重发（连续第 2 轮一封，之后每 7 轮一封），首轮抖动只记录不发信；修复后下一轮调度会自动重试。</p>',
       `<p>——<br>${SITE_FOOTER}</p>`,
     ].join('\n'),
   };

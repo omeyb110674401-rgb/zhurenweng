@@ -7,9 +7,10 @@ import { getNoticeSummary } from '@/db/repo/summaries';
 import { getSourceById } from '@/db/repo/sources';
 import { Countdown, StatusBadge, formatDate } from '@/app/_lib/notice-display';
 import { NoticeBriefView, SubmissionChannels } from '@/app/_lib/notice-brief-view';
-import { SummaryPlaceholder, SummaryUnavailable, SummaryView } from '@/app/_lib/summary-view';
+import { SummaryNotGenerated, SummaryPlaceholder, SummaryUnavailable, SummaryView } from '@/app/_lib/summary-view';
 import { buildNoticeBrief, mergeSubmissionChannels } from '@/lib/notice-brief';
 import { parseQuotedSummary } from '@/lib/summary-content';
+import { summaryDisplayState } from '@/lib/summary-display';
 import { buildNoticeJsonLd, serializeJsonLd } from '@/lib/notice-jsonld';
 import { effectiveStatus } from '@/lib/notice-status';
 import { llmReady } from '@/lib/llm-availability';
@@ -97,6 +98,14 @@ export default async function NoticeDetailPage({ params }: NoticeDetailPageProps
     getSourceById(notice.sourceId),
     getNoticeSummary(notice.id),
   ]);
+  // 摘要区该说什么（issue #58）：判定收在纯函数里，页面只按态选块。注意传的是
+  // **库列** notice.status 而不是上面的展示状态 —— 摘要任务的入队过滤看的就是它。
+  const summaryDisplay = summaryDisplayState({
+    hasSummary: Boolean(summaryInfo?.aiSummaryJson),
+    summaryStatus: summaryInfo?.summaryStatus ?? 'pending',
+    noticeStatus: notice.status,
+    llmReady: llmReady(),
+  });
   // 结构化速读（issue #26/#27）：纯函数、请求期算一次，对存量条目立即生效。
   // 提交方式块与速读卡共用这一份结果，避免同一段正文解析两遍。
   const brief = buildNoticeBrief({
@@ -176,9 +185,9 @@ export default async function NoticeDetailPage({ params }: NoticeDetailPageProps
           </p>
         ) : null}
 
-        {/* 摘要区（issue #4 / #22 / #27）：已有摘要照常渲染（绝不隐藏库内内容）；
-            未生成时先给「结构化速读」（确定性抽取，不依赖大模型），再按 LLM 端口
-            是否可用区分「生成中」占位与「暂未启用」说明 */}
+        {/* 摘要区（issue #4 / #22 / #27 / #58）：已有摘要照常渲染（绝不隐藏库内内容）；
+            未生成时先给「结构化速读」（确定性抽取，不依赖大模型），再按 summaryDisplayState
+            区分「生成中」/「待人工复核」/「未生成摘要」/「暂未启用」。 */}
         {summaryInfo?.aiSummaryJson ? (
           <SummaryView
             notice={notice}
@@ -188,10 +197,12 @@ export default async function NoticeDetailPage({ params }: NoticeDetailPageProps
         ) : (
           <>
             <NoticeBriefView brief={brief} url={notice.url} />
-            {llmReady() ? (
-              <SummaryPlaceholder status={summaryInfo?.summaryStatus ?? 'pending'} />
-            ) : (
+            {summaryDisplay === 'unavailable' ? (
               <SummaryUnavailable />
+            ) : summaryDisplay === 'not-generated' ? (
+              <SummaryNotGenerated />
+            ) : (
+              <SummaryPlaceholder status={summaryInfo?.summaryStatus ?? 'pending'} />
             )}
           </>
         )}

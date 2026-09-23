@@ -44,12 +44,10 @@ before(async () => {
   notices = await import('../../src/db/repo/notices.ts');
   sources = await import('../../src/db/repo/sources.ts');
 
-  await sources.upsertSource({
+  await sources.registerSource({
     id: 'moj',
     name: '司法部',
     adapterType: 'moj',
-    healthy: true,
-    lastSuccessAt: iso(NOW),
   });
   for (const [id, status] of [
     [NOTICE_ID, 'open'],

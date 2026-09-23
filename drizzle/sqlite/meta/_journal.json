@@ -71,6 +71,20 @@
       "when": 1790467200000,
       "tag": "0009_add_notice_attachments",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "6",
+      "when": 1791072000000,
+      "tag": "0010_add_source_consecutive_failures",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "6",
+      "when": 1791072001000,
+      "tag": "0011_drop_source_schedule_config",
+      "breakpoints": true
     }
   ]
 }

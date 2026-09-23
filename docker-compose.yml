@@ -127,6 +127,9 @@ services:
       # 解析」几十秒。每个文件处理完整立刻写终态，所以被 SIGKILL 最多丢一个在途文件 ——
       # 停止等待给到 60s（stop_grace_period 仍留一倍余量）就够。
       WORKER_STOP_WAIT_MS: ${WORKER_STOP_WAIT_MS:-60000}
+      # 单次抓取请求的总预算（毫秒，issue #58）。慢源按源在适配器里声明
+      # （src/sources/adapters/npc.ts 的 fetch.timeoutMs），这里只兜全局缺省。
+      CRAWL_TIMEOUT_MS: ${CRAWL_TIMEOUT_MS:-}
       # 附件条文读取（issue #57）：off / shadow / on。数值项留空即按代码缺省，
       # 所以这里只传空值占位——「填了就生效」必须是真话（契约由
       # tests/unit/deploy-env-contract.test.mjs 守）。

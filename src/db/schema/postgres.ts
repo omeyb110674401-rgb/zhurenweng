@@ -13,12 +13,17 @@ export const sources = pgTable('sources', {
   id: text('id').primaryKey(),
   name: text('name').notNull(),
   adapterType: text('adapter_type').notNull(),
-  /** JSON 存 TEXT：调度配置（如 { "cron": "0 6 * * *" }） */
-  scheduleConfigJson: text('schedule_config_json').notNull().default('{}'),
   /** 0 = 不健康 / 1 = 健康（双方言交集内没有 boolean，用 INTEGER 表达） */
   healthy: integer('healthy').notNull().default(1),
+  /**
+   * 连续失败轮数（issue #58）：判「红」的唯一依据，成功即归零。
+   * 与 SQLite 侧同义，见 ./sqlite.ts 的注释。
+   */
+  consecutiveFailures: integer('consecutive_failures').notNull().default(0),
   lastSuccessAt: text('last_success_at'),
-  /** 最近一次管线错误信息（issue #12 源健康看板；成功不清空，保留最近一次错误便于排查） */
+  /**
+   * 当前故障态的错误信息与时间（issue #12；issue #58 起成功即清空，不再常驻）。
+   */
   lastErrorMessage: text('last_error_message'),
   /** 最近一次错误时间，ISO 8601 */
   lastErrorAt: text('last_error_at'),

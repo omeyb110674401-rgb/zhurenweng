@@ -97,10 +97,14 @@ export interface SourceRecord {
   id: string;
   name: string;
   adapterType: string;
-  scheduleConfig: Record<string, unknown>;
   healthy: boolean;
+  /** 连续失败轮数（issue #58）：判「异常」的门槛计数，成功归零 */
+  consecutiveFailures: number;
   lastSuccessAt: string | null;
-  /** 最近一次管线错误信息（issue #12 源健康看板）；成功不清空，null = 从未失败 */
+  /**
+   * **当前**故障态的错误信息（issue #12；issue #58 起抓取成功即清空）。
+   * null = 当前没有故障。
+   */
   lastErrorMessage: string | null;
   /** 最近一次错误时间，ISO 8601 */
   lastErrorAt: string | null;

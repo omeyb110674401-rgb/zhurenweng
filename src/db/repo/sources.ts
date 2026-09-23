@@ -2,93 +2,112 @@ import { asc, eq } from 'drizzle-orm';
 import { getDb } from '../client.ts';
 import { sources } from '../schema/sqlite.ts';
 import type { SourceRecord } from '../types.ts';
+import {
+  SOURCE_UNHEALTHY_AFTER_CONSECUTIVE_FAILURES,
+  isSourceUnhealthy,
+} from '../../lib/source-health.ts';
 
 /**
- * 抓取管线维护的源登记信息（幂等 upsert 输入）。
+ * 抓取管线维护的源登记信息。
+ *
+ * 三个入口刻意分开（issue #58）：原先 `upsertSource` 一个函数两用 —— 轮初拿它「乐观置
+ * 健康」，成功时再拿它记成功时间。于是抓取失败的源在这一轮开头就被写成 healthy=true，
+ * 而 `recordSourceFailure` 在调用点带着 `.catch(() => {})`：那条写一旦失败被吞掉，
+ * 源就整天假绿。登记行、记账成功、记账失败是三件事，各自只有一个入口。
  */
-export interface UpsertSourceInput {
+export interface SourceIdentity {
   id: string;
   name: string;
   adapterType: string;
-  healthy: boolean;
-  /** undefined = 保留已有值（抓取失败时不清空最近成功时间） */
-  lastSuccessAt?: string | null;
+}
+
+/** 三个入口共用的行形状（读-改-写要用的列）。 */
+const SOURCE_ROW_COLUMNS = {
+  id: sources.id,
+  consecutiveFailures: sources.consecutiveFailures,
+  lastErrorMessage: sources.lastErrorMessage,
+} as const;
+
+type SourceRow = { id: string; consecutiveFailures: number; lastErrorMessage: string | null };
+
+async function findSourceRow(db: Awaited<ReturnType<typeof getDb>>, id: string): Promise<SourceRow | undefined> {
+  const rows = await db
+    .select(SOURCE_ROW_COLUMNS)
+    .from(sources)
+    .where(eq(sources.id, id))
+    .limit(1);
+  return rows[0];
 }
 
 /**
- * 幂等登记源（抓取成功 / 失败都写入，维护健康状态与最近成功时间）。
- * 调度配置（scheduleConfigJson）、启用开关与错误列不被本函数覆盖；
- * 失败路径的错误信息用 recordSourceFailure 单独登记。
+ * 保证源行存在（`notices.source_id` 的外键前提）。**不碰健康、计数与错误列** ——
+ * 「本轮先乐观标健康、失败再翻回来」就是假绿窗口的来源。
  */
-export async function upsertSource(input: UpsertSourceInput): Promise<void> {
+export async function registerSource(input: SourceIdentity): Promise<void> {
   const db = await getDb();
-  const existing = await db
-    .select({ id: sources.id })
-    .from(sources)
-    .where(eq(sources.id, input.id))
-    .limit(1);
-
-  if (existing.length > 0) {
-    await db
-      .update(sources)
-      .set({
-        name: input.name,
-        adapterType: input.adapterType,
-        healthy: input.healthy ? 1 : 0,
-        ...(input.lastSuccessAt !== undefined ? { lastSuccessAt: input.lastSuccessAt } : {}),
-      })
-      .where(eq(sources.id, input.id));
-    return;
-  }
-
-  await db.insert(sources).values({
-    id: input.id,
-    name: input.name,
-    adapterType: input.adapterType,
-    scheduleConfigJson: '{}',
-    healthy: input.healthy ? 1 : 0,
-    lastSuccessAt: input.lastSuccessAt ?? null,
-  });
+  if (await findSourceRow(db, input.id)) return;
+  await db.insert(sources).values({ ...input, healthy: 1, consecutiveFailures: 0 });
 }
 
-/** 抓取失败路径：登记不健康状态与最近一次错误信息 / 时间（成功不清空错误列）。 */
-export async function recordSourceFailure(input: {
-  id: string;
-  name: string;
-  adapterType: string;
-  error: string;
-  now: string;
-}): Promise<void> {
+/** 本轮抓取成功：判健康、连续失败计数归零、清掉当前故障态的错误信息，并记成功时间。 */
+export async function recordSourceSuccess(
+  input: SourceIdentity & { now: string },
+): Promise<void> {
   const db = await getDb();
-  const existing = await db
-    .select({ id: sources.id })
-    .from(sources)
-    .where(eq(sources.id, input.id))
-    .limit(1);
-
-  if (existing.length > 0) {
-    await db
-      .update(sources)
-      .set({
-        name: input.name,
-        adapterType: input.adapterType,
-        healthy: 0,
-        lastErrorMessage: input.error,
-        lastErrorAt: input.now,
-      })
-      .where(eq(sources.id, input.id));
-    return;
-  }
-
-  await db.insert(sources).values({
-    id: input.id,
+  const patch = {
     name: input.name,
     adapterType: input.adapterType,
-    scheduleConfigJson: '{}',
-    healthy: 0,
+    healthy: 1,
+    consecutiveFailures: 0,
+    lastSuccessAt: input.now,
+    lastErrorMessage: null,
+    lastErrorAt: null,
+  };
+  if (await findSourceRow(db, input.id)) {
+    await db.update(sources).set(patch).where(eq(sources.id, input.id));
+    return;
+  }
+  await db.insert(sources).values({ id: input.id, ...patch });
+}
+
+/**
+ * 本轮抓取失败：连续失败计数 +1，并按 `isSourceUnhealthy` 的门槛决定这一行是否判红。
+ *
+ * @param immediateUnhealthy 数据质量降级（issue #51 的「一轮内过半条目失败」）走这条：
+ *   它不是抖动而是事件，必须当场判红，于是把计数钳到门槛而不是留在线上慢慢数。
+ * @returns 新的计数、是否判红，以及**上一次的**错误原文 —— 后者用来把连续故障的来路
+ *   写进这一封邮件：错误列现在成功即清，跨轮的历史只能这样带一句。
+ */
+export async function recordSourceFailure(
+  input: SourceIdentity & { error: string; now: string; immediateUnhealthy?: boolean },
+): Promise<{
+  consecutiveFailures: number;
+  unhealthy: boolean;
+  previousErrorMessage: string | null;
+}> {
+  const db = await getDb();
+  const existing = await findSourceRow(db, input.id);
+  const counted = (existing?.consecutiveFailures ?? 0) + 1;
+  const consecutiveFailures =
+    input.immediateUnhealthy === true
+      ? Math.max(counted, SOURCE_UNHEALTHY_AFTER_CONSECUTIVE_FAILURES)
+      : counted;
+  const unhealthy = isSourceUnhealthy(consecutiveFailures);
+
+  const patch = {
+    name: input.name,
+    adapterType: input.adapterType,
+    healthy: unhealthy ? 0 : 1,
+    consecutiveFailures,
     lastErrorMessage: input.error,
     lastErrorAt: input.now,
-  });
+  };
+  if (existing) {
+    await db.update(sources).set(patch).where(eq(sources.id, input.id));
+  } else {
+    await db.insert(sources).values({ id: input.id, ...patch });
+  }
+  return { consecutiveFailures, unhealthy, previousErrorMessage: existing?.lastErrorMessage ?? null };
 }
 
 /** 全量源列表（管理后台源健康看板用），按源 ID 排序保证展示稳定。 */
@@ -123,22 +142,11 @@ function toSourceRecord(row: typeof sources.$inferSelect): SourceRecord {
     id: row.id,
     name: row.name,
     adapterType: row.adapterType,
-    scheduleConfig: safeParseJsonObject(row.scheduleConfigJson),
     healthy: row.healthy === 1,
+    consecutiveFailures: row.consecutiveFailures,
     lastSuccessAt: row.lastSuccessAt,
     lastErrorMessage: row.lastErrorMessage,
     lastErrorAt: row.lastErrorAt,
     enabled: row.enabled === 1,
   };
-}
-
-function safeParseJsonObject(text: string): Record<string, unknown> {
-  try {
-    const parsed = JSON.parse(text) as unknown;
-    return typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)
-      ? (parsed as Record<string, unknown>)
-      : {};
-  } catch {
-    return {};
-  }
 }

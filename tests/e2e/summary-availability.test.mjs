@@ -21,7 +21,8 @@ import { noticeItems } from './helpers/html.mjs';
  *     不显示「生成中」；**已有摘要照常渲染**（绝不隐藏库内内容）；worker 整轮跳过
  *     摘要任务并说明原因（不再每轮记一条「任务失败」）；
  *   - 端口可用（或 LLM_PROVIDER=stub，见 npc-pipeline / summary-pipeline 场景）
- *     → 「生成中」占位与五段式摘要照常。
+ *     → 「生成中」占位与五段式摘要照常；**已截止条目走 #58 新增的「未生成摘要」分支**
+ *     （它们被摘要任务的入队条件排除，说「生成中」就是承诺一件不会发生的事）。
  *
  * 两阶段用同一个库：先用 stub 跑一轮（生成摘要），再把端口切成「glm 缺 key」，
  * 断言两种条目（已有摘要 / 未生成摘要）在不可用状态下的表现。
@@ -113,16 +114,22 @@ after(async () => {
 });
 
 describe('issue #22：LLM 端口未配置时的摘要区门控', () => {
-  it('端口可用时：已截止条目显示「生成中」占位（进行时状态是可信的）', async () => {
+  it('端口可用 + 已截止：显示「未生成摘要」，不再谎称「生成中」（issue #58）', async () => {
     useAvailableLlm();
     const list = await (await fetch(`${app.url}/`)).text();
     const detail = await (await fetch(`${app.url}${hrefOf(list, CLOSED_TITLE)}`)).text();
 
-    assert.match(detail, /data-testid="summary-placeholder"/, '端口可用时应显示占位');
-    assert.ok(!detail.includes('summary-unavailable'), '端口可用时不应出现「暂未启用」说明');
+    assert.match(detail, /data-testid="summary-not-generated"/, '已截止且不入库的条目应有专属说明块');
+    assert.match(detail, /未生成摘要/);
+    assert.ok(
+      !detail.includes('摘要生成中'),
+      '进行时状态不可信的场景正是这一类：入队条件永不放行',
+    );
+    assert.ok(!detail.includes('summary-placeholder'), '不复用占位块（它会带回「生成中」）');
+    assert.ok(!detail.includes('summary-unavailable'), '端口可用时不该说「暂未启用」');
   });
 
-  it('端口不可用：未生成摘要的条目显示「暂未启用」说明而非「生成中」', async () => {
+  it('端口不可用优先于「已截止不生成」：仍显示「暂未启用」说明', async () => {
     useUnavailableLlm();
     const list = await (await fetch(`${app.url}/`)).text();
     const detail = await (await fetch(`${app.url}${hrefOf(list, CLOSED_TITLE)}`)).text();
@@ -134,6 +141,9 @@ describe('issue #22：LLM 端口未配置时的摘要区门控', () => {
       !/本站正在为本条公示生成结构化 AI 摘要/.test(detail),
       '不应出现「正在生成」的进行时文案',
     );
+    // 优先级本身也要钉住：这条条目同时满足「端口不可用」与「已截止」，界面只该说前者
+    // （端口没配时讨论「这条会不会入队」没有意义）—— 见 summaryDisplayState 的顺序。
+    assert.ok(!detail.includes('summary-not-generated'), '不可用一档优先于未生成一档');
   });
 
   it('端口不可用：已有摘要的条目照常渲染五段式摘要（绝不隐藏库内内容）', async () => {
@@ -158,12 +168,14 @@ describe('issue #22：LLM 端口未配置时的摘要区门控', () => {
     );
   });
 
-  it('配置补齐后自动恢复：无需改代码，占位重新出现', async () => {
+  it('配置补齐后自动恢复：无需改代码，说明块退回各自的真实状态', async () => {
     useAvailableLlm();
     const list = await (await fetch(`${app.url}/`)).text();
     const detail = await (await fetch(`${app.url}${hrefOf(list, CLOSED_TITLE)}`)).text();
 
-    assert.match(detail, /data-testid="summary-placeholder"/, '端口恢复后占位回归');
-    assert.ok(!detail.includes('summary-unavailable'));
+    assert.ok(!detail.includes('summary-unavailable'), '端口恢复后「暂未启用」说明应消失');
+    // #58 之后恢复到的不是「生成中」，而是这条自己的真实状态：已截止 → 不会再生成
+    assert.match(detail, /data-testid="summary-not-generated"/);
+    assert.ok(!detail.includes('摘要生成中'), '门控恢复不等于给已截止条目重新承诺进行时');
   });
 });

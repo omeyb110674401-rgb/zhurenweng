@@ -21,6 +21,8 @@ import {
  *   避免出现「标题下面没有内容」（issue #55 实测线上有过一条空的「影响谁」）。
  * - pending / failed_review：占位块（复用 data-testid="summary-placeholder" 契约），
  *   failed_review 额外标注「待人工复核」。
+ * - 已截止且从未入队：「未生成摘要」说明块（issue #58）——「生成中」是对不会发生之事的
+ *   承诺，这块把它换成实话，并把读者指向同一页上不依赖大模型的两块内容。
  * - 「AI 生成，仅供参考，以官方原文为准」标注在卡片头部显著位置（合规硬性要求）。
  * - 卡片底部明写条文在哪：附件与官方原文 —— 这是本次重构的落脚点，
  *   与其让摘要装作总结了条文，不如把读者准确地送到条文所在。
@@ -189,6 +191,28 @@ export function SummaryUnavailable(): ReactNode {
       </div>
       <p className="summary-note">
         本站的 AI 结构化解读尚未启用（未配置大模型端口），本条不提供机器生成摘要。
+        上方的「结构化速读」与「意见提交方式」由程序从官方原文逐字摘录、不依赖大模型；
+        完整内容请以官方原文为准。
+      </p>
+    </section>
+  );
+}
+
+/**
+ * 已截止、且不会再生成摘要（issue #58）：本站只为公示期内的条目生成摘要。
+ * 标签刻意用「未生成」而不是「生成中」—— 后者承诺一件不会发生的事。
+ */
+export function SummaryNotGenerated(): ReactNode {
+  return (
+    <section className="summary-slot" data-testid="summary-not-generated">
+      <div className="summary-head">
+        <span className="summary-tag">AI 摘要</span>
+        <span className="summary-pending" data-testid="summary-not-generated-label">
+          未生成摘要
+        </span>
+      </div>
+      <p className="summary-note">
+        本条公示已截止，本站的 AI 结构化解读只覆盖公示期内的条目，因此这一条没有摘要，也不会再补生成。
         上方的「结构化速读」与「意见提交方式」由程序从官方原文逐字摘录、不依赖大模型；
         完整内容请以官方原文为准。
       </p>

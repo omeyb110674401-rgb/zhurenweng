@@ -3,6 +3,7 @@ import { getDb } from '../client.ts';
 import { notices } from '../schema/sqlite.ts';
 import type { NoticeStatus } from '../types.ts';
 import type { SummaryStatus } from '../../lib/summary-content.ts';
+import { SUMMARY_NOT_SUMMARIZED_STATUS } from '../../lib/summary-display.ts';
 
 /**
  * AI 摘要的仓库层（issue #4）—— notices 表摘要列（ai_summary_json /
@@ -24,6 +25,10 @@ export interface PendingSummaryTarget {
  * 扫描待摘要条目：摘要 JSON 为空、状态为 pending、且公示未截止。
  * 已截止条目不再生成摘要（issue #4）；failed_review 由人工复核处理，
  * worker 不再自动重试。
+ *
+ * 排除的那个状态值与详情页「未生成摘要」的文案门 import 同一个常量（issue #58）：
+ * 「这条会不会被生成」只能有一个答案。写两份的话，界面就会对着一队永远排不到
+ * 生成机会的条目说「摘要生成中」。
  */
 export async function listNoticesForSummary(limit = 50): Promise<PendingSummaryTarget[]> {
   const db = await getDb();
@@ -40,7 +45,7 @@ export async function listNoticesForSummary(limit = 50): Promise<PendingSummaryT
       and(
         isNull(notices.aiSummaryJson),
         eq(notices.summaryStatus, 'pending'),
-        ne(notices.status, 'closed'),
+        ne(notices.status, SUMMARY_NOT_SUMMARIZED_STATUS),
       ),
     )
     .orderBy(asc(notices.fetchedAt), asc(notices.id))

@@ -73,6 +73,14 @@ export interface SourceFetchOptions {
    * 不带 cookie 时 fetch 的自动重定向会陷入自我循环。仅对本源生效。
    */
   cookieChallenge?: boolean;
+  /**
+   * 本源单次请求的超时预算（毫秒），未声明时用全局 `CRAWL_TIMEOUT_MS`。
+   *
+   * 为什么按源而不是全局放大：人大网的列表接口偶发比别的源慢一个量级（issue #58
+   * 线上实测：`The operation was aborted due to timeout`），把全局值抬到能容下它，
+   * 等于让其余九个源的每一轮都多等那么久 —— 慢是这一个站的属性，不该由全站买单。
+   */
+  timeoutMs?: number;
 }
 
 export interface SourceAdapter {

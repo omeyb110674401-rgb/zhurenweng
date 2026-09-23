@@ -1,5 +1,6 @@
 import type { SourceRecord } from '@/db/types';
 import type { ReviewQueueItem } from '@/db/repo/summaries';
+import { SOURCE_UNHEALTHY_AFTER_CONSECUTIVE_FAILURES } from '@/lib/source-health';
 
 /**
  * 管理后台的 HTML 渲染（issue #12）。
@@ -172,7 +173,18 @@ function sourceToggleForm(source: SourceRecord): string {
   ].join('');
 }
 
-/** 源健康看板：每源最近成功抓取时间、最近错误信息与时间、启用状态。 */
+/**
+ * 源健康看板：每源连续失败轮数、最近成功抓取时间、当前故障的错误信息与时间、启用状态。
+ *
+ * 「连续失败」这一列是告警降噪的补偿（issue #58）：首轮抖动不再发邮件，看板上必须
+ * 看得见「已经坏了一次」，否则降噪就变成漏报。
+ */
+function consecutiveFailuresCell(count: number): string {
+  if (count <= 0) return DASH;
+  if (count >= SOURCE_UNHEALTHY_AFTER_CONSECUTIVE_FAILURES) return `连续 ${count} 轮`;
+  return `连续 ${count} 轮（满 ${SOURCE_UNHEALTHY_AFTER_CONSECUTIVE_FAILURES} 轮判异常）`;
+}
+
 export function renderSourceBoard(sources: SourceRecord[]): string {
   const rows = sources
     .map(
@@ -180,6 +192,7 @@ export function renderSourceBoard(sources: SourceRecord[]): string {
         `<tr data-testid="source-health-row" data-source-id="${escapeHtml(source.id)}">`,
         `<th scope="row">${escapeHtml(source.name)}<br><span class="mono">${escapeHtml(source.id)}</span></th>`,
         `<td data-field="status">${source.healthy ? '健康' : '异常'}</td>`,
+        `<td data-field="recent-failures">${consecutiveFailuresCell(source.consecutiveFailures)}</td>`,
         `<td data-field="enabled">${source.enabled ? '启用' : '停用'}</td>`,
         `<td data-field="last-success">${formatTimestamp(source.lastSuccessAt)}</td>`,
         `<td data-field="last-error">${source.lastErrorMessage ? escapeHtml(source.lastErrorMessage) : DASH}</td>`,
@@ -192,14 +205,14 @@ export function renderSourceBoard(sources: SourceRecord[]): string {
   return [
     '<section aria-labelledby="board-title">',
     '<h2 id="board-title">源健康看板</h2>',
-    '<p class="muted">每个抓取源的最近成功时间、最近错误与启用状态；停用的源会被抓取任务跳过。</p>',
+    '<p class="muted">每个抓取源的连续失败轮数、最近成功时间、当前故障与启用状态；停用的源会被抓取任务跳过。</p>',
     sources.length === 0
       ? '<div class="muted" data-testid="source-board-empty">尚无源登记记录，抓取任务运行一次后出现。</div>'
       : [
           '<div class="table-wrap">',
           '<table data-testid="source-health-board">',
-          '<thead><tr><th scope="col">源</th><th scope="col">健康</th><th scope="col">启用</th>',
-          '<th scope="col">最近成功抓取</th><th scope="col">最近错误信息</th><th scope="col">最近错误时间</th><th scope="col">操作</th></tr></thead>',
+          '<thead><tr><th scope="col">源</th><th scope="col">健康</th><th scope="col">连续失败</th><th scope="col">启用</th>',
+          '<th scope="col">最近成功抓取</th><th scope="col">当前错误信息</th><th scope="col">错误时间</th><th scope="col">操作</th></tr></thead>',
           `<tbody>${rows}</tbody>`,
           '</table>',
           '</div>',

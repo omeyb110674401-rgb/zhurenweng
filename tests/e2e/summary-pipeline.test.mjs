@@ -158,11 +158,16 @@ describe('issue #4：AI 摘要器 → 五段式摘要展示（失败重试与成
     assert.ok(!openHtml.includes('data-testid="ai-summary"'), '失败路径不渲染摘要卡片');
     assert.ok(!openHtml.includes('【stub】'), '失败路径无摘要内容');
 
-    // 已截止条目不参与摘要：仍是普通「摘要生成中」占位（无待复核标注）
+    // 已截止条目不参与摘要：说明块直说「未生成摘要」（issue #58）。此前这里挂着
+    // 「摘要生成中」，而那批条目（线上实测 108 条）按入队条件永远不会被生成。
     const closedId = extractNoticeId(items[2].href);
     const closedHtml = await (await fetch(`${app.url}/notices/${closedId}`)).text();
-    assert.match(closedHtml, /data-testid="summary-placeholder"/);
-    assert.match(closedHtml, /摘要生成中/);
+    assert.match(closedHtml, /data-testid="summary-not-generated"/);
+    assert.match(closedHtml, /未生成摘要/);
+    assert.ok(
+      !closedHtml.includes('摘要生成中'),
+      '已截止条目不再被承诺「生成中」，也不该复用占位块',
+    );
     assert.ok(!closedHtml.includes('待人工复核'), '已截止条目未被尝试摘要');
   });
 

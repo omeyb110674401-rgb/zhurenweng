@@ -154,6 +154,29 @@ export function createFixtureServer({ fixturesDir, host = '127.0.0.1', port = 0 
         res.end();
         return;
       }
+      // 测试专用：`/__stall?ms=<毫秒>[&before=1]` —— 挂起 ms 毫秒才结束响应
+      // （issue #58）。默认**先发 headers 与半截正文再停**，这是超时最难覆盖的一种停摆：
+      // 表头已到、readable stream 永不结束，只有把 signal 约束到读循环上才掐得断。
+      // `before=1` 则连表头都不发。客户端断开后本响应即销毁，不会留悬挂的定时器。
+      // 真实源站没有这种路由，它只服务于「慢源会不会把一轮抓取拖死」的用例。
+      if (segments[0] === '__stall') {
+        const ms = Number(url.searchParams.get('ms') ?? '0');
+        const beforeHeaders = url.searchParams.get('before') === '1';
+        const wait = Number.isFinite(ms) && ms > 0 ? ms : 0;
+        if (!beforeHeaders) {
+          res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
+          res.write('<html><body>已到达的半截正文');
+        }
+        const timer = setTimeout(() => {
+          if (beforeHeaders) res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
+          res.end('后半段永远不来，除非客户端有自己的超时');
+        }, wait);
+        req.on('close', () => {
+          clearTimeout(timer);
+          res.destroy();
+        });
+        return;
+      }
       // 目录式接口路径（真实站点以 …/flca/<id>/info/ 形式提供 JSON 数据）→
       // 目录下的 index.json / index.html；其余路径按文件精确匹配。
       const candidates = url.pathname.endsWith('/')

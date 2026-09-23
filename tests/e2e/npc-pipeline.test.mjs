@@ -18,7 +18,7 @@ import { noticeItems } from './helpers/html.mjs';
  *   → 触发抓取（真实 worker 进程，WORKER_ONCE=1，SOURCES_FIXTURE_BASE 注入 fixture 源站）
  *   → 列表页：按截止日期升序（即将截止在前）+ 倒计时 + 状态徽标
  *   → 详情页：全部字段 + 官方原文链接 + 提意指引 + AI 摘要展示（issue #4：
- *     同轮 worker 内完成摘要；已截止条目保持「摘要生成中」占位）
+ *     同轮 worker 内完成摘要；已截止条目走「未生成摘要」分支，见 issue #58）
  *   → /go/<id>：302 至官方原文且点击计数 +1
  *   → 重复抓取：条目数不变（幂等）
  *
@@ -287,12 +287,17 @@ describe('issue #3：全国人大源 → 入库 → 列表/详情 → 出站跳�
     assert.match(html, /data-testid="summary-quote"/, '摘要附原文引用（可点击跳官方原文）');
     assert.ok(!html.includes('摘要生成中'), '摘要完成后占位消失');
 
-    // 已截止条目不参与摘要（issue #4）：仍显示「摘要生成中」占位
+    // 已截止条目不参与摘要（issue #4）：入队条件永不放行，所以界面不能说「生成中」
+    // （issue #58）。这一条同时钉住「不误伤」的另一半：有摘要的条目永远照常渲染。
     const closedHtml = await (
       await fetch(`${app.url}/notices/${extractNoticeId(hrefOf(extractListItems(listHtml), TITLES.closed))}`)
     ).text();
-    assert.match(closedHtml, /data-testid="summary-placeholder"/, '占位块保留');
-    assert.match(closedHtml, /摘要生成中/);
+    assert.match(closedHtml, /data-testid="summary-not-generated"/, '应显示「未生成摘要」说明块');
+    assert.match(closedHtml, /未生成摘要/);
+    assert.ok(
+      !closedHtml.includes('摘要生成中'),
+      '永不会生成的条目不该被承诺一个不兑现的进行时',
+    );
     assert.ok(!closedHtml.includes('待人工复核'), '已截止条目未被尝试摘要，非待复核状态');
   });
 

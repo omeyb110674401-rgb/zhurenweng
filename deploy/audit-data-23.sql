@@ -49,7 +49,9 @@ from notices
 group by source_id
 order by 无标签 desc;
 
-\echo '=== 7. 摘要状态（AI 端口未配置，应全为 pending 且无 done） ==='
+\echo '=== 7. 摘要状态分布（只看不判：口径见 #4 与 #58） ==='
+-- 「closed 恒为 pending」是 #4 的入队条件带来的既有事实，不是异常（#58 改的是界面文案，
+-- 不改数据）；曾写在这里的「应全为 pending 且无 done」是 AI 端口未配置时的断言，已过期。
 select summary_status, count(*)
 from notices
 group by summary_status

@@ -73,6 +73,12 @@ export const npcLawDraftsAdapter: SourceAdapter = {
   id: 'npc',
   name: '全国人大网·法律草案征求意见',
   listUrl: LIST_URL,
+  /**
+   * 本站接口比其它源慢一个量级（2026-09-23 线上实测：列表请求在 15s 全局预算下抛
+   * `aborted due to timeout`），单独放宽到 30s。刻意**不**抬高全局缺省：那等于让
+   * 其余九个源的每一跳都为这一个站多等一倍时间。
+   */
+  fetch: { timeoutMs: 30_000 },
   /** 本源列表是 JSON 接口，fixture 快照为 list.json（见 fixtures/npc/） */
   listFixturePath: 'list.json',
 
