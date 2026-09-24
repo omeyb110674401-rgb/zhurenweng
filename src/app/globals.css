@@ -1423,6 +1423,18 @@ body {
   color: #166534;
 }
 
+/* 取不到渠道时的说明块（issue #64）：外观刻意与"抽到了"的那块分开 ——
+   同一个绿色标题会让两种相反的事实看起来像同一件事（一条有渠道、一条没有）。
+   中性灰 + 细虚线边框：它说的是"这里缺一样东西"，不是"这里有一样东西"。 */
+.channels-empty {
+  border-style: dashed;
+  background: var(--paper);
+}
+
+.channels-empty .channels-title {
+  color: var(--ink-soft);
+}
+
 .channels-list {
   list-style: none;
   margin: 0;

@@ -52,6 +52,7 @@ const TARGETS = {
   notify: 'worker/jobs/notify-new-notices.ts',
   mail: 'src/lib/mail.ts',
   feed: 'src/lib/feed.ts',
+  channelGuidance: 'src/lib/channel-guidance.ts',
   compose: 'docker-compose.yml',
 };
 
@@ -629,6 +630,48 @@ const CASES = [
     to: '',
     pattern: '条件的说法与地址（issue #63）',
     test: 'tests/unit/home-query.test.mjs',
+  },
+  {
+    label: '有渠道也照样给"我没取到"的说明（页面自相矛盾）',
+    file: 'channelGuidance',
+    from: '  if (input.hasChannels) return null;',
+    to: '',
+    pattern: 'issue #64：channelGuidance 的分支',
+    test: 'tests/unit/channel-guidance.test.mjs',
+  },
+  {
+    label: '正文为空与正文里没句式混成一种（把"读过没找到"说成"没拿到正文"）',
+    file: 'channelGuidance',
+    from: "    reason: input.bodyChars > 0 ? 'not-in-body' : 'no-body',",
+    to: "    reason: 'no-body',",
+    pattern: 'issue #64：channelGuidance 的分支',
+    test: 'tests/unit/channel-guidance.test.mjs',
+  },
+  {
+    label: '影子档（抽到正文没喂摘要）不算可读（读者被阻止去附件里自己找）',
+    file: 'channelGuidance',
+    // 只撤 `read-not-used` 那一半：撤整个 readable 会连"可读时指向附件"一起红，
+    // 钉的就不是影子档这个决定了（片段在文件里首次出现处即判定行，份数行不受影响）
+    from: " || draft.kind === 'read-not-used'",
+    to: '',
+    pattern: 'issue #64：channelGuidance 的分支',
+    test: 'tests/unit/channel-guidance.test.mjs',
+  },
+  {
+    label: '「抽取还没跑到」报成「没有附件」（白删读者一个去处）',
+    file: 'channelGuidance',
+    from: "          : 'unknown';",
+    to: "          : 'none';",
+    pattern: 'issue #64：channelGuidance 的分支',
+    test: 'tests/unit/channel-guidance.test.mjs',
+  },
+  {
+    label: '说明里不说附件份数（"有 3 份附件"退化成"有附件"）',
+    file: 'channelGuidance',
+    from: '        ? draft.files',
+    to: '        ? 0',
+    pattern: 'issue #64：channelGuidance 的分支',
+    test: 'tests/unit/channel-guidance.test.mjs',
   },
 ];
 

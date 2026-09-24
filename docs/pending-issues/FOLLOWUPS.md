@@ -55,7 +55,7 @@
 | #54 | **并列排序的 e2e 用例挡不住该事故** | 已知局限：SQLite 对小规模并列集的排序结果恰好与 `LIMIT` 的 N 无关，摘掉 `asc(notices.id)` 用例仍全绿（实测过）。线上是 PostgreSQL 的有界 top-N 排序才会出问题 → 事故侧验收必须在生产跑 `54-live-site-audit.md` 第四节那段脚本 |
 | #54 | 非索引页继承首页标题 | 未做：`/search`、订阅确认/已确认、退订/已完成、`not-found` 的 `<title>` 都是首页那一条。它们全带 noindex，SEO 无害，只是浏览器标签页与历史记录里分不出是谁。要做就是各补一份 `simplePageMetadata` |
 | #54 | HTTP/2 是否启用 | **未验证**（不是「已确认没开」）：本地 libcurl 不支持 ALPN h2，对照 baidu 也返回 1.1，测不出差异。换 `curl --http2` 以外的工具（或浏览器 DevTools 的 Protocol 列）在生产上确认 |
-| #54 | `npm run lint` 在 main 上是红的 | 未修：`scripts/gen-brand-assets.mjs:111` 两个未使用变量，与 #54 无关。推测 GitHub 账号停用后 CI 再没跑过，所以一直没被发现 —— 属独立的小清理 |
+| #54 | ~~`npm run lint` 在 main 上是红的~~ **已修**（#60 那一轮顺手清掉）：`scripts/gen-brand-assets.mjs:111` 两个未使用变量 + 本轮自己引入的两个未使用导入 | 现在 `npm run lint` 全绿，且已进本轮的门清单（自账号停用以来第一次全绿，此前 CI 从未跑过所以一直没人发现） |
 | #55 | `MAIL_FROM` 的显示名（`主人翁 <地址>`）依赖 compose 对 `.env` 里 `<`、`>`、空格的解析 | 未做契约断言：本轮真实发信成功，但「`docker compose config` 渲染得出来」≠「nodemailer 收到的就是这个值」。要长期依赖显示名，值得在 `deploy-env-contract` 里补一条 |
 | #55 | 任务失败告警邮件未做人为触发 | 未单独验证：与确认邮件共用同一个 `createMailerPort()` 路径（确认邮件已证可发）。等一次自然失败即可，或按需手动制造一次（收件人 `ALERT_EMAIL` 已配） |
 | #55 | 摘要单条最坏占用 4 × 300s ≈ 20 分钟 | 已知权衡：`mimo-v2.5` 实测 87.6s/次，超时从 120s 提到 300s 才不被误判。若境外通道更慢，先降 `SUMMARY_MAX_RETRIES` 或换 8.2s 档的 `glm-5.3-flash`，都是改 `.env` |
@@ -63,6 +63,7 @@
 | #56 | ~~B 路线（解析附件把条文补进来）~~ **已按 D 路线实现**，见 `57-attachment-draft-text.md` | 当时列的三道障碍，有两道被后续实测推翻或降级：① miit 主机 403 **不是无解** —— 换到详情页 origin 再取即通（生产实测 `blocked` 归零、miit 14 份里 10 份 ok），"纯 HTTP 无解"这个结论只试了同主机换头换 IP；② 老式 `.doc` 要单独判型，但没成为吞吐瓶颈；③「附件不保证含正文」是真的，按文件名打分 + 400 字门槛处理（10 行落 `no_draft_text`、1 行 `too_large`） |
 | #59 → #57 | `ATTACHMENT_TEXT` 缺省已走完一次往返：`on`（无调用者 ⇒ 幽灵旋钮）→ `shadow`（#59 收回真生效档）→ `on`（#57 第 5 步接线后改回） | 三处一致性由 `deploy-env-contract` 的单测绑死（只改一处就红），两档产出差异由 `tests/e2e/summary-draft-input.test.mjs` 钉住。剩下的不是代码问题：生产 `.env` 仍写着 `shadow`，翻 `on` 与本轮代码属同一次部署（**需授权**） |
 | #59 | **备份只有本地一份**：`daily-backup.sh` 每天导出并**真恢复进临时库校验** 6 项计数，产物落在同一台机器的 `/var/backups/zhurenweng/`（保留 7 份） | 待异地第二份：`workbench exec` 输出通道不适合传 MB 级文件，要先定托管/对象存储方向（与本文「GitHub 账号处置」那一行是同一个决策） |
+| #64 | **提交方式空态占比未测**：本地没有生产数据，不知道多少条 open 条目会落到新的"为什么没取到"说明块 | 部署后跑一次只读核对（判据与页面同源：`buildNoticeBrief(...).channels.length === 0` 且摘要无渠道）。低于 5% 则本刀只是收尾 polish；高于 30% 说明真正的问题在**抽取句式覆盖面**，下一步该按空态条目的真实写法补 `notice-brief.ts` 的规则，而不是继续加说明 |
 
 ## 三、有意不做（by design，别当成遗漏）
 

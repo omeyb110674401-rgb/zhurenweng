@@ -19,8 +19,8 @@ import { noticeItems, cellNumber, stripSsrComments as stripComments } from './he
  *
  * - LLM 端口不可用时：页面仍要给出原文注明的邮箱 / 在线入口 / 通信地址，且逐条带
  *   原文上下文；速读卡要明确标注「非 AI 生成」（不能让读者误以为是模型输出）；
- * - 抽不到渠道的条目：整块不渲染，分步指引保留通用文案——**不编**一条「通常可通过
- *   电子邮件提出」凑数；
+ * - 抽不到渠道的条目：说明「为什么没有」（issue #64 起；此前是一片沉默，读者会读成
+ *   「这条不接受意见」），但**不编**一条「通常可通过电子邮件提出」凑数；
  * - 已有 AI 摘要时：速读卡让位（五段式已覆盖），但提交方式照常渲染——它是原文原句，
  *   比模型叙述更该待在行动位置。
  *
@@ -249,13 +249,19 @@ describe('issue #27：无标点连排的渠道也能逐条抽出（工业和信�
   });
 });
 
-describe('issue #27：抽不到渠道时不编造', () => {
-  it('正文未取到的条目（未知模板）：渠道块不渲染，指引保留通用文案', async () => {
+describe('issue #27（issue #64 改了空态表现）：抽不到渠道时不编造', () => {
+  it('正文未取到的条目（未知模板）：给出"为什么没有"的说明，但不编一条渠道', async () => {
     useUnavailableLlm();
     const detail = await detailOf(UNKNOWN_TEMPLATE_TITLE);
 
-    assert.ok(!detail.includes('submission-channels'), '无渠道时不应渲染该块');
-    assert.match(detail, /通常可通过在线表单、电子邮件或信函提出/);
+    assert.match(detail, /data-testid="submission-channels-empty"/, '空态要说明原因，不再一片沉默');
+    assert.ok(
+      !/data-testid="submission-channel"[^>]*>/.test(detail),
+      '仍然不许出现任何一条编造的渠道',
+    );
+    // 泛泛猜测文案是 #64 清掉的对象：它把"本站没取到"说成"通常都可以…"，读者无从判断
+    assert.ok(!detail.includes('通常可通过在线表单、电子邮件或信函提出'), '不应回退到通用猜测');
+    assert.match(detail, /data-testid="empty-channels-official-link"/, '要把读者准确指向官方原文');
     // 抽不到渠道也不该让页面崩：摘要区说明照常在
     assert.match(detail, /data-testid="summary-unavailable"/);
   });

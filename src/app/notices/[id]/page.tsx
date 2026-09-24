@@ -10,6 +10,7 @@ import { Countdown, StatusBadge, formatDate } from '@/app/_lib/notice-display';
 import { NoticeBriefView, SubmissionChannels } from '@/app/_lib/notice-brief-view';
 import { SummaryNotGenerated, SummaryPlaceholder, SummaryUnavailable, SummaryView } from '@/app/_lib/summary-view';
 import { buildNoticeBrief, mergeSubmissionChannels } from '@/lib/notice-brief';
+import { channelGuidance } from '@/lib/channel-guidance';
 import { parseQuotedSummary } from '@/lib/summary-content';
 import { summaryDisplayState } from '@/lib/summary-display';
 import { buildNoticeJsonLd, serializeJsonLd } from '@/lib/notice-jsonld';
@@ -133,6 +134,13 @@ export default async function NoticeDetailPage({ params }: NoticeDetailPageProps
       ? (parseQuotedSummary(safeParseJson(summaryInfo.aiSummaryJson))?.channels ?? [])
       : [],
   );
+  // 取不到渠道时**为什么**取不到（issue #64）：判据与「条文在哪」同一份附件报告，
+  // 页面只按结论选文案 —— 空着不说话会被读成「这条不接受意见」，而那不是事实。
+  const channelAdvice = channelGuidance({
+    hasChannels: submissionChannels.length > 0,
+    bodyChars: (notice.bodyText ?? '').length,
+    attachmentReport: draftReport,
+  });
   // 结构化数据（issue #39）：与 metadata 用同一份摘要，避免两处描述分叉。
   const jsonLd = serializeJsonLd(
     buildNoticeJsonLd({
@@ -228,8 +236,9 @@ export default async function NoticeDetailPage({ params }: NoticeDetailPageProps
             去官方渠道提意见
           </a>
           {/* 提交方式（issue #27）：原文里写着的具体渠道。放在按钮旁——读者点了
-              按钮要跳走，此处先给「跳过去之后往哪儿提」。取不到时整块不渲染。 */}
-          <SubmissionChannels channels={submissionChannels} />
+              按钮要跳走，此处先给「跳过去之后往哪儿提」。取不到时不再留白，
+              而是说明为什么取不到（issue #64），仍然不编一条凑数。 */}
+          <SubmissionChannels channels={submissionChannels} guidance={channelAdvice} url={notice.url} />
           <div className="how-to" data-testid="how-to-comment">
             <p className="how-to-title">分步提意指引</p>
             <ol>
@@ -242,7 +251,7 @@ export default async function NoticeDetailPage({ params }: NoticeDetailPageProps
               <li>
                 {submissionChannels.length > 0
                   ? '本公示已在原文中注明具体提交方式（见上方「意见提交方式」），按其办理；建议附上具体条款与修改建议。'
-                  : '按官方页面指引提交意见：通常可通过在线表单、电子邮件或信函提出，建议附上具体条款与修改建议。'}
+                  : '到官方原文页面上找「反馈方式 / 意见反馈」那一段并按其办理（上方已说明本站为什么没取到渠道）；建议附上具体条款与修改建议。'}
               </li>
               <li>截止日期前提交的意见才会被纳入汇总，请留意页面上的截止时间。</li>
             </ol>

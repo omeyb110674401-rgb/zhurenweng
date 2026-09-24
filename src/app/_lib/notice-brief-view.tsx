@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react';
+import type { ChannelGuidance } from '@/lib/channel-guidance';
 import {
   CHANNEL_LABELS,
   hasBriefContent,
@@ -68,9 +69,48 @@ function ChannelItem({ channel }: { channel: NoticeChannel }): ReactNode {
  * 此前这里只有一句泛泛的「通常可通过在线表单、电子邮件或信函提出」——而官方原文
  * 里其实写着具体邮箱、传真与通信地址。把原文的渠道摆出来，是本站从「告诉你要提意见」
  * 走到「告诉你往哪儿提」的关键一步；取不到时整块不渲染，绝不编一条凑数。
+ *
+ * 「绝不编」挡住了瞎编，却留下另一种不诚实：空的时候页面一片沉默，读者分不清
+ * 「原文没写」「本站没抓到正文」「渠道在附件里而附件读不出来」——这三种的行动含义不同
+ * （issue #64）。所以取不到时不再留白，而是把**为什么空**说出来，并把读者准确地指向
+ * 官方原文与附件；仍然不编任何一条具体渠道。
  */
-export function SubmissionChannels({ channels }: { channels: NoticeChannel[] }): ReactNode {
-  if (channels.length === 0) return null;
+export function SubmissionChannels({
+  channels,
+  guidance,
+  url,
+}: {
+  channels: NoticeChannel[];
+  guidance: ChannelGuidance | null;
+  url: string;
+}): ReactNode {
+  if (channels.length === 0) {
+    if (guidance === null) return null;
+    return (
+      <div className="channels channels-empty" data-testid="submission-channels-empty">
+        <p className="channels-title">意见提交方式：本站没能从这一页取到</p>
+        <p className="channels-note">
+          {guidance.reason === 'no-body'
+            ? '本站抓到的这条正文是空的（只取到公告标题与链接），所以无处可找。'
+            : `本站抓到了 ${guidance.bodyChars} 字正文，但里面没有按常见句式写出的邮箱 / 传真 / 通信地址 / 在线入口。`}
+          {guidance.attachment === 'readable'
+            ? `本页有 ${guidance.attachmentFiles} 份附件已抽出正文，提交方式常写在附件正文的通知段里 —— 请看下方附件。`
+            : guidance.attachment === 'unreadable'
+              ? `本页有 ${guidance.attachmentFiles} 份附件，但本站没能读出其中的文字，提交方式可能在附件里。`
+              : guidance.attachment === 'none'
+                ? '这条也没有随文附件，提交方式多半直接写在官方页面的正文里。'
+                : '提交方式也可能写在随文附件里（本站尚未完成这一条的附件抽取）。'}
+        </p>
+        <p className="channels-note">
+          {'本站不替原文猜测或补写渠道，请以'}
+          <a href={url} target="_blank" rel="noopener noreferrer" data-testid="empty-channels-official-link">
+            官方原文页面
+          </a>
+          {'公告正文注明的受理方式为准。'}
+        </p>
+      </div>
+    );
+  }
   const hasSummaryChannel = channels.some((channel) => channel.source === 'summary');
 
   return (
