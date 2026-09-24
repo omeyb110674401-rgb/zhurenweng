@@ -41,6 +41,8 @@ const TARGETS = {
   summarize: 'worker/jobs/summarize-notices.ts',
   noticePage: 'src/app/notices/[id]/page.tsx',
   reminders: 'worker/jobs/send-deadline-reminders.ts',
+  subscription: 'src/lib/subscription.ts',
+  subsRepo: 'src/db/repo/subscriptions.ts',
   mail: 'src/lib/mail.ts',
   compose: 'docker-compose.yml',
 };
@@ -418,10 +420,84 @@ const CASES = [
     pattern: '提醒邮件的档位措辞与实际剩余一致',
     test: 'tests/unit/reminder-stages.test.mjs',
   },
+  {
+    label: '机关匹配退回子串（订「司法部」会收到「司法部办公厅」的条目）',
+    file: 'subscription',
+    from: '    if (subscription.agencies.some((agency) => noticeAgencies.has(agency))) return true;',
+    to: '    if (subscription.agencies.some((agency) => notice.agency.includes(agency))) return true;',
+    pattern: '按参与机关逐个精确相等',
+    test: 'tests/unit/subscription-rules.test.mjs',
+  },
+  {
+    label: 'scope=all 不再生效（订全部的人只收到命中条件的）',
+    file: 'subscription',
+    from: "  if (subscription.scope === 'all') return true;",
+    to: "  if (false) return true;",
+    pattern: 'issue #60 第 2 刀',
+    test: 'tests/e2e/subscription-scope.test.mjs',
+  },
+  {
+    label: '空条件被当成「订全部」（漏填的人会被所有新公示轰炸）',
+    file: 'subscription',
+    from: "  if (!hasAnyRule({ keywords, categories, agencies })) return { ok: false, reason: 'no_rules' };",
+    to: "  if (false) return { ok: false, reason: 'no_rules' };",
+    pattern: 'validateSubscriptionRules：范围与条件的关系是显式的',
+    // 必须指单测：这条判据在**路由**里被调用，而 e2e 跑的是 .next 构建产物 ——
+    // 撤掉源码里的实现，构建产物照旧，测试不会红（规则 1；本条曾经就指错成 e2e 而假绿）。
+    test: 'tests/unit/subscription-rules.test.mjs',
+  },
+  {
+    label: '改订阅时漏写机关规则（重新提交一次就把机关清没）',
+    file: 'subsRepo',
+    from: '    agenciesJson: JSON.stringify(input.agencies),',
+    to: '    agenciesJson: JSON.stringify([]),',
+    pattern: '按参与机关命中',
+    test: 'tests/e2e/subscription-scope.test.mjs',
+  },
 ];
 
 let red = 0;
 const problems = [];
+
+/**
+ * 正在被改写、尚未还原的文件。
+ *
+ * 这个脚本会**动工作区里的源码**，所以"崩了要把源码放回去"不是可选项：
+ * 2026-09-24 就出现过一次——Windows 上写回时撞上 `EBUSY`（子进程还持着文件句柄），
+ * 异常直接掀掉整个循环，工作区里留下一处"撤掉实现"后的假代码。
+ * 那种状态如果被顺手 commit 掉，就是把一个已知缺陷提交进主干，而测试全绿。
+ */
+let pending = null;
+
+function restorePending() {
+  if (pending === null) return;
+  const { file, original } = pending;
+  pending = null;
+  if (readFileSync(file, 'utf8') === original) return;
+  // EBUSY / EMFILE 在这台机器上是瞬时的：等一下再写就好
+  for (let attempt = 1; attempt <= 8; attempt += 1) {
+    try {
+      writeFileSync(file, original);
+      if (readFileSync(file, 'utf8') === original) return;
+    } catch {
+      // 交给下一次重试
+    }
+    Atomics.wait(
+      new Int32Array(new SharedArrayBuffer(4)),
+      0,
+      0,
+      attempt * 250,
+    );
+  }
+  console.error(
+    `\n!! 无法还原 ${file}（多次写回都失败）。工作区现在留着"撤掉实现"后的假代码，`
+    + '先执行 `git checkout -- ' + file + '` 再继续，别把这个状态提交掉。',
+  );
+  process.exitCode = 1;
+}
+
+process.on('exit', restorePending);
+
 for (const testCase of CASES) {
   const file = TARGETS[testCase.file];
   const original = readFileSync(file, 'utf8');
@@ -431,14 +507,22 @@ for (const testCase of CASES) {
     continue;
   }
   writeFileSync(file, original.replace(testCase.from, testCase.to));
-  const run = spawnSync(
-    process.execPath,
-    ['--test', '--test-name-pattern', testCase.pattern, testCase.test],
-    { encoding: 'utf8', timeout: 300_000 },
-  );
-  writeFileSync(file, original);
+  pending = { file, original };
+  let out = '';
+  try {
+    const run = spawnSync(
+      process.execPath,
+      ['--test', '--test-name-pattern', testCase.pattern, testCase.test],
+      { encoding: 'utf8', timeout: 300_000 },
+    );
+    out = `${run.stdout}\n${run.stderr}`;
+    if (run.error) throw run.error;
+  } catch (error) {
+    problems.push(`${testCase.label} —— 跑测试时出错：${error instanceof Error ? error.message : String(error)}`);
+  } finally {
+    restorePending();
+  }
 
-  const out = `${run.stdout}\n${run.stderr}`;
   if (!/\nℹ tests ([1-9]\d*)/.test(out)) {
     problems.push(`${testCase.label} —— 名字模式没匹配到任何测试，这条用例本身是空的`);
   } else if (/\nℹ fail ([1-9]\d*)/.test(out)) {
@@ -447,7 +531,6 @@ for (const testCase of CASES) {
   } else {
     problems.push(`${testCase.label} —— 撤掉实现后测试仍然通过，这条断言没钉住任何东西`);
   }
-  if (original !== readFileSync(file, 'utf8')) problems.push(`${testCase.label} —— 源码没被还原！`);
 }
 
 console.log(`\n撤掉实现后变红 ${red}/${CASES.length}`);
