@@ -174,7 +174,7 @@ describe('issue #53：站点图标、分享图与元数据', () => {
     );
 
     const subscribe = await (await fetch(`${app.url}/subscribe`)).text();
-    assert.match(subscribe, /<title>订阅截止提醒 —— 主人翁<\/title>/);
+    assert.match(subscribe, /<title>订阅公示提醒 —— 主人翁<\/title>/);
     const subscribeDescription = metaContent(subscribe, 'description');
     assert.ok(
       subscribeDescription !== null && subscribeDescription.includes('double opt-in'),

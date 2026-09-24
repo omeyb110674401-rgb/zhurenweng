@@ -256,7 +256,7 @@ export default async function NoticeDetailPage({ params }: NoticeDetailPageProps
             <p className="subscribe-hint">
               不想错过同类公示？
               <Link href="/subscribe" data-testid="subscribe-detail-link">
-                订阅截止提醒
+                订阅公示提醒
               </Link>
               —— 按关键词或领域，在截止前 7 天、3 天各收一封提醒邮件。
             </p>

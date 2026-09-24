@@ -212,7 +212,7 @@ describe('issue #7：订阅 double opt-in → 截止提醒 → 一键退订', ()
     const response = await fetch(`${app.url}/subscribe`);
     assert.equal(response.status, 200);
     const html = await response.text();
-    assert.match(html, /订阅截止提醒/);
+    assert.match(html, /订阅公示提醒/);
     assert.match(html, /action="\/api\/subscriptions"/);
     assert.match(html, /生态环境/, '领域选项应含生态环境');
     assert.ok(!html.includes('subscribe-unavailable-banner'), 'stub 邮件端口可用 → 不显示不可用提示');
