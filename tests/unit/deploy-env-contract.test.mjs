@@ -7,6 +7,7 @@ import { createLlmPort, createMailerPort } from '../../src/lib/ports.ts';
 import { llmReady } from '../../src/lib/llm-availability.ts';
 import { mailerReady } from '../../src/lib/mailer-availability.ts';
 import { resolveSmtpOptions } from '../../src/lib/adapters/smtp-mailer.ts';
+import { attachmentMode } from '../../src/lib/attachment-mode.ts';
 
 /**
  * 单元：部署环境变量契约（compose ↔ .env.example ↔ docs ↔ 代码）。
@@ -429,5 +430,28 @@ describe('构建与部署卫生', () => {
       assert.ok(envVars.has(key), `${key} 应在 .env.example 里声明`);
       assert.ok(webKeys?.has(key), `${key} 应传进 web 容器（限流跑在 web 进程里）`);
     }
+  });
+
+  it('附件档位的三处缺省一致（代码 ↔ .env.example ↔ compose 回退值）', () => {
+    // 为什么单挑这一个变量做三方比对：`on` 的语义是「摘要把附件文本当第二路输入」，而这条
+    // 路径尚未接线（issue #57 第 5 步未完，`attachmentTextFeedsSummary()` 当时零调用者）。
+    // 三处缺省里任何一处单独写 on，操作者改档位就毫无效果 —— 那正是 issue #58 删掉
+    // `sources.schedule_config_json` 时定性的「幽灵旋钮」。缺省只能是真会生效的那一档；
+    // 第 5 步接上后三处一起改回 on（改动面被本条断言绑死，不允许只改一处）。
+    const exampleValue = /^ATTACHMENT_TEXT=(\S*)$/m.exec(envExampleText)?.[1];
+    const composeDefault = /ATTACHMENT_TEXT: \$\{ATTACHMENT_TEXT:-([^}]*)\}/.exec(composeText)?.[1];
+    const saved = process.env.ATTACHMENT_TEXT;
+    let codeDefault;
+    try {
+      delete process.env.ATTACHMENT_TEXT;
+      codeDefault = attachmentMode();
+    } finally {
+      if (saved === undefined) delete process.env.ATTACHMENT_TEXT;
+      else process.env.ATTACHMENT_TEXT = saved;
+    }
+    assert.ok(exampleValue !== undefined, '.env.example 应声明 ATTACHMENT_TEXT');
+    assert.ok(composeDefault !== undefined, 'compose 应给 ATTACHMENT_TEXT 一个 :- 回退值');
+    assert.equal(exampleValue, codeDefault, '.env.example 写的档位与代码缺省不一致');
+    assert.equal(composeDefault, codeDefault, 'compose 的 :- 回退值与代码缺省不一致');
   });
 });

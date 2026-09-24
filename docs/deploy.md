@@ -201,8 +201,18 @@ docker compose run --rm -e WORKER_ONCE=1 worker npm run worker
 - **限流阈值**（issue #52）：`SUBSCRIBE_RATE_LIMIT_PER_HOUR`（缺省 10）、
   `ADMIN_LOGIN_RATE_LIMIT_PER_HOUR`（缺省 30），单位次/小时，按客户端 IP 的固定窗口；
   计数在**进程内存**里，只对单实例部署有效（多副本时实际阈值 = 设定值 × 副本数）
-- **备份**：卷 `db-data`、`meili-data`（`caddy-data` 建议一并备份，含证书私钥）；
-  `docker compose exec db pg_dump -U zhurenweng zhurenweng > backup.sql`
+- **备份（每天自动，2026-09-24 起）**：`deploy/daily-backup.sh` 由 root 的 crontab 每天
+  19:30 UTC（北京 03:30）跑一次，产物在 `/var/backups/zhurenweng/`，保留 7 份。
+  它不只是导出：每天把那份归档**真的恢复进临时库** `zw_backup_verify`，比对 6 项关键计数
+  （条目数 / 有摘要数 / 附件行数 / 已抽字数量 / 订阅数 / 源数），对不上就非零退出 ——
+  **备份没验证过 = 没有备份**。日志在 `/var/log/zhurenweng-backup.log`。
+  - 安装（一次性）：`crontab -l 2>/dev/null | { echo '30 19 * * * /bin/bash /opt/zhurenweng/deploy/daily-backup.sh >> /var/log/zhurenweng-backup.log 2>&1'; cat -; } | crontab -`
+  - 手动补跑：`bash /opt/zhurenweng/deploy/daily-backup.sh`
+  - 为什么必须有：本文件先前只写了一条手工 `pg_dump`，实测结果就是**从没执行过** ——
+    服务器上唯一一份备份停在 2026-09-20，比库旧 4 天且不含附件表（147 万字从未被备份）。
+    卷 `db-data`、`meili-data`（含 `caddy-data` 的证书私钥）仍需整机快照，日备份不替代它
+  - **仍是单点**：备份与库在同一块盘上。第二份副本要等托管/对象存储方案定了再加（异地一份
+    拉不回本地：`workbench exec` 的输出通道不适合传 MB 级文件）
 - **日志**：`docker compose logs -f caddy worker`
 - **排障**：容器健康但域名不通时，先 `curl -I http://127.0.0.1:3000/`（绕过 Caddy 直连 web），
   再 `docker compose logs caddy`（证书失败多为 DNS 未生效或安全组未放行 80）

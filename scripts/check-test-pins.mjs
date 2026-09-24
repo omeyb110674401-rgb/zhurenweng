@@ -36,6 +36,8 @@ const TARGETS = {
   sourcesRepo: 'src/db/repo/sources.ts',
   sourceHealth: 'src/lib/source-health.ts',
   summaryDisplay: 'src/lib/summary-display.ts',
+  attachmentMode: 'src/lib/attachment-mode.ts',
+  compose: 'docker-compose.yml',
 };
 
 const CASES = [
@@ -314,6 +316,30 @@ const CASES = [
     to: "  if (input.summaryStatus === 'pending' && false) {",
     pattern: '已截止且 pending',
     test: 'tests/unit/summary-display.test.mjs',
+  },
+  {
+    label: '附件档位缺省写回 on（幽灵旋钮复活：操作者改它毫无效果）',
+    file: 'attachmentMode',
+    from: "  const value = raw === undefined || raw === '' ? 'shadow' : raw.toLowerCase();",
+    to: "  const value = raw === undefined || raw === '' ? 'on' : raw.toLowerCase();",
+    pattern: '附件档位',
+    test: 'tests/unit/config-guards.test.mjs',
+  },
+  {
+    label: 'shadow 也放开「摘要读」（三档塌成一档，影子轮失去意义）',
+    file: 'attachmentMode',
+    from: "  return rawMode() === 'on';",
+    to: "  return rawMode() !== 'off';",
+    pattern: '附件档位',
+    test: 'tests/unit/config-guards.test.mjs',
+  },
+  {
+    label: 'compose 回退值与代码缺省漂移（只改一处的三方不一致）',
+    file: 'compose',
+    from: '      ATTACHMENT_TEXT: ${ATTACHMENT_TEXT:-shadow}',
+    to: '      ATTACHMENT_TEXT: ${ATTACHMENT_TEXT:-on}',
+    pattern: '附件档位的三处缺省一致',
+    test: 'tests/unit/deploy-env-contract.test.mjs',
   },
 ];
 
