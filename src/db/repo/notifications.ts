@@ -1,4 +1,4 @@
-import { and, eq, gte, inArray, isNotNull } from 'drizzle-orm';
+import { and, gte, inArray, isNotNull } from 'drizzle-orm';
 import { getDb } from '../client.ts';
 import { noticeNotifications, notices } from '../schema/sqlite.ts';
 import type { NoticeRecord, NoticeStatus } from '../types.ts';

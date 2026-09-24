@@ -2,6 +2,7 @@ import Link from 'next/link';
 import { cookies } from 'next/headers';
 import { CATEGORY_OPTIONS } from '@/lib/subscription';
 import { listNoticeAgencies } from '@/db/repo/notices';
+import { findSubscriptionByUnsubscribeToken } from '@/db/repo/subscriptions';
 import { mailerReady } from '@/lib/mailer-availability';
 import { simplePageMetadata } from '@/lib/page-metadata';
 import {
@@ -30,7 +31,7 @@ export const dynamic = 'force-dynamic';
 export const metadata = simplePageMetadata({
   title: '订阅公示提醒',
   description:
-    '按关键词、领域或发布机关订阅政府公示与征求意见稿，也可直接订全部新公示：在截止前 7 天、3 天各收到一封提醒邮件。采用 double opt-in（先确认再生效），每封邮件底部都能一键退订，本站只存邮箱、不建账号。',
+    '按关键词、领域或发布机关订阅政府公示与征求意见稿，也可直接订全部新公示：有新公示收录时收到一封汇总邮件，截止前 7 天、3 天各收到一封提醒邮件。采用 double opt-in（先确认再生效），每封邮件底部都能一键退订，本站只存邮箱、不建账号。',
   path: '/subscribe',
 });
 
@@ -70,6 +71,21 @@ export default async function SubscribePage({ searchParams }: SubscribePageProps
   const mailReady = mailerReady();
   const agencyOptions = mailReady ? await listNoticeAgencies() : [];
 
+  // 「查看或修改我的订阅」：邮件底部的链接带着退订 token（issue #60 第 4 刀）。
+  // 预填用的是**待确认的那份**（如果有）—— 用户上次提交的改动还没生效，
+  // 给他看正式规则会让他以为自己改丢了，于是再改一遍。
+  const token = firstValue(params.token)?.trim() ?? '';
+  const managed = mailReady && token !== '' ? await findSubscriptionByUnsubscribeToken(token) : null;
+  const manageDraft: SubscribeDraft | null = managed
+    ? {
+        email: managed.email,
+        keywords: (managed.pending?.keywords ?? managed.keywords).join(' '),
+        categories: managed.pending?.categories ?? managed.categories,
+        agencies: managed.pending?.agencies ?? managed.agencies,
+        scope: (managed.pending?.scope ?? managed.scope) === 'all' ? 'all' : 'rules',
+      }
+    : null;
+
   return (
     <main id="main-content">
       <nav className="breadcrumb">
@@ -86,9 +102,18 @@ export default async function SubscribePage({ searchParams }: SubscribePageProps
 
       {sent ? (
         <p className="form-banner form-banner-ok" data-testid="subscribe-sent-banner">
-          已收到你的订阅设置：如果该邮箱此前已确认订阅，规则已立即更新（无需再次确认）；
-          如果是新订阅或此前退订过，请查收确认邮件并点击确认链接 —— 确认前订阅不生效，
-          不会收到任何提醒邮件。
+          已收到你的提交：<b>请查收确认邮件并点击确认链接</b> —— 新订阅在确认前不生效；
+          若这是对一个已确认订阅的修改，<b>确认之前本站仍按你原来的规则发送</b>通知与提醒。
+          确认前旧链接会失效，这是正常的：每次提交都换发一个新的确认链接。
+        </p>
+      ) : null}
+      {managed ? (
+        <p className="form-banner form-banner-ok" data-testid="subscribe-manage-banner">
+          {managed.unsubscribedAt !== null
+            ? '这个邮箱已退订。下面的内容是你上次的订阅设置，重新提交并按邮件确认后会重新生效。'
+            : '你正在修改已有订阅。下面的内容是当前生效的设置'
+              + (managed.pending !== null ? '（其中还有一次尚未确认的改动，已一并回填）' : '')
+              + '；提交后需要再点一次确认邮件里的按钮才生效，确认之前仍按原规则发送。'}
         </p>
       ) : null}
       {errorMessage ? (
@@ -98,7 +123,7 @@ export default async function SubscribePage({ searchParams }: SubscribePageProps
       ) : null}
 
       {mailReady ? (
-        <SubscribeFormSection draft={draft} agencyOptions={agencyOptions} />
+        <SubscribeFormSection draft={manageDraft ?? draft} agencyOptions={agencyOptions} />
       ) : (
         <SubscribeUnavailableSection />
       )}

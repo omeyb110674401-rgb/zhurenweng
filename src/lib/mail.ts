@@ -1,4 +1,4 @@
-import type { NoticeRecord, ReminderStage } from '../db/types.ts';
+import type { NoticeRecord, ReminderStage, SubscriptionRules } from '../db/types.ts';
 import type { MailMessage } from './ports.ts';
 import type { RuleMatchableSubscription } from './subscription.ts';
 
@@ -74,6 +74,17 @@ export function noticeDetailUrl(noticeId: string): string {
   return `${appBaseUrl()}/notices/${noticeId}`;
 }
 
+/**
+ * 「查看或修改我的订阅」入口地址（issue #60 第 4 刀）。
+ *
+ * 刻意复用**退订 token**，不新签一类 token：它同样印在每封邮件底部、同样不轮换，
+ * 因此能打开这个页面的人与能退订的人是同一批（= 能读该邮箱的人）—— 能力面没有变宽。
+ * 真正的门槛在别处：改动必须再确认一次才生效，所以"知道某人邮箱"不再等于"能改其订阅"。
+ */
+function manageUrl(unsubscribeToken: string): string {
+  return `${appBaseUrl()}/subscribe?token=${encodeURIComponent(unsubscribeToken)}`;
+}
+
 function rulesText(rules: RuleMatchableSubscription): string {
   const parts: string[] = [];
   if (rules.scope === 'all') return '订阅范围：收录的全部新公示（不限关键词 / 领域 / 机关）';
@@ -83,27 +94,44 @@ function rulesText(rules: RuleMatchableSubscription): string {
   return parts.join('\n');
 }
 
-/** 确认邮件（double opt-in 第一步）：未确认前订阅不生效、不接收任何提醒。 */
+/**
+ * 确认邮件（double opt-in 第一步）：未确认前订阅不生效、不接收任何提醒。
+ *
+ * 带 `pendingRules` 时这是**已确认订阅的一次修改**（issue #60 第 4 刀）：信里显示新规则，
+ * 同时明写「确认之前仍按原规则发送」—— 库里生效的还是旧的那份，说"已更新"就是撒谎。
+ * 两种情况都必须发确认信：不再存在"重复提交直接改生效"这条路。
+ */
 export function buildConfirmationEmail(input: {
   email: string;
   rules: RuleMatchableSubscription;
+  /** 非空 = 这是一次待确认的修改，信里显示的就是这份新规则 */
+  pendingRules?: SubscriptionRules | null;
   confirmToken: string;
   unsubscribeToken: string;
 }): MailMessage {
+  const isUpdate = input.pendingRules !== undefined && input.pendingRules !== null;
+  const shown = isUpdate ? (input.pendingRules as SubscriptionRules) : input.rules;
   const confirm = confirmUrl(input.confirmToken);
   const unsubscribe = unsubscribeUrl(input.unsubscribeToken);
+  const manage = manageUrl(input.unsubscribeToken);
   return {
     to: input.email,
-    subject: '【主人翁】请确认你的公示提醒订阅',
+    subject: isUpdate ? '【主人翁】请确认你的订阅修改' : '【主人翁】请确认你的公示提醒订阅',
     text: [
-      '你（或他人）使用本邮箱在「主人翁」提交了公示提醒订阅：',
+      isUpdate
+        ? '你（或他人）使用本邮箱在「主人翁」提交了订阅修改：'
+        : '你（或他人）使用本邮箱在「主人翁」提交了公示提醒订阅：',
       '',
-      rulesText(input.rules),
+      rulesText(shown),
       '',
-      `请点击下面的链接确认订阅，确认后订阅才生效：`,
+      isUpdate
+        ? '请点击下面的链接确认这次修改。确认之前，本站仍按你原来的规则发送通知与提醒。'
+        : '请点击下面的链接确认订阅，确认后订阅才生效：',
       confirm,
       '',
       `确认前你不会收到任何提醒邮件。如非本人操作，可忽略本邮件或通过下方链接退订。`,
+      `查看或修改我的订阅：`,
+      manage,
       `退订（打开页面后点确认）：`,
       unsubscribe,
       '',
@@ -111,10 +139,14 @@ export function buildConfirmationEmail(input: {
       SITE_FOOTER,
     ].join('\n'),
     html: [
-      '<p>你（或他人）使用本邮箱在「主人翁」提交了公示提醒订阅：</p>',
-      `<p>${escapeHtml(rulesText(input.rules)).replaceAll('\n', '<br>')}</p>`,
-      `<p>请<a href="${confirm}">点击这里确认订阅</a>，确认后订阅才生效；确认前你不会收到任何提醒邮件。</p>`,
-      `<p>如非本人操作，可忽略本邮件，或<a href="${unsubscribe}">退订（打开页面后点确认）</a>。</p>`,
+      isUpdate
+        ? '<p>你（或他人）使用本邮箱在「主人翁」提交了<b>订阅修改</b>：</p>'
+        : '<p>你（或他人）使用本邮箱在「主人翁」提交了公示提醒订阅：</p>',
+      `<p>${escapeHtml(rulesText(shown)).replaceAll('\n', '<br>')}</p>`,
+      isUpdate
+        ? `<p>请<a href="${confirm}">点击这里确认这次修改</a>。<b>确认之前，本站仍按你原来的规则发送通知与提醒。</b></p>`
+        : `<p>请<a href="${confirm}">点击这里确认订阅</a>，确认后订阅才生效；确认前你不会收到任何提醒邮件。</p>`,
+      `<p><a href="${manage}">查看或修改我的订阅</a> · 如非本人操作，可忽略本邮件，或<a href="${unsubscribe}">退订（打开页面后点确认）</a>。</p>`,
       `<p>——<br>${SITE_FOOTER}</p>`,
     ].join('\n'),
     headers: unsubscribeHeaders(input.unsubscribeToken),

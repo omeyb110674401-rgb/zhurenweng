@@ -130,6 +130,14 @@ export type ReminderStage = 'd7' | 'd3';
  */
 export type SubscriptionScope = 'rules' | 'all';
 
+/** 一份订阅规则（issue #60 第 4 刀）：正式列与待确认列共用同一个形状。 */
+export interface SubscriptionRules {
+  keywords: string[];
+  categories: string[];
+  agencies: string[];
+  scope: SubscriptionScope;
+}
+
 export interface SubscriptionRecord {
   id: string;
   /** 仅存储订阅邮箱（PRD 合规姿态），统一小写 */
@@ -142,6 +150,11 @@ export interface SubscriptionRecord {
   agencies: string[];
   /** 订阅范围（issue #60）：'rules' 只收命中条件的；'all' 全部新公示 */
   scope: SubscriptionScope;
+  /**
+   * 待确认的规则改动（issue #60 第 4 刀）：非 null 表示"这个人提交过修改但还没确认"。
+   * 确认前，提醒与通知仍按上面的正式规则发。
+   */
+  pending: SubscriptionRules | null;
   /** false = 待确认 / true = 已确认 */
   confirmed: boolean;
   /** 确认令牌（确认邮件链接） */

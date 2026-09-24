@@ -272,8 +272,13 @@ describe('issue #7：订阅 double opt-in → 截止提醒 → 一键退订', ()
     const { html } = await followGet(`${app.url}/subscribe?sent=1`);
     // 文案对「已订阅（规则已更新）」与「新订阅（已发确认信）」两种分支都成立（issue #52：
     // 区分这两种回复等于给匿名者一个「该邮箱是否已确认订阅」的枚举 oracle）
-    assert.match(html, /已收到你的订阅设置/);
-    assert.match(html, /确认前订阅不生效/);
+    assert.match(html, /data-testid="subscribe-sent-banner"/);
+    assert.match(html, /请查收确认邮件并点击确认链接/);
+    assert.match(html, /新订阅在确认前不生效/);
+    assert.ok(
+      !html.includes('规则已立即更新'),
+      '横幅不能声称"已立即生效"：既违反 double opt-in，也给匿名者一个"该邮箱是否已确认"的枚举 oracle',
+    );
 
     const mails = mailsTo(ALICE);
     assert.equal(mails.length, 1, `应发出 1 封确认邮件，实际 ${JSON.stringify(mails)}`);

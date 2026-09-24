@@ -152,6 +152,15 @@ export const subscriptions = pgTable('subscriptions', {
   agenciesJson: text('agencies_json').notNull().default('[]'),
   /** 订阅范围（issue #60）：'rules' 按条件 / 'all' 全部新公示；空规则不等于「全部」 */
   scope: text('scope').notNull().default('rules'),
+  /**
+   * 待确认的规则改动（issue #60 第 4 刀）：JSON = {keywords, categories, agencies, scope}；
+   * NULL = 没有待确认的改动。已确认订阅者再次提交时新规则先进这里，**确认之后才套用**到
+   * 上面那几列 —— 在此之前提醒与新公示通知仍按旧规则发。
+   * 解的是 FOLLOWUPS #52 挂账的「知道某人的邮箱就能重复提交表单静默改写其订阅」：
+   * 共享密钥模型下唯一真正管用的门槛不是限流，而是让改动必须经一次确认
+   * （确认链接只有能读该邮箱的人点得了）。
+   */
+  pendingRulesJson: text('pending_rules_json'),
   /** 0 = 待确认 / 1 = 已确认（双方言交集内没有 boolean，用 INTEGER 表达） */
   confirmed: integer('confirmed').notNull().default(0),
   /** 订阅确认令牌（确认邮件链接） */

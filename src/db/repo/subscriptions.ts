@@ -2,7 +2,7 @@ import { randomBytes, randomUUID } from 'node:crypto';
 import { and, eq, isNull } from 'drizzle-orm';
 import { getDb } from '../client.ts';
 import { subscriptions } from '../schema/sqlite.ts';
-import type { SubscriptionRecord, SubscriptionScope } from '../types.ts';
+import type { SubscriptionRecord, SubscriptionRules, SubscriptionScope } from '../types.ts';
 
 /**
  * 订阅仓库（issue #7）：double opt-in 的持久化层。
@@ -24,6 +24,7 @@ function toSubscriptionRecord(row: typeof subscriptions.$inferSelect): Subscript
     categories: safeParseArray(row.categoriesJson),
     agencies: safeParseArray(row.agenciesJson),
     scope: row.scope === 'all' ? 'all' : 'rules',
+    pending: parsePendingRules(row.pendingRulesJson),
     confirmed: row.confirmed === 1,
     confirmToken: row.confirmToken,
     unsubscribeToken: row.unsubscribeToken,
@@ -43,12 +44,48 @@ function safeParseArray(text: string): string[] {
   }
 }
 
-/** upsert 结果：created / pending-refreshed / resubscribed 需要发送确认邮件，confirmed-updated 不需要。 */
+/** 解析待确认规则；NULL / 形状不对都当"没有待确认改动"（绝不让脏数据当成生效规则）。 */
+function parsePendingRules(text: string | null): SubscriptionRules | null {
+  if (text === null || text === '') return null;
+  try {
+    const parsed = JSON.parse(text) as unknown;
+    if (typeof parsed !== 'object' || parsed === null) return null;
+    const record = parsed as Record<string, unknown>;
+    const list = (key: string): string[] =>
+      Array.isArray(record[key]) ? (record[key] as unknown[]).map((item) => String(item)) : [];
+    return {
+      keywords: list('keywords'),
+      categories: list('categories'),
+      agencies: list('agencies'),
+      scope: record.scope === 'all' ? 'all' : 'rules',
+    };
+  } catch {
+    return null;
+  }
+}
+
+/** 一份输入的规则部分（正式列与待确认列共用同一份序列化，别写两遍）。 */
+type RulesInput = Pick<UpsertSubscriptionInput, 'keywords' | 'categories' | 'agencies' | 'scope'>;
+
+function serializeRules(rules: RulesInput): string {
+  return JSON.stringify({
+    keywords: rules.keywords,
+    categories: rules.categories,
+    agencies: rules.agencies,
+    scope: rules.scope,
+  });
+}
+
+/** upsert 结果：四种取值都需要发送确认邮件（含已确认订阅的改动）。 */
 export type SubscriptionUpsertOutcome =
   | 'created'
   | 'pending-refreshed'
   | 'resubscribed'
-  | 'confirmed-updated';
+  /**
+   * 已确认订阅改了规则：新规则进待确认列，**必须再确认一次才生效**（issue #60 第 4 刀）。
+   * 旧名字 `confirmed-updated` 描述的是"直接改生效"，那个行为正是要修掉的东西。
+   */
+  | 'confirmed-pending';
 
 export interface UpsertSubscriptionInput {
   email: string;
@@ -110,6 +147,8 @@ export async function upsertSubscriptionRules(input: UpsertSubscriptionInput): P
     id: randomUUID(),
     email: input.email,
     ...ruleColumns(input),
+    // 新订阅没有"上一版规则"要保护：规则直接进正式列，待确认列为空
+    pendingRulesJson: null,
     confirmed: 0,
     confirmToken: newToken(),
     unsubscribeToken: newToken(),
@@ -153,17 +192,27 @@ async function applyRulesToExisting(
   const wasConfirmed = existing.confirmed === 1 && !wasUnsubscribed;
 
   if (wasConfirmed) {
+    // 已确认订阅的改动**不直接生效**：写进待确认列 + 轮换确认 token + 重发确认邮件。
+    // 旧行为是直接改正式列且不发信，于是"知道某人邮箱"就能静默改写其订阅
+    // （FOLLOWUPS #52 挂账）；限流挡不住有意的重复提交，"必须再确认一次"才挡得住。
+    const confirmToken = newToken();
+    const updated = {
+      ...existing,
+      pendingRulesJson: serializeRules(input),
+      confirmToken,
+      updatedAt: nowIso,
+    };
     await db
       .update(subscriptions)
-      .set({ ...ruleColumns(input), updatedAt: nowIso })
+      .set({
+        pendingRulesJson: updated.pendingRulesJson,
+        confirmToken,
+        updatedAt: nowIso,
+      })
       .where(eq(subscriptions.id, existing.id));
     return {
-      subscription: toSubscriptionRecord({
-        ...existing,
-        ...ruleColumns(input),
-        updatedAt: nowIso,
-      }),
-      outcome: 'confirmed-updated',
+      subscription: toSubscriptionRecord(updated),
+      outcome: 'confirmed-pending',
     };
   }
 
@@ -179,6 +228,9 @@ async function applyRulesToExisting(
   const updated = {
     ...existing,
     ...ruleColumns(input),
+    // 待确认 / 已退订的邮箱重新提交：这次的内容就是它要确认的全部内容，
+    // 旧的待套用改动必须清掉，否则会留下一个"下次确认时套用哪份"的歧义。
+    pendingRulesJson: null,
     confirmed: 0,
     confirmToken,
     confirmedAt: null,
@@ -216,13 +268,41 @@ export async function confirmTokenStatus(token: string): Promise<ConfirmTokenSta
   if (token.length === 0) return 'invalid';
   const db = await getDb();
   const rows = await db
-    .select({ confirmed: subscriptions.confirmed, unsubscribedAt: subscriptions.unsubscribedAt })
+    .select({
+      confirmed: subscriptions.confirmed,
+      unsubscribedAt: subscriptions.unsubscribedAt,
+      pendingRulesJson: subscriptions.pendingRulesJson,
+    })
     .from(subscriptions)
     .where(eq(subscriptions.confirmToken, token))
     .limit(1);
   if (rows.length === 0) return 'invalid';
   if (rows[0].unsubscribedAt !== null) return 'unsubscribed';
-  return rows[0].confirmed === 1 ? 'confirmed' : 'confirmable';
+  // 「已确认但有待套用改动」必须仍然算可确认 —— 否则确认页不给按钮，
+  // 用户改的规则永远无法生效（issue #60 第 4 刀新增的这条路径就堵死在这里）。
+  if (rows[0].confirmed === 1 && parsePendingRules(rows[0].pendingRulesJson) === null) {
+    return 'confirmed';
+  }
+  return 'confirmable';
+}
+
+/**
+ * 按退订 token 只读取出订阅（issue #60 第 4 刀：「查看或修改我的订阅」入口预填用）。
+ *
+ * 只读 —— 与 `unsubscribeTokenStatus` 同一条理由：邮件安全网关会预取邮件里的链接，
+ * 打开页面绝不能改数据。token 无效返回 null，页面按"普通订阅页"渲染。
+ */
+export async function findSubscriptionByUnsubscribeToken(
+  token: string,
+): Promise<SubscriptionRecord | null> {
+  if (token.length === 0) return null;
+  const db = await getDb();
+  const rows = await db
+    .select()
+    .from(subscriptions)
+    .where(eq(subscriptions.unsubscribeToken, token))
+    .limit(1);
+  return rows.length === 0 ? null : toSubscriptionRecord(rows[0]);
 }
 
 /** 按确认 token 确认订阅（幂等）；已退订的订阅不可复活，token 不存在返回 invalid。 */
@@ -235,12 +315,29 @@ export async function confirmSubscriptionByToken(token: string): Promise<Confirm
     .where(eq(subscriptions.confirmToken, token))
     .limit(1);
   if (rows.length === 0) return 'invalid';
-  if (rows[0].unsubscribedAt !== null) return 'unsubscribed';
-  if (rows[0].confirmed === 1) return 'confirmed';
+  const row = rows[0];
+  if (row.unsubscribedAt !== null) return 'unsubscribed';
+  const pending = parsePendingRules(row.pendingRulesJson);
+  if (row.confirmed === 1 && pending === null) return 'confirmed';
+
+  // 有待确认改动 ⇒ 确认这一刻才套用（issue #60 第 4 刀）。没有则维持原规则，
+  // 只做首次确认。**已确认 + 有待确认**这一支是关键：它以前会在这里直接 return，
+  // 于是"改规则再确认"永远不生效。
+  const applied = pending ?? {
+    keywords: safeParseArray(row.keywordsJson),
+    categories: safeParseArray(row.categoriesJson),
+    agencies: safeParseArray(row.agenciesJson),
+    scope: row.scope === 'all' ? ('all' as const) : ('rules' as const),
+  };
   await db
     .update(subscriptions)
-    .set({ confirmed: 1, confirmedAt: new Date().toISOString() })
-    .where(eq(subscriptions.id, rows[0].id));
+    .set({
+      ...ruleColumns(applied),
+      pendingRulesJson: null,
+      confirmed: 1,
+      confirmedAt: row.confirmedAt ?? new Date().toISOString(),
+    })
+    .where(eq(subscriptions.id, row.id));
   return 'confirmed';
 }
 

@@ -1,7 +1,6 @@
 import { createMailerPort } from '../../src/lib/ports.ts';
 import { envInt } from '../../src/lib/env-int.ts';
 import { mailerReady, mailerUnavailableReason } from '../../src/lib/mailer-availability.ts';
-import { sendTaskFailureAlert } from '../../src/lib/alerts.ts';
 import {
   MAX_NOTICES_PER_EMAIL,
   buildNewNoticesEmail,

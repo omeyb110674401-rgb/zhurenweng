@@ -108,7 +108,6 @@ function appleMark(size) {
 
 /** 分享卡片：琥珀底 + 两处色块 + 白色文档卡（卡内三条递减横杠）。 */
 function ogCard() {
-  const { width, height } = { width: 1200, height: 630 };
   return h(
     'div',
     {

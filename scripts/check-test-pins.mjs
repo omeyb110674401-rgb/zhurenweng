@@ -480,6 +480,30 @@ const CASES = [
     pattern: '一封都没发出去',
     test: 'tests/e2e/subscription-scope.test.mjs',
   },
+  {
+    label: '订阅改动不再挂待确认（回到"重复提交即静默改写"，FOLLOWUPS #52 的老问题）',
+    file: 'subsRepo',
+    from: '        pendingRulesJson: updated.pendingRulesJson,',
+    to: '        pendingRulesJson: null,',
+    pattern: 'issue #60 第 4 刀',
+    test: 'tests/e2e/subscription-scope.test.mjs',
+  },
+  {
+    label: '确认时不套用待确认规则（用户点了确认，改的东西永远不生效）',
+    file: 'subsRepo',
+    from: '  if (row.confirmed === 1 && pending === null) return \'confirmed\';',
+    to: '  if (row.confirmed === 1) return \'confirmed\';',
+    pattern: '点确认之后：新规则才生效',
+    test: 'tests/e2e/subscription-scope.test.mjs',
+  },
+  {
+    label: '确认页对"已确认+待套用"判定不看 pending（按钮不出现，改动永远卡住）',
+    file: 'subsRepo',
+    from: '  if (rows[0].confirmed === 1 && parsePendingRules(rows[0].pendingRulesJson) === null) {',
+    to: '  if (rows[0].confirmed === 1) {',
+    pattern: '提交修改后：新规则进待确认',
+    test: 'tests/e2e/subscription-scope.test.mjs',
+  },
 ];
 
 let red = 0;

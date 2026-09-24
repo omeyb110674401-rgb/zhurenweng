@@ -109,7 +109,7 @@ export async function POST(request: Request): Promise<Response> {
     return redirectWithDraft(`/subscribe?error=${rules.reason}`, draft);
   }
 
-  const { subscription, outcome } = await upsertSubscriptionRules({
+  const { subscription } = await upsertSubscriptionRules({
     email,
     keywords,
     categories: categoryInput,
@@ -118,24 +118,24 @@ export async function POST(request: Request): Promise<Response> {
     now: new Date(),
   });
 
-  // 已确认的订阅只更新规则；其余结果都需要完成确认才能生效，发送确认邮件
-  if (outcome !== 'confirmed-updated') {
-    try {
-      const mailer = createMailerPort();
-      await mailer.send(
-        buildConfirmationEmail({
-          email: subscription.email,
-          rules: subscription,
-          confirmToken: subscription.confirmToken,
-          unsubscribeToken: subscription.unsubscribeToken,
-        }),
-      );
-    } catch (error) {
-      console.error(
-        `[subscribe] 确认邮件发送失败 email=${email}：${error instanceof Error ? error.message : String(error)}`,
-      );
-      return redirectWithDraft('/subscribe?error=send_failed', draft);
-    }
+  // **任何**结果都发确认邮件（issue #60 第 4 刀）：已确认订阅改规则也不再"直接生效"，
+  // 否则知道某人邮箱就能静默改写其订阅（FOLLOWUPS #52 挂账的解法）。
+  try {
+    const mailer = createMailerPort();
+    await mailer.send(
+      buildConfirmationEmail({
+        email: subscription.email,
+        rules: subscription,
+        pendingRules: subscription.pending,
+        confirmToken: subscription.confirmToken,
+        unsubscribeToken: subscription.unsubscribeToken,
+      }),
+    );
+  } catch (error) {
+    console.error(
+      `[subscribe] 确认邮件发送失败 email=${email}：${error instanceof Error ? error.message : String(error)}`,
+    );
+    return redirectWithDraft('/subscribe?error=send_failed', draft);
   }
 
   // 两种结果回同一个参数（见文件头的防枚举说明）；成功即清掉草稿，

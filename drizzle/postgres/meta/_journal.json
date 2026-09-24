@@ -99,6 +99,13 @@
       "when": 1790000000013,
       "tag": "0013_add_notice_notifications",
       "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1790000000014,
+      "tag": "0014_add_subscription_pending_rules",
+      "breakpoints": true
     }
   ]
 }

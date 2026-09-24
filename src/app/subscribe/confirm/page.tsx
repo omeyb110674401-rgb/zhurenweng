@@ -56,8 +56,9 @@ export default async function SubscribeConfirmPage({ searchParams }: ConfirmPage
       {status === 'confirmable' ? (
         <section className="result-card" data-testid="subscribe-confirm">
           <p>
-            点击下面的按钮即可完成确认：之后每当你订阅的关键词 / 领域有新的征求意见公示，
-            我们会在截止前 7 天、3 天各发送一封提醒邮件。每封邮件底部都有退订入口。
+            点击下面的按钮即可完成确认：生效后，命中你订阅条件的新公示会收到一封汇总邮件，
+            征求意见截止前 7 天、3 天各收到一封提醒邮件。若你刚提交过订阅修改，
+            <b>确认之前仍按原规则发送</b>。每封邮件底部都有退订入口。
           </p>
           {/* POST 才写库：邮件网关预取本页（GET）不会造成确认 */}
           <form action="/subscribe/confirm/submit" method="post">

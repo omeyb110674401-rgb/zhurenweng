@@ -348,3 +348,147 @@ describe('issue #60 第 3 刀：新公示通知（一人一封汇总、条目×�
     assert.match(retried, /新公示通知任务完成[^\n]*发送 [1-9]\d* 封/, '下一轮应把这批条目补上');
   });
 });
+
+/**
+ * 改订阅也要再确认一次（issue #60 第 4 刀，解 FOLLOWUPS #52 挂账）。
+ *
+ * 被修掉的行为是：已确认的人重复提交表单会**直接改写规则且不发确认邮件**
+ * （旧 outcome 叫 confirmed-updated）。在只有共享密钥、没有账号的模型下，
+ * "知道某个邮箱"于是等于"能改这个人的订阅"。限流挡不住有意的重复提交，
+ * 能挡住的是：改动先进待确认列，确认之前站内生效的仍是旧规则。
+ *
+ * 所以这一组按真实顺序验：改 → 旧规则还在用 → 点确认 → 新规则才生效 → 旧确认链接失效。
+ */
+describe('issue #60 第 4 刀：订阅改动需再次确认（确认前旧规则继续生效）', () => {
+  let notifyJob;
+
+  function noticeRow(id) {
+    const db = new Database(dbFile);
+    try {
+      return db.prepare('select title from notices where id = ?').get(id);
+    } finally {
+      db.close();
+    }
+  }
+
+  function mutate(sql, ...params) {
+    const db = new Database(dbFile);
+    try {
+      db.prepare(sql).run(...params);
+    } finally {
+      db.close();
+    }
+  }
+
+  async function insertNotice(id, title, agency) {
+    await noticesRepo.upsertNotice({
+      id,
+      sourceId: 'e2e-sub-scope',
+      title,
+      agency,
+      url: `https://source.test/${id}.html`,
+      publishedAt: datePlusDays(-1),
+      deadlineAt: datePlusDays(7),
+      status: 'open',
+      bodyText: '现向社会公开征求意见。',
+      attachments: [],
+      fetchedAt: new Date().toISOString(),
+    });
+  }
+
+  async function runNotify() {
+    logs = [];
+    fs.rmSync(outboxFile, { force: true });
+    await notifyJob.run(ctx);
+    return logs.join('\n');
+  }
+
+  async function postSubscription(fields) {
+    return fetch(`${app.url}/api/subscriptions`, {
+      method: 'POST',
+      redirect: 'manual',
+      headers: { 'content-type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams(fields).toString(),
+    });
+  }
+
+  before(async () => {
+    notifyJob = (await import('../../worker/jobs/notify-new-notices.ts')).notifyNewNoticesJob;
+  });
+
+  it('提交修改后：新规则进待确认，站内仍按旧规则发信，且发来一封"请确认这次修改"', async () => {
+    const original = (await subsRepo.listActiveSubscriptions()).find((s) => s.email === 'joint@example.test');
+    assert.ok(original, '前置：joint 订阅应已确认');
+
+    const response = await postSubscription({
+      email: 'joint@example.test',
+      scope: 'rules',
+      agencies: '生态环境部',
+    });
+    assert.equal(response.status, 303);
+
+    const updated = (await subsRepo.listActiveSubscriptions()).find((s) => s.email === 'joint@example.test');
+    assert.deepEqual(updated.agencies, ['中国民用航空局'], '确认前**生效的还必须是旧规则**');
+    assert.deepEqual(updated.pending.agencies, ['生态环境部'], '新规则应完整落在待确认列里');
+
+    const mail = mailsTo('joint@example.test').at(-1);
+    assert.match(mail.subject, /请确认你的订阅修改/);
+    assert.match(mail.text, /发布机关：生态环境部/, '信里显示的应是要改成的新规则');
+    assert.match(mail.text, /确认之前，本站仍按你原来的规则发送/);
+    assert.notEqual(updated.confirmToken, original.confirmToken, '确认 token 必须轮换（旧链接不能继续有效）');
+    assert.equal(await subsRepo.confirmTokenStatus(original.confirmToken), 'invalid', '旧确认链接应已失效');
+    // 已确认 + 有待套用改动 ⇒ 确认页仍要给按钮，否则这次改动永远无法生效
+    assert.equal(await subsRepo.confirmTokenStatus(updated.confirmToken), 'confirmable');
+
+    await insertNotice('f'.repeat(32), '关于某环保办法公开征求意见的公告', '生态环境部');
+    await runNotify();
+    const pendingMails = mailsTo('joint@example.test').filter((m) => m.subject.includes('新公示'));
+    assert.equal(pendingMails.length, 0, '改动没确认之前，新规则不该已经开始收信');
+  });
+
+  it('点确认之后：新规则才生效，旧规则不再命中', async () => {
+    const current = (await subsRepo.listActiveSubscriptions()).find((s) => s.email === 'joint@example.test');
+    const submit = await fetch(`${app.url}/subscribe/confirm/submit`, {
+      method: 'POST',
+      redirect: 'manual',
+      headers: { 'content-type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({ token: current.confirmToken }).toString(),
+    });
+    assert.equal(submit.status, 303);
+
+    const applied = (await subsRepo.listActiveSubscriptions()).find((s) => s.email === 'joint@example.test');
+    assert.deepEqual(applied.agencies, ['生态环境部'], '确认这一刻才把待确认规则套用到正式列');
+    assert.equal(applied.pending, null, '套用完必须清空，否则下一次确认会重复套用旧改动');
+    assert.equal(applied.scope, 'rules');
+
+    await insertNotice('g'.repeat(32), '关于民航规则公开征求意见的公告', '中国民用航空局');
+    // 把候选集收到可控范围：前面几组测试留下的 21 条批量条目会把这一封挤满 20 条上限，
+    // 那样"命中没命中"就跟"排在第几位"混在一起了 —— 本条要验的只是规则切换。
+    mutate("update notices set first_seen_at = null where id like 'eeee%'");
+    mutate('delete from notice_notifications');
+    await runNotify();
+    const mail = mailsTo('joint@example.test').find((m) => m.subject.includes('新公示'));
+    assert.ok(mail, '新规则应命中生态环境部那条（上一轮它被挡着没发）');
+    assert.ok(mail.text.includes('关于某环保办法公开征求意见的公告'), '新规则命中的要发来');
+    // 只验这一条命中 + 两条不命中：OTHER 那条（生态环境部）在本文件更早的
+    // 「first_seen_at 为空永不通知」测试里被置成了 NULL，它不参与候选是正确行为，
+    // 不是规则没生效 —— 断言里必须把它当"缺席"看，否则就是在测一个巧合。
+    assert.ok(!mail.text.includes('关于民航规则公开征求意见的公告'), '旧规则命中的不该再来');
+    assert.ok(!mail.text.includes(JOINT_TITLE), '联合发文里没有生态环境部，确认后的规则不该收它');
+    assert.equal(noticeRow('f'.repeat(32)).title, '关于某环保办法公开征求意见的公告');
+  });
+
+  it('管理入口：带退订 token 打开订阅页会预填当前设置并说明"改完要再确认"', async () => {
+    const current = (await subsRepo.listActiveSubscriptions()).find((s) => s.email === 'joint@example.test');
+    const html = await (await fetch(`${app.url}/subscribe?token=${current.unsubscribeToken}`)).text();
+    assert.match(html, /data-testid="subscribe-manage-banner"/);
+    assert.match(html, /你正在修改已有订阅/);
+    assert.match(html, /确认之前仍按原规则发送/);
+    assert.ok(html.includes('value="joint@example.test"'), '邮箱应预填（不是让人重敲一遍）');
+    assert.ok(html.includes('value="生态环境部"'), '机关勾选状态要回填');
+
+    const plain = await (await fetch(`${app.url}/subscribe?token=not-a-real-token`)).text();
+    assert.ok(!plain.includes('subscribe-manage-banner'), '无效 token 不该报错，也不该谎称在修改订阅');
+    assert.ok(!plain.includes('value="joint@example.test"'), '无效 token 不能带出别人的订阅内容');
+  });
+});
