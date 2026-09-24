@@ -2,14 +2,17 @@ import type { NoticeRecord } from '../db/types.ts';
 import { parseQuotedSummary } from './summary-content.ts';
 
 /**
- * RSS 2.0 feed 生成（issue #6）—— 纯函数，与传输层（Route Handler）解耦。
+ * RSS 2.0 feed 生成（issue #6 建立，issue #63 起支持子 feed）—— 纯函数，与传输层解耦。
  *
  * - 零依赖：XML 拼接 + 自实现转义，不引入任何 XML 库；
  * - 字段：channel（标题 / 链接 / 描述 / 语言 / lastBuildDate / atom:link self）
  *   与 item（title / link / guid / pubDate / description）；
  * - 绝对 URL：站点对外地址由调用方注入（Route Handler 读 SITE_URL 环境变量）；
  * - 摘要片段：AI 摘要就绪（ai_summary_json 可安全解析为五段式摘要）时取
- *   「这是什么」段截断展示，并显著标注 AI 生成（合规姿态在 feed 内同样成立）。
+ *   「这是什么」段截断展示，并显著标注 AI 生成（合规姿态在 feed 内同样成立）；
+ * - 子 feed：`filterLabel` 非空时频道标题与描述都写明"这是按条件订的一份筛选结果"。
+ *   feed 没有页面上下文，频道名就是读者在阅读器里唯一能看到的说明 —— 标题不说清条件，
+ *   两周后他自己也不知道这个频道装的是什么。条目顺序固定为发布日期倒序（时间线语义）。
  */
 
 /** RSS 2.0 单页上限（issue #6：item 按发布日期倒序上限 200 条） */
@@ -56,25 +59,51 @@ export interface FeedSite {
 export interface BuildFeedInput extends FeedSite {
   notices: NoticeRecord[];
   now: Date;
+  /**
+   * 子 feed 的条件标签（issue #63）：如「生态环境 · 只看未截止」。
+   * 给了它，channel 的标题与描述就必须说清这是**一份筛选结果** —— 否则订了
+   * 「只看生态环境」的人，阅读器里显示的频道名仍是全量站点的名字，
+   * 过两周他会忘记这个频道到底装的是什么（feed 没有页面上下文，标题就是全部说明）。
+   */
+  filterLabel?: string;
+  /** `atom:link rel="self"` 的绝对地址（含条件）；缺省 = `/feed.xml` */
+  selfUrl?: string;
+}
+
+/** channel 标题：带条件的子 feed 把条件写进标题，全量 feed 用站点名。 */
+export function feedChannelTitle(filterLabel?: string): string {
+  return filterLabel ? `${FEED_TITLE} —— ${filterLabel}` : FEED_TITLE;
+}
+
+/** channel 描述：子 feed 说明这份订的是什么、以及全量地址在哪。 */
+export function feedChannelDescription(filterLabel?: string): string {
+  if (!filterLabel) return FEED_DESCRIPTION;
+  return `${FEED_DESCRIPTION} 本频道是按条件订阅的子 feed（条件：${filterLabel}），条目新增后会自动出现在这里；全量订阅见 /feed.xml。`;
 }
 
 /**
  * 生成完整 RSS 2.0 XML。channel 元素顺序遵循 RSS 2.0 惯例；
  * atom:link rel="self" 需要 xmlns:atom 命名空间（RSS 阅读器自动发现的推荐写法）。
  */
-export function buildFeedXml({ siteUrl, notices, now }: BuildFeedInput): string {
+export function buildFeedXml({
+  siteUrl,
+  notices,
+  now,
+  filterLabel,
+  selfUrl,
+}: BuildFeedInput): string {
   const base = siteUrl.replace(/\/+$/, '');
   const items = notices.map((notice) => buildItemXml(notice, base)).join('\n');
   const lines = [
     '<?xml version="1.0" encoding="UTF-8"?>',
     '<rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom">',
     '  <channel>',
-    `    <title>${escapeXml(FEED_TITLE)}</title>`,
+    `    <title>${escapeXml(feedChannelTitle(filterLabel))}</title>`,
     `    <link>${escapeXml(`${base}/`)}</link>`,
-    `    <description>${escapeXml(FEED_DESCRIPTION)}</description>`,
+    `    <description>${escapeXml(feedChannelDescription(filterLabel))}</description>`,
     '    <language>zh-cn</language>',
     `    <lastBuildDate>${escapeXml(now.toUTCString())}</lastBuildDate>`,
-    `    <atom:link href="${escapeXml(`${base}/feed.xml`)}" rel="self" type="application/rss+xml" />`,
+    `    <atom:link href="${escapeXml(selfUrl ?? `${base}/feed.xml`)}" rel="self" type="application/rss+xml" />`,
   ];
   if (items.length > 0) {
     lines.push(items);

@@ -87,7 +87,9 @@ const NULLS_LAST = (column: SQLWrapper) => sql`case when ${column} is null then 
 
 const ORDERS: Record<NoticeSortKey, SQL[]> = {
   deadline: AGGREGATION_ORDER,
-  // 最新发布：缺发布日期的沉底（与统计页「缺发布日期不计入分布」同一口径）
+  // 最新发布：缺发布日期的沉底（与统计页「缺发布日期不计入分布」同一口径）。
+  // RSS feed 也走这一档（issue #6 的 feed 是时间线语义，不是倒计时序）——
+  // 原先那里另有一份 `listNoticesByPublishedDesc`，两处排序迟早分家，已合并到这一档。
   published: [
     NULLS_LAST(notices.publishedAt),
     desc(notices.publishedAt),
@@ -374,30 +376,6 @@ export async function listNoticeAgencies(): Promise<string[]> {
     for (const name of splitAgencies(row.agency)) names.add(name);
   }
   return [...names].sort((a, b) => a.localeCompare(b));
-}
-
-/**
- * RSS feed 查询（issue #6）：全量条目按发布日期倒序（最新发布在前）。
- * 与聚合列表（listNotices）的「截止日期升序」排序不同：feed 是时间线语义。
- * 无发布日期的条目排最后 —— 显式 CASE 归一化 NULL 排序位置（双方言下
- * SQLite 与 PostgreSQL 的 NULL 排序方向相反），同日按抓取时间、条目 ID
- * 兜底保证顺序稳定。
- */
-export async function listNoticesByPublishedDesc(
-  options: ListNoticesOptions = {},
-): Promise<NoticeRecord[]> {
-  const db = await getDb();
-  const rows = await db
-    .select()
-    .from(notices)
-    .orderBy(
-      sql`case when ${notices.publishedAt} is null then 1 else 0 end`,
-      desc(notices.publishedAt),
-      desc(notices.fetchedAt),
-      asc(notices.id),
-    )
-    .limit(options.limit ?? 200);
-  return rows.map(toNoticeRecord);
 }
 
 /** 按主键取单条；不存在返回 null（详情页与 /go 端点使用）。 */

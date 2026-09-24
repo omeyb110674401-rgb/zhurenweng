@@ -207,11 +207,18 @@ SOURCES_FIXTURE_BASE=http://127.0.0.1:4170 APP_BASE_URL=http://localhost:3000 WO
 数据库迁移在应用首连时自动应用（`drizzle/<driver>/`）；CI（GitHub Actions）运行
 lint 与 e2e 两个 job，同样只依赖 npm。
 
-## RSS Feed（issue #6）
+## RSS Feed（issue #6 建立，issue #63 起支持子 feed）
 
-- **端点**（`GET /feed.xml`）：RSS 2.0，每次请求实时读库生成（`force-dynamic`，
+- **端点**（`GET /feed.xml`，或 `GET /feed.xml?category=…&open=1&since=7`）：RSS 2.0，
+  每次请求实时读库生成（`force-dynamic`，
   不缓存），Content-Type `application/rss+xml; charset=utf-8`；XML 生成零依赖
   （转义 / 拼接逻辑见 `src/lib/feed.ts`）。
+- **子 feed（issue #63）**：querystring 复用首页那套筛选参数与同一份 SQL 条件
+  （`parseHomeQuery` + `filterConditions`），因此「页面上看到哪几条」与「订到的是哪几条」
+  同口径。频道标题与描述在有条件时写明条件并指回全量地址，`atom:link rel="self"`
+  带上条件（阅读器据此区分两份订阅）。首页仅在筛选生效时给「只订这一批（RSS）」入口。
+  **刻意不吃 `sort` 与 `page`**：RSS 阅读器按 `pubDate` 自己排、feed 也没有分页，
+  收下不生效的参数就是假旋钮；未知参数值不生效时频道标题也不加条件（标题不撒谎）。
 - **channel**：标题「主人翁 —— 政府公示信息聚合」、站点链接、描述、语言
   `zh-cn`、`lastBuildDate` 与 `atom:link rel="self"`。
 - **item**：全量条目按**发布日期倒序**、上限 200 条；`link` 为站内详情页

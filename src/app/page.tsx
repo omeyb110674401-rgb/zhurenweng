@@ -4,8 +4,13 @@ import type { Metadata } from 'next';
 import { countNoticesFiltered, listNoticesFiltered, listNoticeAgencies } from '@/db/repo/notices';
 import { NoticeItem } from '@/app/_lib/notice-item';
 import { SearchForm } from '@/app/_lib/search-form';
-import { parseHomeQuery, type HomeSearchParams } from '@/app/_lib/home-query';
-import { periodBucketLabel, type PeriodBucketKey } from '@/lib/notice-period';
+import {
+  describeHomeQuery,
+  parseHomeQuery,
+  subFeedHref,
+  type HomeSearchParams,
+} from '@/app/_lib/home-query';
+import type { PeriodBucketKey } from '@/lib/notice-period';
 import { NOTICE_SORT_KEYS, NOTICE_SORT_LABELS, type NoticeSortKey } from '@/lib/notice-sort';
 import { SINCE_OPTION_DAYS } from '@/lib/notice-recency';
 import { buildNoticeListJsonLd, serializeJsonLd } from '@/lib/notice-jsonld';
@@ -124,20 +129,6 @@ function buildFilterHref(current: FilterState, next: Partial<FilterState>): stri
   return qs.length > 0 ? `/?${qs}` : '/';
 }
 
-/**
- * 发布月份筛选的摘要文案（issue #45/#48）：区间 / 起点 / 终点 / 单月四种形态。
- *
- * 抽成函数是因为这段判断原先嵌在数组字面量里、三层嵌套三元 —— 读者得自己数括号
- * 才知道哪个分支对应哪种 URL 形态。改成顺序 early-return 后，四种形态一眼可数。
- */
-function monthFilterSummary(from: string | undefined, to: string | undefined): string {
-  if (from === undefined && to === undefined) return '';
-  if (from !== undefined && to !== undefined) {
-    return from === to ? `发布月份：${from}` : `发布区间：${from} 至 ${to}`;
-  }
-  return from !== undefined ? `发布月份：${from} 起` : `发布月份：${to} 止`;
-}
-
 export default async function HomePage({ searchParams }: HomePageProps) {
   // 解析与 generateMetadata 共用同一份（issue #41）：领域只接受已知标签值
   // （未知值不生效，避免任意 querystring 触发无效筛选）
@@ -207,19 +198,7 @@ export default async function HomePage({ searchParams }: HomePageProps) {
   const agencyOptions =
     agency !== undefined && !agencies.includes(agency) ? [agency, ...agencies] : agencies;
 
-  const filterSummary = [
-    category,
-    agency ? (current.leadAgencyOnly ? `机关（牵头）：${agency}` : `机关：${agency}`) : '',
-    keyword ? `关键词：${keyword}` : '',
-    monthFilterSummary(from, to),
-    period ? `公示期：${periodBucketLabel(period) ?? period}` : '',
-    // 「只看未截止」「最近新增」也要进摘要（issue #62）：这行文字是「筛选后共 N 条」
-    // 里 N 的口径说明，少说一个维度，读者就只能猜这个 0 是谁造成的
-    current.openOnly ? '只看未截止' : '',
-    current.sinceDays ? `最近 ${current.sinceDays} 天收录` : '',
-  ]
-    .filter(Boolean)
-    .join(' · ');
+  const filterSummary = describeHomeQuery(query);
 
   // 列表页结构化数据（issue #49）：描述**本页真实渲染**的那批条目，位置从本页首条起
   // 连续编号（分页时不会与上一页撞位）；numberOfItems 给整份列表的合计 `total`
@@ -304,6 +283,19 @@ export default async function HomePage({ searchParams }: HomePageProps) {
           <a className="rss-link" href="/feed.xml" data-testid="rss-feed-link">
             RSS 订阅
           </a>
+          {/* 子 feed（issue #63）：筛选生效时才多给这一个入口 —— 订「只看未截止的生态环境」
+              的人要的就是这一批条目，而全量 feed 会把条件整个丢掉。地址由 `subFeedHref`
+              生成，与首页的筛选链接共用同一份参数口径。 */}
+          {hasFilter ? (
+            <a
+              className="rss-link"
+              href={subFeedHref(query)}
+              data-testid="filtered-rss-link"
+              title={`RSS 订阅当前条件：${filterSummary}`}
+            >
+              只订这一批（RSS）
+            </a>
+          ) : null}
           {/* 邮件提醒入口（issue #17）：邮件端口可用时才出现，与 RSS 并列 */}
           {mailerReady() ? (
             <a className="rss-link" href="/subscribe" data-testid="subscribe-list-link">

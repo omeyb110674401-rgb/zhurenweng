@@ -7,7 +7,7 @@
  */
 
 import { isKnownCategory } from '../../lib/categories.ts';
-import { isPeriodBucketKey, type PeriodBucketKey } from '../../lib/notice-period.ts';
+import { isPeriodBucketKey, periodBucketLabel, type PeriodBucketKey } from '../../lib/notice-period.ts';
 import { MAX_SINCE_DAYS } from '../../lib/notice-recency.ts';
 import { isNoticeSortKey, type NoticeSortKey } from '../../lib/notice-sort.ts';
 
@@ -149,6 +149,69 @@ export interface HomeQuery {
   page: number;
   /** 是否带了筛选维度（领域 / 机关 / 关键词 / 月份 / 公示期 / 未截止 / 最近新增）—— 决定「筛选后共 N 条」与索引口径 */
   hasFilter: boolean;
+}
+
+/** 发布月份筛选的摘要文案（issue #45/#48）：区间 / 起点 / 终点 / 单月四种形态。 */
+export function monthRangeSummary(from: string | undefined, to: string | undefined): string {
+  if (from === undefined && to === undefined) return '';
+  if (from !== undefined && to !== undefined) {
+    return from === to ? `发布月份：${from}` : `发布区间：${from} 至 ${to}`;
+  }
+  return from !== undefined ? `发布月份：${from} 起` : `发布月份：${to} 止`;
+}
+
+/**
+ * 当前筛选状态的人话摘要（issue #63 起首页与子 feed 共用一份）。
+ *
+ * 为什么收成一份：首页那行「筛选后共 N 条（X）」与子 feed 的标题必须说同一个条件。
+ * 分家成两份的后果就是本项目反复清掉的那件事 —— 同一个口径两处实现，迟早给出相反答案。
+ */
+export function describeHomeQuery(query: HomeQuery): string {
+  return [
+    query.category,
+    query.agency
+      ? query.leadAgencyOnly
+        ? `机关（牵头）：${query.agency}`
+        : `机关：${query.agency}`
+      : '',
+    query.keyword ? `关键词：${query.keyword}` : '',
+    monthRangeSummary(query.from, query.to),
+    query.period ? `公示期：${periodBucketLabel(query.period) ?? query.period}` : '',
+    // 「只看未截止」「最近新增」也要进摘要（issue #62）：这行文字是「筛选后共 N 条」
+    // 里 N 的口径说明，少说一个维度，读者就只能猜这个 0 是谁造成的
+    query.openOnly ? '只看未截止' : '',
+    query.sinceDays ? `最近 ${query.sinceDays} 天收录` : '',
+  ]
+    .filter(Boolean)
+    .join(' · ');
+}
+
+/**
+ * 当前筛选条件对应的**子 feed 地址**（issue #63）。
+ *
+ * 刻意不带 `sort` 与 `page`：RSS 阅读器按 `pubDate` 自己排序，feed 也没有分页概念 ——
+ * 挂一个不生效的参数就是"假旋钮"（#58/#59 反复清掉的那类）。
+ * `?month=` 别名在解析层已折平成 from / to，所以同一条件只有一个规范地址。
+ *
+ * `prefix` 由调用方给：页面上用相对地址（`/feed.xml?…`），feed 内的
+ * `atom:link rel="self"` 要绝对地址（传 `siteUrl()`）。
+ */
+export function subFeedHref(query: HomeQuery, prefix = ''): string {
+  const search = new URLSearchParams();
+  if (query.category) search.set('category', query.category);
+  // lead 只在有机关筛选时才有意义（与首页 buildFilterHref 同一处理）
+  if (query.agency) {
+    search.set('agency', query.agency);
+    if (query.leadAgencyOnly) search.set('lead', '1');
+  }
+  if (query.keyword) search.set('q', query.keyword);
+  if (query.from) search.set('from', query.from);
+  if (query.to) search.set('to', query.to);
+  if (query.period) search.set('period', query.period);
+  if (query.openOnly) search.set('open', '1');
+  if (query.sinceDays) search.set('since', String(query.sinceDays));
+  const qs = search.toString();
+  return `${prefix}/feed.xml${qs.length > 0 ? `?${qs}` : ''}`;
 }
 
 /** 解析首页 querystring。 */

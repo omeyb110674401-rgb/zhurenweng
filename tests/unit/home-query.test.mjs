@@ -1,15 +1,17 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import {
+  describeHomeQuery,
   firstParam,
   monthParam,
   monthRangeParam,
+  openOnlyParam,
   pageParam,
   parseHomeQuery,
   periodParam,
   sinceParam,
   sortParam,
-  openOnlyParam,
+  subFeedHref,
 } from '../../src/app/_lib/home-query.ts';
 
 /**
@@ -210,5 +212,58 @@ describe('sortParam / openOnlyParam / sinceParam：排序与收录范围（issue
     assert.equal(sinceParam('abc'), undefined);
     assert.equal(sinceParam(''), undefined);
     assert.equal(parseHomeQuery({ since: '99999' }).hasFilter, false, '不生效就不该算筛选');
+  });
+});
+
+describe('describeHomeQuery / subFeedHref：条件的说法与地址（issue #63）', () => {
+  it('每个维度都有且只有一种说法，组合顺序稳定', () => {
+    assert.equal(describeHomeQuery(parseHomeQuery({})), '');
+    assert.equal(describeHomeQuery(parseHomeQuery({ category: '生态环境' })), '生态环境');
+    assert.equal(describeHomeQuery(parseHomeQuery({ agency: '司法部' })), '机关：司法部');
+    assert.equal(
+      describeHomeQuery(parseHomeQuery({ agency: '司法部', lead: '1' })),
+      '机关（牵头）：司法部',
+    );
+    assert.equal(describeHomeQuery(parseHomeQuery({ q: '噪声' })), '关键词：噪声');
+    assert.equal(describeHomeQuery(parseHomeQuery({ month: '2026-08' })), '发布月份：2026-08');
+    assert.equal(
+      describeHomeQuery(parseHomeQuery({ from: '2026-04', to: '2026-09' })),
+      '发布区间：2026-04 至 2026-09',
+    );
+    assert.equal(describeHomeQuery(parseHomeQuery({ period: 'lte7' })), '公示期：7 天以内（含 7 天）');
+    assert.equal(describeHomeQuery(parseHomeQuery({ open: '1' })), '只看未截止');
+    assert.equal(describeHomeQuery(parseHomeQuery({ since: '7' })), '最近 7 天收录');
+    assert.equal(
+      describeHomeQuery(parseHomeQuery({ category: '生态环境', open: '1', since: '30' })),
+      '生态环境 · 只看未截止 · 最近 30 天收录',
+      '顺序是固定的：两处（首页摘要行 / feed 标题）拼出的必须是同一个串',
+    );
+  });
+
+  it('裸 lead=1 不说成牵头口径（没有机关筛选时它不改变任何结果）', () => {
+    assert.equal(describeHomeQuery(parseHomeQuery({ lead: '1' })), '');
+  });
+
+  it('子 feed 地址只带真正生效的维度，且不含 sort / page', () => {
+    assert.equal(subFeedHref(parseHomeQuery({})), '/feed.xml');
+    assert.equal(
+      subFeedHref(parseHomeQuery({ category: '生态环境', open: '1', since: '7', sort: 'clicks', page: '3' })),
+      '/feed.xml?category=%E7%94%9F%E6%80%81%E7%8E%AF%E5%A2%83&open=1&since=7',
+    );
+    assert.equal(subFeedHref(parseHomeQuery({ sort: 'newest' })), '/feed.xml', '排序不是条件');
+  });
+
+  it('?month= 别名在地址里折平成 from / to（同一条件只有一个规范地址）', () => {
+    const alias = subFeedHref(parseHomeQuery({ month: '2026-08' }));
+    assert.equal(alias, '/feed.xml?from=2026-08&to=2026-08');
+    assert.equal(alias, subFeedHref(parseHomeQuery({ from: '2026-08', to: '2026-08' })));
+  });
+
+  it('lead 只跟机关一起出现；prefix 供绝对地址用（feed 内的 atom:link self）', () => {
+    assert.equal(subFeedHref(parseHomeQuery({ lead: '1' })), '/feed.xml');
+    assert.equal(
+      subFeedHref(parseHomeQuery({ agency: '司法部', lead: '1' }), 'https://x.test'),
+      'https://x.test/feed.xml?agency=%E5%8F%B8%E6%B3%95%E9%83%A8&lead=1',
+    );
   });
 });
