@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import { listNoticeSourceFacets, type NoticeSourceFacet } from '@/db/repo/notices';
 import {
   getAgencyMonthlyCounts,
   getAgencyTotals,
@@ -9,7 +10,7 @@ import {
   type AgencyMonthCount,
   type AgencyTotal,
 } from '@/db/repo/stats';
-import { lastSiteMonths } from '@/lib/dates';
+import { lastSiteMonths, siteDateIso } from '@/lib/dates';
 import { PERIOD_BUCKETS } from '@/lib/notice-period';
 import { simplePageMetadata } from '@/lib/page-metadata';
 import { SiteFooter } from '@/app/_lib/site-footer';
@@ -81,7 +82,7 @@ function DrillNumber({
 
 export default async function StatsPage() {
   const now = new Date();
-  const [overview, agencyTotals, monthlyCounts, periodDistribution, topClicked, clicksByDate] =
+  const [overview, agencyTotals, monthlyCounts, periodDistribution, topClicked, clicksByDate, sourceFacets] =
     await Promise.all([
       getStatsOverview(),
       getAgencyTotals(),
@@ -89,7 +90,11 @@ export default async function StatsPage() {
       getPeriodLengthDistribution(),
       getTopClickedNotices(10),
       getClicksByDate(30),
+      listNoticeSourceFacets(),
     ]);
+  // 「哪个源不再送新东西」是健康看板看不见的一类故障（抓取天天成功、就是没有新条目），
+  // 这里用 first_seen_at 的最近值把它摆出来（issue #65）。
+  const unregisteredFacets = sourceFacets.filter((facet: NoticeSourceFacet) => !facet.registered);
 
   const months = lastSiteMonths(now, TREND_MONTHS);
   const monthSet = new Set(months);
@@ -196,6 +201,92 @@ export default async function StatsPage() {
           </table>
           </div>
         )}
+      </section>
+
+      <section className="stats-section" aria-labelledby="stats-source-title">
+        <h2 id="stats-source-title">各来源收录量</h2>
+        <p className="section-hint">
+          按抓取来源（各部委 / 机构的公开栏目）聚合。「最近新收录」取的是该源最新一条
+          <strong>首次收录</strong>的日期 —— 这一列是本页唯一能揭穿某类故障的地方：
+          一个源可以天天抓取成功、看板全绿，却连续几周一条新的都不送（源站改版、栏目换址、
+          选择器失效）。点数字可查看对应条目，条数与表格一致（issue #36 的规矩）。
+        </p>
+        {sourceFacets.length === 0 ? (
+          <EmptyBlock testId="stats-source-empty" text="暂无来源数据，注册抓取来源并收录条目后这里将按来源聚合展示。" />
+        ) : (
+          <div
+            className="stat-table-wrap"
+            data-testid="source-table-wrap"
+            role="region"
+            tabIndex={0}
+            aria-label="各来源收录量表（窄屏可横向滚动）"
+          >
+            <table className="stat-table" data-testid="source-facets-table">
+              <caption className="sr-only">
+                各来源收录量：收录条目数、未截止条目数与最近一次新收录日期，覆盖全部收录历史
+              </caption>
+              <thead>
+                <tr>
+                  <th scope="col">来源渠道</th>
+                  <th scope="col" className="stat-num">
+                    收录量
+                  </th>
+                  <th scope="col" className="stat-num">
+                    未截止
+                  </th>
+                  <th scope="col">最近新收录</th>
+                </tr>
+              </thead>
+              <tbody>
+                {sourceFacets.map((facet) => (
+                  <tr key={facet.id} data-testid="source-facet-row" data-source={facet.id}>
+                    <th scope="row">
+                      {/* 登记表里查不到的源（#58 清掉的 govcn 那类死行）照列，名字退回 ID：
+                          静默归并或漏掉会让「各行之和 = 总数」这条对不上而没人发现（issue #46） */}
+                      <span data-testid="source-facet-label">
+                        {facet.name}
+                        {facet.registered ? '' : '（未在源登记表）'}
+                      </span>
+                    </th>
+                    <td className="stat-num">
+                      <DrillNumber
+                        count={facet.count}
+                        href={`/?source=${encodeURIComponent(facet.id)}`}
+                        testId="source-count-link"
+                        label={`查看来源「${facet.name}」的 ${facet.count} 条公示`}
+                      />
+                    </td>
+                    <td className="stat-num">
+                      {/* 「未截止」与首页 ?open=1 用的是同一份 SQL 判据（repo 的 openCondition），
+                          两处一旦分家，这一格就不再等于点进去的条数 */}
+                      <DrillNumber
+                        count={facet.openCount}
+                        href={`/?source=${encodeURIComponent(facet.id)}&open=1`}
+                        testId="source-open-link"
+                        label={`查看来源「${facet.name}」未截止的 ${facet.openCount} 条公示`}
+                      />
+                    </td>
+                    <td>
+                      {facet.lastFirstSeenAt === null ? (
+                        <span data-testid="source-no-new">暂无新收录</span>
+                      ) : (
+                        /* 存的是 UTC 时间戳，按站点日历日显示：直接截前 10 位会在
+                           北京时间 00:00–08:00 那一段少算一天（issue #40 的同一件事） */
+                        siteDateIso(new Date(facet.lastFirstSeenAt))
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+        {unregisteredFacets.length > 0 ? (
+          <p className="section-hint" data-testid="stats-source-unregistered">
+            {`其中 ${unregisteredFacets.length} 行的来源已不在源登记表里（条目还挂着它的 ID）：`}
+            {unregisteredFacets.map((facet) => `${facet.name} ${facet.count} 条`).join('、')}。
+          </p>
+        ) : null}
       </section>
 
       <section className="stats-section" aria-labelledby="stats-trend-title">

@@ -1,7 +1,13 @@
 import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import type { Metadata } from 'next';
-import { countNoticesFiltered, listNoticesFiltered, listNoticeAgencies } from '@/db/repo/notices';
+import {
+  countNoticesFiltered,
+  listNoticeSourceFacets,
+  listNoticesFiltered,
+  listNoticeAgencies,
+  type NoticeSourceFacet,
+} from '@/db/repo/notices';
 import { NoticeItem } from '@/app/_lib/notice-item';
 import { SearchForm } from '@/app/_lib/search-form';
 import {
@@ -86,6 +92,8 @@ interface FilterState {
    * 桶边界与文案统一在 lib/notice-period.ts，SQL 条件由同一份定义推导。
    */
   period?: PeriodBucketKey;
+  /** 来源渠道 ID（issue #65）：统计页「各来源收录量」的钻取口径 */
+  source?: string;
   /**
    * 机关筛选只算牵头机关（issue #36）：统计页的钻取链接带 `lead=1` 进来，
    * 与「各部门公示量」同一口径（联合发文只归牵头机关，否则各部门之和会超过总数）。
@@ -121,6 +129,7 @@ function buildFilterHref(current: FilterState, next: Partial<FilterState>): stri
   if (merged.from) search.set('from', merged.from);
   if (merged.to) search.set('to', merged.to);
   if (merged.period) search.set('period', merged.period);
+  if (merged.source) search.set('source', merged.source);
   if (merged.sort) search.set('sort', merged.sort);
   if (merged.openOnly) search.set('open', '1');
   if (merged.sinceDays) search.set('since', String(merged.sinceDays));
@@ -140,13 +149,14 @@ export default async function HomePage({ searchParams }: HomePageProps) {
     from: query.from,
     to: query.to,
     period: query.period,
+    source: query.source,
     // 只有「带了机关 + lead=1」才算牵头口径；裸 lead=1 不改变任何结果
     leadAgencyOnly: query.leadAgencyOnly,
     sort: query.sort,
     openOnly: query.openOnly,
     sinceDays: query.sinceDays,
   };
-  const { category, agency, keyword, from, to, period } = current;
+  const { category, agency, keyword, from, to, period, source } = current;
   const hasFilter = query.hasFilter;
 
   const size = pageSize();
@@ -159,6 +169,7 @@ export default async function HomePage({ searchParams }: HomePageProps) {
     publishedFromMonth: from,
     publishedToMonth: to,
     periodBucket: period,
+    sourceId: source,
     leadAgencyOnly: current.leadAgencyOnly && agency !== undefined,
     sort: query.sort,
     openOnly: query.openOnly,
@@ -167,9 +178,11 @@ export default async function HomePage({ searchParams }: HomePageProps) {
 
   // 仓库层排序：征求意见中在前、截止日期升序（即将截止在前）、无截止日期靠后；
   // 筛选（issue #9）只过滤行、不改变该顺序。合计与列表共用同一组筛选条件。
-  const [total, agencies] = await Promise.all([
+  const [total, agencies, sourceFacets] = await Promise.all([
     countNoticesFiltered(filter),
     listNoticeAgencies(),
+    // 来源下拉与统计页「各来源收录量」用同一个函数：两处数字不许分家（issue #36）
+    listNoticeSourceFacets(),
   ]);
   const totalPages = Math.max(1, Math.ceil(total / size));
   const page = Math.min(requestedPage, totalPages);
@@ -198,7 +211,16 @@ export default async function HomePage({ searchParams }: HomePageProps) {
   const agencyOptions =
     agency !== undefined && !agencies.includes(agency) ? [agency, ...agencies] : agencies;
 
-  const filterSummary = describeHomeQuery(query);
+  // 来源下拉的选项（issue #65，与上面 issue #39 那件事同一处理）
+  const sourceOptions =
+    source !== undefined && !sourceFacets.some((facet: NoticeSourceFacet) => facet.id === source)
+      ? [{ id: source, name: source, registered: false, count: 0, openCount: 0, lastFirstSeenAt: null }, ...sourceFacets]
+      : sourceFacets;
+
+  // 来源显示的是登记表里的名字而不是 ID（这一行是给人读的口径说明）；
+  // 登记表里查不到该 ID（源被删过）时退回 ID，条件不因此从说明里消失。
+  const sourceName = source === undefined ? undefined : sourceFacets.find((facet: NoticeSourceFacet) => facet.id === source)?.name;
+  const filterSummary = describeHomeQuery(query, sourceName);
 
   // 列表页结构化数据（issue #49）：描述**本页真实渲染**的那批条目，位置从本页首条起
   // 连续编号（分页时不会与上一页撞位）；numberOfItems 给整份列表的合计 `total`
@@ -385,6 +407,7 @@ export default async function HomePage({ searchParams }: HomePageProps) {
             {from !== undefined && <input type="hidden" name="from" value={from} />}
             {to !== undefined && <input type="hidden" name="to" value={to} />}
             {period !== undefined && <input type="hidden" name="period" value={period} />}
+            {source !== undefined && <input type="hidden" name="source" value={source} />}
             {/* 排序与范围同样要留住（issue #62，与 issue #50 的 lead 同一件事）：
                 表单里没这些字段时，用户只填个关键词点「筛选」就会静默回到默认排序 +
                 全部条目，页面顶部却还显示着他刚选的那一档 */}
@@ -425,6 +448,28 @@ export default async function HomePage({ searchParams }: HomePageProps) {
               {agencyOptions.map((name) => (
                 <option key={name} value={name}>
                   {name}
+                </option>
+              ))}
+            </select>
+            {/*
+              来源下拉（issue #65）。与机关下拉同一处理（issue #39）：当前值若不在
+              选项里（登记表里已删掉这个源，老链接还在被分享），把它补成第一项 ——
+              否则 <select> 显示「全部来源」而列表其实按那个源筛过了，控件在说谎。
+              选项是**有收录记录的 + 登记表里的**全部源（0 条的也在：那正是
+              "源活着但不再送新东西"这种故障的可见化入口）。
+            */}
+            <select
+              className="filter-source"
+              name="source"
+              aria-label="按来源渠道筛选"
+              data-testid="source-filter-select"
+              defaultValue={source ?? ''}
+            >
+              <option value="">全部来源</option>
+              {sourceOptions.map((facet) => (
+                <option key={facet.id} value={facet.id}>
+                  {facet.name}
+                  {facet.count === 0 ? '（暂无收录）' : `（${facet.count}）`}
                 </option>
               ))}
             </select>

@@ -385,7 +385,7 @@ worker 注册表中的 `summarize-notices` 任务（`worker/jobs/summarize-notic
     「清除全部筛选」入口；未知领域参数不生效（避免任意串触发无效筛选）。
 - **排序与收录范围（issue #62）**：筛选条上方一排普通链接给四个排序档
   （`?sort=deadline|published|newest|clicks`，默认档不写进链接）与两个范围维度
-  （`?open=1` 只看未截止、`?since=N` 最近 N 天收录）。三条口径值得记：
+  （`?open=1` 只看未截止、`?since=N` 最近 N 天收录），以及来源下拉 `?source=`（issue #65）。三条口径值得记：
   `?open=1` 按**展示口径**判（库里 `status` 是抓取时的缓存，刚过截止的条目仍写 `open`，
   见 issue #43）；`?since=` 用 `first_seen_at` 而不是每天被覆盖的 `fetched_at`；
   越界的 `since` **不生效而不是夹取**（夹窄会少给条目且看不出来）。排序不进 `hasFilter`
@@ -548,6 +548,14 @@ worker 注册表中的 `summarize-notices` 任务（`worker/jobs/summarize-notic
   `notices.outbound_clicks` 总计数（issue #5）+ `outbound_click_daily`
   按（条目 × 本地日历日）聚合表（迁移 0005，复合主键 upsert 幂等），
   按日期聚合即对该表 `GROUP BY click_date` 求和。
+- **各来源收录量（issue #65）**：按 `notices.source_id` 聚合的收录量、未截止量与
+  **最近一次新收录**（`max(first_seen_at)`），两格数字可钻取（`/?source=…`、
+  `/?source=…&open=1`），条数与表格一致（issue #36 的不变式）。「未截止」与首页
+  `?open=1` 共用同一份 SQL 判据（`openCondition()`），两处绝不允许分家。
+  这一列存在的理由是**源健康看板看不见的那类故障**：一个源可以天天抓取成功、
+  看板全绿，却连续几周一条新的都不送（改版 / 换址 / 选择器失效）——
+  停在两周以前的那一行就是它。登记表里零收录的源也照列（被聚合结果挤掉的
+  正是要看的那行）；条目引用了已注销的源时标「未在源登记表」，不静默归并。
 - **隐私边界**：点击数据只有条目 ID 与日期两个维度，纯计数聚合，
   无 IP、无 Cookie、无账号（`/go` 端点保持不变）。
 

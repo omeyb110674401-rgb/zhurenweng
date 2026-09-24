@@ -22,6 +22,7 @@ export interface HomeSearchParams {
   from?: string | string[];
   to?: string | string[];
   period?: string | string[];
+  source?: string | string[];
   sort?: string | string[];
   open?: string | string[];
   since?: string | string[];
@@ -136,6 +137,8 @@ export interface HomeQuery {
   to?: string;
   /** 公示期分桶 key（issue #47：统计页公示期分布钻取用） */
   period?: PeriodBucketKey;
+  /** 来源渠道 ID（issue #65：统计页「各来源收录量」钻取用）；不做白名单，理由见仓储层同名选项 */
+  source?: string;
   /**
    * 排序档位（issue #62）；未传 / 未知值 = 默认排序。**不算筛选**：
    * 换排序不改变结果集合，所以不进 `hasFilter`（否则每个排序档都会多出一个 noindex 变体）。
@@ -165,8 +168,11 @@ export function monthRangeSummary(from: string | undefined, to: string | undefin
  *
  * 为什么收成一份：首页那行「筛选后共 N 条（X）」与子 feed 的标题必须说同一个条件。
  * 分家成两份的后果就是本项目反复清掉的那件事 —— 同一个口径两处实现，迟早给出相反答案。
+ *
+ * `sourceName` 由调用方给（来源名字在 `sources` 表里，本模块刻意不碰数据库）。缺省时
+ * 退回显示 ID：宁可给一个不好读的 ID，也不能把这个条件从说明里省掉 —— 省掉等于口径漏报。
  */
-export function describeHomeQuery(query: HomeQuery): string {
+export function describeHomeQuery(query: HomeQuery, sourceName?: string): string {
   return [
     query.category,
     query.agency
@@ -174,6 +180,7 @@ export function describeHomeQuery(query: HomeQuery): string {
         ? `机关（牵头）：${query.agency}`
         : `机关：${query.agency}`
       : '',
+    query.source ? `来源：${sourceName ?? query.source}` : '',
     query.keyword ? `关键词：${query.keyword}` : '',
     monthRangeSummary(query.from, query.to),
     query.period ? `公示期：${periodBucketLabel(query.period) ?? query.period}` : '',
@@ -208,6 +215,7 @@ export function subFeedHref(query: HomeQuery, prefix = ''): string {
   if (query.from) search.set('from', query.from);
   if (query.to) search.set('to', query.to);
   if (query.period) search.set('period', query.period);
+  if (query.source) search.set('source', query.source);
   if (query.openOnly) search.set('open', '1');
   if (query.sinceDays) search.set('since', String(query.sinceDays));
   const qs = search.toString();
@@ -231,6 +239,7 @@ export function parseHomeQuery(params: HomeSearchParams): HomeQuery {
   const from = range.from ?? legacyMonth;
   const to = range.to ?? legacyMonth;
   const period = periodParam(params.period);
+  const source = firstParam(params.source);
   const sort = sortParam(params.sort);
   const openOnly = openOnlyParam(params.open);
   const sinceDays = sinceParam(params.since);
@@ -241,6 +250,7 @@ export function parseHomeQuery(params: HomeSearchParams): HomeQuery {
     from,
     to,
     period,
+    source,
     sort,
     openOnly,
     sinceDays,
@@ -253,6 +263,7 @@ export function parseHomeQuery(params: HomeSearchParams): HomeQuery {
       from !== undefined ||
       to !== undefined ||
       period !== undefined ||
+      source !== undefined ||
       openOnly ||
       sinceDays !== undefined,
   };

@@ -218,7 +218,13 @@ describe('issue #9：领域标签自动打标与分类浏览筛选', () => {
     );
     assert.match(html, /data-testid="category-filter-all"[^>]*>全部领域/);
 
-    const options = [...html.matchAll(/<option[^>]*>([^<]*)<\/option>/g)].map((match) => match[1]);
+    // 只看机关那一个 <select>（issue #65 起筛选条里有两组下拉，整页抓 <option> 会串）
+    const agencySelect =
+      /<select[^>]*agency-filter-select[\s\S]*?<\/select>/.exec(html)?.[0] ?? '';
+    assert.ok(agencySelect.length > 0, '机关下拉应在场');
+    const options = [...agencySelect.matchAll(/<option[^>]*>([^<]*)<\/option>/g)].map(
+      (match) => match[1],
+    );
     assert.equal(options[0], '全部机关', '机关下拉首项应为「全部机关」占位');
     const agencyOptions = options.slice(1);
     assert.equal(new Set(agencyOptions).size, agencyOptions.length, '机关选项应去重');
@@ -226,6 +232,7 @@ describe('issue #9：领域标签自动打标与分类浏览筛选', () => {
     for (const agency of AGENCIES) {
       assert.ok(agencyOptions.includes(agency), `机关下拉应含「${agency}」`);
     }
+    assert.match(html, /data-testid="source-filter-select"/, '来源下拉（issue #65）也在筛选条里');
 
     assert.match(html, /data-testid="filter-keyword-input"/);
     assert.match(html, /data-testid="filter-form"[^>]*action="\/"/);

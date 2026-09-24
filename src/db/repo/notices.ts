@@ -1,6 +1,6 @@
 import { and, asc, desc, eq, gte, inArray, isNull, or, sql, type SQL, type SQLWrapper } from 'drizzle-orm';
 import { currentDriver, getDb } from '../client.ts';
-import { notices, outboundClickDaily } from '../schema/sqlite.ts';
+import { notices, outboundClickDaily, sources } from '../schema/sqlite.ts';
 import { syncNoticeVersionLinks } from './versions.ts';
 import { siteDateIso } from '../../lib/dates.ts';
 import { splitSearchTerms } from '../../lib/search/search-text.ts';
@@ -133,6 +133,13 @@ export interface ListNoticesFilteredOptions {
   /** 领域标签精确值（应为 src/lib/categories.ts 词表内的标签） */
   category?: string;
   /**
+   * 来源渠道 ID（`sources.id`，issue #65）：精确相等。与 `agency` 同一处理方式 ——
+   * **不做白名单**（值来自登记表，登记表是会变的；不认识的 ID 筛出 0 条并把该值
+   * 回显在下拉里，见 app/page.tsx 的 issue #39 那段），而 `category` 之所以白名单，
+   * 是因为那份词表写死在代码里、页面与它不可能不一致。
+   */
+  sourceId?: string;
+  /**
    * 发布机关精确值。默认按**任一参与机关**命中（issue #21：联合发文
    * 「司法部 国家发展改革委」选任一方都能筛到）；设 leadAgencyOnly 后只算牵头机关。
    */
@@ -253,6 +260,28 @@ function periodBucketCondition(key: PeriodBucketKey) {
   return and(...parts);
 }
 
+/**
+ * 「还没截止」的 SQL 判据（issue #62 的 `?open=1`，issue #65 起统计页的
+ * 「未截止」列也用同一份）。
+ *
+ * 按**展示口径**判，与页面上的徽标同源（issue #43 的那件事）：库内 status 是抓取时
+ * 推导的，刚过截止的条目在下一轮抓取前仍写着 open。只看未截止的人若拿到那条，
+ * 看到的徽标却是「已截止」—— 筛选器在说谎。
+ * 截止日为空的条目留下：它没有"已过"的截止日，`effectiveStatus` 也判它 open。
+ *
+ * 收成函数而不是两处各写一遍，是为了统计页那个「点进去的条数 = 表格上的数字」的
+ * 不变式（issue #36）：CASE 里那份和 WHERE 里这份一旦分家，数字就开始骗人。
+ */
+function openCondition() {
+  return and(
+    eq(notices.status, 'open'),
+    or(
+      isNull(notices.deadlineAt),
+      sql`substr(${notices.deadlineAt}, 1, 10) >= ${siteDateIso(new Date())}`,
+    ),
+  );
+}
+
 function filterConditions(options: ListNoticesFilteredOptions) {
   const conditions = [];
   if (options.category) {
@@ -300,20 +329,11 @@ function filterConditions(options: ListNoticesFilteredOptions) {
     const keyword = keywordCondition(options.keyword);
     if (keyword) conditions.push(keyword);
   }
+  if (options.sourceId) {
+    conditions.push(eq(notices.sourceId, options.sourceId));
+  }
   if (options.openOnly) {
-    // 「还没截止」按**展示口径**判，与页面上的徽标同源（issue #43 的那件事）：
-    // 库内 status 是抓取时推导的，刚过截止的条目在下一轮抓取前仍写着 open。
-    // 只看未截止的人若拿到那条，看到的徽标却是「已截止」—— 筛选器在说谎。
-    // 截止日为空的条目留下：它没有"已过"的截止日，effectiveStatus 也判它 open。
-    conditions.push(
-      and(
-        eq(notices.status, 'open'),
-        or(
-          isNull(notices.deadlineAt),
-          sql`substr(${notices.deadlineAt}, 1, 10) >= ${siteDateIso(new Date())}`,
-        ),
-      ),
-    );
+    conditions.push(openCondition());
   }
   if (options.firstSeenWithinDays !== undefined) {
     // 同形状的 UTC ISO 字符串按字节序比较 = 按时间先后比较；下界形状的出处见
@@ -376,6 +396,72 @@ export async function listNoticeAgencies(): Promise<string[]> {
     for (const name of splitAgencies(row.agency)) names.add(name);
   }
   return [...names].sort((a, b) => a.localeCompare(b));
+}
+
+/**
+ * 按来源渠道聚合的收录面（issue #65）：统计页「各来源收录量」的表 + 首页来源下拉。
+ *
+ * 为什么值得单列一列「最近新收录」：源健康（issue #58 的 `consecutive_failures`）只看
+ * 「这一轮抓取有没有报错」，而**一个源可以天天成功却连续几周一条新的都不送**
+ * （源站改版、选择器失效、栏目换址）。那种故障在健康看板里是绿的。`first_seen_at`
+ * （#60 第 3 刀加的列）是这里唯一能揭穿它的判据。
+ *
+ * 登记表里有、但一条都没收录到的源**也要出现在结果里**（count 0）—— 那正是要看得见的情形。
+ * 反过来，条目引用了登记表里没有的源（#58 清掉的 `govcn` 那类死行）时 `registered=false`，
+ * 名字回落到 ID，让差额在表上看得见而不是被静默归并（issue #46 的同一件事）。
+ */
+export interface NoticeSourceFacet {
+  id: string;
+  /** 登记表里的名字；未登记的源回落到 ID */
+  name: string;
+  /** false = 条目引用了登记表里没有的源 */
+  registered: boolean;
+  count: number;
+  /** 未截止条数，判据与 `?open=1` 同一份 `openCondition()`（点进去的条数 = 表格数字） */
+  openCount: number;
+  /** 该源最近一次新收录条目的 `first_seen_at`；一条都没有时为 null */
+  lastFirstSeenAt: string | null;
+}
+
+export async function listNoticeSourceFacets(): Promise<NoticeSourceFacet[]> {
+  const db = await getDb();
+  const [grouped, registered] = await Promise.all([
+    db
+      .select({
+        id: notices.sourceId,
+        count: sql<number>`count(*)`,
+        openCount: sql<number>`sum(case when ${openCondition()} then 1 else 0 end)`,
+        lastFirstSeenAt: sql<string | null>`max(${notices.firstSeenAt})`,
+      })
+      .from(notices)
+      .groupBy(notices.sourceId),
+    db.select({ id: sources.id, name: sources.name }).from(sources),
+  ]);
+  const names = new Map(registered.map((row) => [row.id, row.name]));
+  const facets = new Map<string, NoticeSourceFacet>();
+  for (const row of registered) {
+    facets.set(row.id, {
+      id: row.id,
+      name: row.name,
+      registered: true,
+      count: 0,
+      openCount: 0,
+      lastFirstSeenAt: null,
+    });
+  }
+  for (const row of grouped) {
+    facets.set(row.id, {
+      id: row.id,
+      name: names.get(row.id) ?? row.id,
+      registered: names.has(row.id),
+      count: Number(row.count),
+      openCount: Number(row.openCount ?? 0),
+      lastFirstSeenAt: row.lastFirstSeenAt ?? null,
+    });
+  }
+  return [...facets.values()].sort(
+    (a, b) => b.count - a.count || a.id.localeCompare(b.id),
+  );
 }
 
 /** 按主键取单条；不存在返回 null（详情页与 /go 端点使用）。 */

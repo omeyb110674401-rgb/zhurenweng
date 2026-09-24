@@ -161,6 +161,7 @@ describe('parseHomeQuery：筛选状态与索引口径', () => {
       from: undefined,
       to: undefined,
       period: undefined,
+      source: undefined,
       sort: undefined,
       openOnly: false,
       sinceDays: undefined,
@@ -264,6 +265,35 @@ describe('describeHomeQuery / subFeedHref：条件的说法与地址（issue #63
     assert.equal(
       subFeedHref(parseHomeQuery({ agency: '司法部', lead: '1' }), 'https://x.test'),
       'https://x.test/feed.xml?agency=%E5%8F%B8%E6%B3%95%E9%83%A8&lead=1',
+    );
+  });
+});
+
+describe('source 参数：按来源筛选（issue #65）', () => {
+  it('source 是筛选维度（改了集合就该算），空串不算', () => {
+    assert.equal(parseHomeQuery({ source: 'miit' }).source, 'miit');
+    assert.equal(parseHomeQuery({ source: 'miit' }).hasFilter, true);
+    assert.equal(parseHomeQuery({ source: '' }).source, undefined);
+    assert.equal(parseHomeQuery({ source: '' }).hasFilter, false);
+    assert.equal(parseHomeQuery({ source: ['a', 'b'] }).source, 'a', '数组取首值，与其余参数一致');
+  });
+
+  it('摘要里的来源显示名字；查不到名字时退回 ID（宁可不好读，也不能把条件从说明里省掉）', () => {
+    const query = parseHomeQuery({ source: 'miit' });
+    assert.equal(describeHomeQuery(query, '工业和信息化部'), '来源：工业和信息化部');
+    assert.equal(describeHomeQuery(query), '来源：miit');
+    assert.equal(describeHomeQuery(query, undefined), '来源：miit');
+    assert.equal(
+      describeHomeQuery(parseHomeQuery({ source: 'miit', open: '1' }), '工信部'),
+      '来源：工信部 · 只看未截止',
+    );
+  });
+
+  it('子 feed 地址带上来源条件（订的必须是同一批条目）', () => {
+    assert.equal(subFeedHref(parseHomeQuery({ source: 'miit' })), '/feed.xml?source=miit');
+    assert.equal(
+      subFeedHref(parseHomeQuery({ source: 'miit', open: '1' })),
+      '/feed.xml?source=miit&open=1',
     );
   });
 });

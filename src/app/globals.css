@@ -1225,7 +1225,9 @@ body {
   border-radius: 6px;
 }
 
-.filter-agency {
+.filter-agency,
+/* 来源下拉（issue #65）：与机关下拉同一外观，选项里带收录条数所以更宽一点 */
+.filter-source {
   max-width: 280px;
   padding: 8px 10px;
   font-size: 14px;

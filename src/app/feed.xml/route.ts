@@ -1,11 +1,12 @@
 import { listNoticesFiltered } from '@/db/repo/notices';
+import { getSourceById } from '@/db/repo/sources';
 import { FEED_MAX_ITEMS, buildFeedXml } from '@/lib/feed';
 import { siteUrl } from '@/lib/site-url';
 import { describeHomeQuery, parseHomeQuery, subFeedHref, type HomeSearchParams } from '@/app/_lib/home-query';
 
 /**
  * RSS 2.0 feed 端点（issue #6 建立，issue #63 起支持子 feed）：
- * `GET /feed.xml`，或 `GET /feed.xml?category=…&open=1&since=7`（与首页同一套筛选参数）。
+ * `GET /feed.xml`，或 `GET /feed.xml?category=…&source=…&open=1&since=7`（与首页同一套筛选参数）。
  *
  * 内容随抓取管线实时更新，每次请求实时读库并按发布日期倒序生成
  * （上限 FEED_MAX_ITEMS 条），禁止静态预渲染与缓存。
@@ -33,6 +34,7 @@ function feedSearchParams(url: URL): HomeSearchParams {
     from: pick('from'),
     to: pick('to'),
     period: pick('period'),
+    source: pick('source'),
     open: pick('open'),
     since: pick('since'),
   };
@@ -45,6 +47,7 @@ export async function GET(request: Request): Promise<Response> {
     category: query.category,
     agency: query.agency,
     keyword: query.keyword,
+    sourceId: query.source,
     leadAgencyOnly: query.leadAgencyOnly && query.agency !== undefined,
     publishedFromMonth: query.from,
     publishedToMonth: query.to,
@@ -56,7 +59,9 @@ export async function GET(request: Request): Promise<Response> {
   });
   const base = siteUrl();
   // 条件为空串时是全量 feed：标题不带后缀、self 指回 /feed.xml 本身
-  const label = query.hasFilter ? describeHomeQuery(query) : undefined;
+  // 来源显示名字而不是 ID（与首页那行口径说明同源，`describeHomeQuery` 只少了查表这一步）
+  const sourceRecord = query.source === undefined ? null : await getSourceById(query.source);
+  const label = query.hasFilter ? describeHomeQuery(query, sourceRecord?.name) : undefined;
   const xml = buildFeedXml({
     siteUrl: base,
     notices,
