@@ -306,6 +306,11 @@ export interface AttachmentExtractReport {
   total: number;
   /** 已喂给摘要的附件（名称 + 链接） */
   fed: { name: string; url: string }[];
+  /** 已喂给摘要的条文合计字数（页面用它说「本站读到了多少字」） */
+  fedChars: number;
+  /** 已抽到条文的附件份数与字数（抽到了但本轮没喂给摘要 —— 影子档的正常形态） */
+  okFiles: number;
+  okChars: number;
   /** 各失败状态计数，用于「为什么读不到」的诚实说明 */
   failures: Partial<Record<AttachmentExtractStatus, number>>;
 }
@@ -324,11 +329,16 @@ export async function getNoticeAttachmentExtractReport(
     if (row.status === 'ok' || row.status === 'pending') continue;
     failures[row.status] = (failures[row.status] ?? 0) + 1;
   }
+  const fedRows = records.filter((row) => row.fedToSummary);
+  const okRows = records.filter((row) => row.status === 'ok');
+  const charsOf = (list: typeof records): number =>
+    list.reduce((sum, row) => sum + (row.charCount ?? 0), 0);
   return {
     total: records.length,
-    fed: records
-      .filter((row) => row.fedToSummary)
-      .map((row) => ({ name: row.name ?? row.url, url: row.url })),
+    fed: fedRows.map((row) => ({ name: row.name ?? row.url, url: row.url })),
+    fedChars: charsOf(fedRows),
+    okFiles: okRows.length,
+    okChars: charsOf(okRows),
     failures,
   };
 }

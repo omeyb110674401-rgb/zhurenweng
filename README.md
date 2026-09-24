@@ -247,11 +247,26 @@ lint 与 e2e 两个 job，同样只依赖 npm。
 
 worker 注册表中的 `summarize-notices` 任务（`worker/jobs/summarize-notices.ts`）
 对 `ai_summary_json` 为空、状态 `pending` 且**未截止**的条目调用 LLM 端口
-（`LlmPort`，输入正文纯文本），输出**参与导引**结构化摘要（这是什么 / 影响谁 /
-谁能提 / 逾期会怎样 / 截止日期 / 如何提意见 + 提交渠道清单），每段附**原文引用片段**，连同 `summary_model`
-落库（`notices.ai_summary_json`，形状见 `src/lib/summary-content.ts`）。摘要不概括条文 ——
-抓取到的正文是公告壳（生产实测均值 443 字），草案全文在附件里，卡片底部因此明写条文在哪（issue #55）。
+（`LlmPort`，输入 = 公告正文 **+ 附件里抽出的草案条文**），输出**参与导引**结构化摘要
+（这是什么 / 影响谁 / 谁能提 / 逾期会怎样 / **草案条文要点** / 截止日期 / 如何提意见 +
+提交渠道清单），每段附**原文引用片段**，连同 `summary_model`
+落库（`notices.ai_summary_json`，形状见 `src/lib/summary-content.ts`）。
+条文要点只在**附件正文真的进了提示词**时才存在：抓取到的公告正文平均只有 443 字，
+从壳里概括条文必然编造（issue #55/#56 因此删过这一段，issue #57 换了输入后重新启用）。
 抽到的渠道**不在摘要卡里渲染**，而是并入页面上唯一的「意见提交方式」块（issue #56，见下）。
+
+- **条文输入的预算**（`draftSourcesForSummary()`，`worker/jobs/summarize-notices.ts`）：每条公示
+  最多 3 份附件、每份 8,000 字按「第 X 条」锚点窗口结构感知截取、合计 ≤ 12,000 个汉字，
+  装不下就**整份不送**（半截条文会让模型把截断处当成规定本身）；仍然只发一次 LLM 请求。
+- **出处由程序反查，不由模型自报**（`buildQuotedSummary` 第三参）：每条要点的引用必须在本轮
+  真正喂进去的条文里逐字找到（比对待空白，因为 PDF 抽取带换行），短于 8 字不算出处，
+  **核对不上就丢弃这一条要点** —— 于是「页面上出现条文要点」的必要条件是附件正文进过提示词，
+  与模型听不听话无关。反查到的附件名随要点落库，详情页每条要点下面写着「出处：附件《…》」。
+- **档位 `ATTACHMENT_TEXT`**（`src/lib/attachment-mode.ts`，缺省 `on`）：`off` 完全不跑；
+  `shadow` 照常下载解析并写库出审计数、但摘要**不读**（页面一字不变，用于先验证成功面）；
+  `on` 摘要读。三处缺省（代码 / `.env.example` / compose 回退值）必须同值，
+  且 `shadow` 与 `on` 的产出差异由 `tests/e2e/summary-draft-input.test.mjs` 钉住 ——
+  这一档曾经没有调用者，属于 issue #58 定性的「幽灵旋钮」，接线后才改回 `on`。
 
 - **失败策略**：单条条目失败后重试 `SUMMARY_MAX_RETRIES` 次（默认 3，指数退避），
   仍失败置 `summary_status=failed_review` 转人工复核，worker 不再自动重试；

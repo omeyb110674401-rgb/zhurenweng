@@ -13,12 +13,14 @@
  * 配置写错要当场说清楚（与 `envInt` 同一取舍）：`ATTACHMENT_TEX=on` 这种笔误如果静默
  * 当成 off，会得到「附件功能上线了但什么都没发生」的错误结论。
  *
- * **缺省为什么是 `shadow` 而不是 `on`**：`on` 的语义是「摘要把附件文本当第二路输入」，
- * 而这条输入路径（issue #57 第 5 步）还没接线 —— `attachmentTextFeedsSummary()` 目前没有
- * 任何调用者。缺省值必须是**今天真会生效的那一档**：把一个还没兑现的档位写成缺省，
- * 就等于在配置里放一个幽灵旋钮（`sources.schedule_config_json` 的前例，issue #58 已为此
- * 删掉一列）。第 5 步接上之后把缺省改回 `on`，并由 `shadow` / `on` 产出不同摘要的 e2e
- * 用例证明这一档确实有差别 —— 在那之前，本文件的这一行就是全仓唯一诚实的表达。
+ * **缺省曾经是 `shadow`，现在是 `on`**（issue #57 第 5 步接线之后）：
+ * `on` 的语义是「摘要把附件文本当第二路输入」，这条路径由
+ * `worker/jobs/summarize-notices.ts` 的 `draftSourcesForSummary()` 实现，
+ * 并且有 e2e 证明**同一份夹具在两档下产出的摘要不同**。
+ * 在此之前它没有调用者，缺省写 `on` 就是一个幽灵旋钮（改它毫无效果）—— 那正是
+ * issue #58 删掉 `sources.schedule_config_json` 时定性的毛病，所以当时把三处缺省
+ * 统一收回 `shadow`。三方一致性由 `tests/unit/deploy-env-contract.test.mjs` 绑死：
+ * 代码缺省、`.env.example`、compose 回退值必须同值。
  */
 
 export type AttachmentTextMode = 'off' | 'shadow' | 'on';
@@ -29,9 +31,9 @@ function rawMode(): AttachmentTextMode {
   // 空串要当「未设置」：compose 用 `${ATTACHMENT_TEXT:-}` 形态传变量，操作者留空就会传进来
   // 一个空字符串 —— 按严格判定它是个非法档位，于是「留空用缺省」变成「留空就崩」。
   const raw = process.env.ATTACHMENT_TEXT?.trim();
-  const value = raw === undefined || raw === '' ? 'shadow' : raw.toLowerCase();
+  const value = raw === undefined || raw === '' ? 'on' : raw.toLowerCase();
   if ((MODES as readonly string[]).includes(value)) return value as AttachmentTextMode;
-  throw new Error(`ATTACHMENT_TEXT 不是合法档位：「${raw ?? ''}」（应为 off / shadow / on，未设置时缺省 shadow）`);
+  throw new Error(`ATTACHMENT_TEXT 不是合法档位：「${raw ?? ''}」（应为 off / shadow / on，未设置时缺省 on）`);
 }
 
 /** 抽取任务是否运行。 */

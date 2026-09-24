@@ -70,6 +70,19 @@ export interface QuotedSummaryChannel extends SummaryChannel {
 }
 
 /**
+ * 一条草案条文要点（issue #57 第 6 步）。
+ *
+ * 与普通段落多出的两个字段是**出处**：`source` 是这条要点的引用被反查到的那个附件文件名。
+ * 出处由程序算，不由模型报 —— 模型会把两份附件的内容混标到其中一份上，而读者从页面上
+ * 看不出这种错配，只会以为是我们编的。反查不到的一律不落库（见 `buildQuotedSummary`），
+ * 所以 `source` 为 null 只有一种来路：**改动前落库的旧格式摘要**，页面会明写「未标出处」。
+ */
+export interface QuotedDraftPoint extends SummarySection {
+  source: string | null;
+  sourceUrl: string | null;
+}
+
+/**
  * ai_summary_json 的落库形状。
  */
 export interface QuotedSummary {
@@ -79,8 +92,8 @@ export interface QuotedSummary {
   whoCanSubmit: SummarySection;
   /** 逾期会怎样（同上） */
   afterDeadline: SummarySection;
-  /** 历史字段，仅为重刷期间读旧数据保留；新输出恒为空数组 */
-  keyPoints: SummarySection[];
+  /** 历史字段（#56 停用）→ 现为**草案条文要点**：只有喂了附件条文才会产生（issue #57 第 5 步） */
+  keyPoints: QuotedDraftPoint[];
   /** deadline.text 为 ISO 日期（YYYY-MM-DD）或 null */
   deadline: SummaryDeadlineSection;
   howToComment: SummarySection;
@@ -157,27 +170,74 @@ export function normalizeChannels(
 }
 
 /**
+ * 引用与条文比对用的「指纹」：去掉全部空白与包裹引号。
+ *
+ * 为什么要去空白：附件抽取出来的文本带 PDF/DOCX 的换行与缩进，模型引用时常把它们压成
+ * 一行 —— 按原样 indexOf 会把**真的逐字引用**判成对不上，那种误杀等于让附件白读一遍。
+ * 去掉空白只可能让比对**变松**（不会凭空造出匹配），代价是可接受的方向。
+ */
+function quoteFingerprint(text: string): string {
+  return text.replace(/[\s\u3000]+/g, '').replace(/^["'“「『]|["'”」』]$/g, '');
+}
+
+/**
+ * 短于这个字数的"引用"不构成可核对的出处。
+ * 像「第三条」「本办法」这种片段在任何公文里都能蒙中，标它「摘自附件《X》」等于给一句
+ * 没有信息量的话盖上"有据可查"的章 —— 宁可丢条目，不标假出处。
+ */
+const MIN_VERIFIABLE_QUOTE_CHARS = 8;
+
+/** 在给出的条文里反查这条引用的出处；找不到（或太短不可核对）返回 null。 */
+export function findDraftSourceForQuote<T extends { name: string; url: string; text: string }>(
+  quote: string | null,
+  sources: T[] | undefined,
+): T | null {
+  if (!quote) return null;
+  const normalized = quoteFingerprint(quote);
+  if (normalized.length < MIN_VERIFIABLE_QUOTE_CHARS) return null;
+  for (const source of sources ?? []) {
+    if (quoteFingerprint(source.text).includes(normalized)) return source;
+  }
+  return null;
+}
+
+/**
  * 把 LLM 返回的扁平摘要 + 可选引用归一化为落库形状。
  * 字段缺失 / 类型异常时保守兜底，保证落库 JSON 永远符合 QuotedSummary 形状。
+ *
+ * `draftSources` 是本轮**实际喂给模型的条文**（issue #57 第 5 步）：条文要点必须
+ * 用它反查出处。没给这个参数（后台人工录入、影子档）时，模型即使编出了 keyPoints
+ * 也会全部丢弃 —— 于是「页面上出现了条文要点」这件事，只有在附件正文真的进了
+ * 提示词时才成立，这条不变量不依赖提示词措辞是否被模型遵守。
  */
 export function buildQuotedSummary(
   summary: StructuredSummary,
   quotes?: SummaryQuotes,
+  draftSources?: { name: string; url: string; text: string }[],
 ): QuotedSummary {
-  const keyPoints = Array.isArray(summary.keyPoints) ? summary.keyPoints : [];
+  const rawPoints = Array.isArray(summary.keyPoints) ? summary.keyPoints : [];
   const quotePoints = Array.isArray(quotes?.keyPoints) ? (quotes.keyPoints as (string | null)[]) : [];
   const text = (value: unknown): string =>
     typeof value === 'string' ? value.trim() : '';
+
+  const keyPoints: QuotedDraftPoint[] = [];
+  rawPoints.forEach((point, index) => {
+    const pointText = text(point);
+    if (pointText === '') return;
+    const quote = cleanQuote(quotePoints[index]);
+    const source = findDraftSourceForQuote(quote, draftSources);
+    // 反查不到 ⇒ 这条要点没有可核对的出处（模型改写了原文，或从公告壳里"提炼"出条文）。
+    // 丢弃而不是照登：详情页那句「摘自官方原文」不该为一条核对不上的话背书。
+    if (source === null) return;
+    keyPoints.push({ text: pointText, quote, source: source.name, sourceUrl: source.url });
+  });
 
   return {
     what: { text: text(summary.what), quote: cleanQuote(quotes?.what) },
     who: { text: text(summary.who), quote: cleanQuote(quotes?.who) },
     whoCanSubmit: { text: text(summary.whoCanSubmit), quote: cleanQuote(quotes?.whoCanSubmit) },
     afterDeadline: { text: text(summary.afterDeadline), quote: cleanQuote(quotes?.afterDeadline) },
-    keyPoints: keyPoints.map((point, index) => ({
-      text: text(point),
-      quote: cleanQuote(quotePoints[index]),
-    })),
+    keyPoints,
     deadline: {
       text:
         summary.deadline === null || summary.deadline === undefined
@@ -231,12 +291,21 @@ export function parseQuotedSummary(value: unknown): QuotedSummary | null {
   const howToComment = section(record.howToComment);
   if (!what || !deadline || !howToComment) return null;
 
-  const keyPoints: SummarySection[] = [];
+  // 条文要点：`source` 缺失是**允许的** —— 改动前落库的旧格式摘要没有这个字段。
+  // 缺就照实缺着，由渲染层标「未标出处」，而不是补一个看起来像出处的值。
+  const keyPoints: QuotedDraftPoint[] = [];
   if (Array.isArray(record.keyPoints)) {
     for (const raw of record.keyPoints) {
       const point = section(raw);
       if (!point) return null;
-      keyPoints.push(point);
+      const item = raw as Record<string, unknown>;
+      const sourceText = typeof item.source === 'string' ? item.source.trim() : '';
+      const sourceUrl = typeof item.sourceUrl === 'string' ? item.sourceUrl.trim() : '';
+      keyPoints.push({
+        ...point,
+        source: sourceText === '' ? null : sourceText,
+        sourceUrl: sourceUrl === '' ? null : sourceUrl,
+      });
     }
   }
 

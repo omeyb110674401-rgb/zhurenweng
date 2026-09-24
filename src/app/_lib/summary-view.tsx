@@ -7,15 +7,17 @@ import {
   type SummarySection,
   type SummaryStatus,
 } from '@/lib/summary-content';
+import { draftAvailability, type DraftAvailabilityInput } from '@/lib/summary-display';
 
 /**
- * 详情页摘要展示（issue #4 建立，issue #55/#56 重构为「参与导引」）。
+ * 详情页摘要展示（issue #4 建立，issue #55/#56 重构为「参与导引」，issue #57 第 6 步
+ * 重新启用条文要点）。
  *
- * 段落：这是什么 / 影响谁 / 谁能提 / 逾期会怎样 / 截止日期 / 如何提意见。
- * 两处刻意不在此渲染：**关键条款**（抓取到的正文是公告壳，生产实测均值 443 字，
- * 草案条文在附件里，从壳里概括只会产出看着像条款的元信息复述）与**渠道清单**
- * （地址在页面上只有一个位置，见下方 SummaryView 的注释）。
- * `keyPoints` 仍保留渲染通路，供存量摘要在重刷完成前正常显示（不是给新输出用的）。
+ * 段落：这是什么 / 影响谁 / 谁能提 / 逾期会怎样 / **草案条文要点** / 截止日期 / 如何提意见。
+ * 「条文要点」与其余各段不同：它的依据不是公告壳，而是本站从附件里抽出的正文，
+ * 因此每条都带**出处**（哪个附件），且出处是程序按引用反查出来的（`buildQuotedSummary`）——
+ * 反查不到的要点根本不会落库，所以这里不需要防御"模型编了条文"。
+ * **渠道清单**仍刻意不在此渲染：地址在页面上只有一个位置，见下方 SummaryView 的注释。
  *
  * - done：渲染本体；可缺段（谁能提 / 逾期会怎样）文本为空时**整段不出现**，
  *   避免出现「标题下面没有内容」（issue #55 实测线上有过一条空的「影响谁」）。
@@ -24,24 +26,40 @@ import {
  * - 已截止且从未入队：「未生成摘要」说明块（issue #58）——「生成中」是对不会发生之事的
  *   承诺，这块把它换成实话，并把读者指向同一页上不依赖大模型的两块内容。
  * - 「AI 生成，仅供参考，以官方原文为准」标注在卡片头部显著位置（合规硬性要求）。
- * - 卡片底部明写条文在哪：附件与官方原文 —— 这是本次重构的落脚点，
- *   与其让摘要装作总结了条文，不如把读者准确地送到条文所在。
+ * - 卡片底部说明条文在哪（`draftAvailability` 四分支）：读到了并用上了 / 读到了但本页
+ *   未用 / 有附件但读不到 / 没有随文附件 —— 每一句都说的是**本页实际发生的事**。
  */
 
 export const AI_DISCLAIMER_TEXT = 'AI 生成，仅供参考，以官方原文为准';
 
-/** 原文引用块：样式与摘要正文区分，点击打开官方原文。 */
-function SectionQuote({ notice, quote }: { notice: NoticeRecord; quote: string }) {
+/**
+ * 原文引用块：样式与摘要正文区分，点击打开出处。
+ *
+ * `href` 缺省是官方原文页；条文要点的引用则指向**该附件本身**（issue #57）——
+ * 读者核对「这条要点是不是条文里写的」时，正确的落地页是那份 PDF/DOCX，
+ * 而不是没有这些条文的公告页。
+ */
+function SectionQuote({
+  notice,
+  quote,
+  href,
+}: {
+  notice: NoticeRecord;
+  quote: string;
+  href?: string;
+}) {
+  const target = href ?? notice.url;
+  const isAttachment = target !== notice.url;
   return (
     <a
       className="summary-quote"
-      href={notice.url}
+      href={target}
       target="_blank"
       rel="noopener noreferrer"
       data-testid="summary-quote"
     >
       <span className="summary-quote-text">「{quote}」</span>
-      <span className="summary-quote-jump">查看原文↗</span>
+      <span className="summary-quote-jump">{isAttachment ? '查看附件↗' : '查看原文↗'}</span>
     </a>
   );
 }
@@ -88,10 +106,17 @@ export function SummaryView({
   notice,
   summaryJson,
   summaryModel,
+  attachmentReport,
 }: {
   notice: NoticeRecord;
   summaryJson: string;
   summaryModel: string | null;
+  /**
+   * 附件条文的可读情况（issue #57 第 6 步）。未传 / null = 未探测过这份公示的附件
+   * （该源不产附件，或抽取任务还没跑到），此时底部说明回到改动前的通用文案 ——
+   * 没有事实就不说话，比猜一个分支诚实。
+   */
+  attachmentReport?: DraftAvailabilityInput | null;
 }): ReactNode {
   const summary: QuotedSummary | null = parseQuotedSummary(safeParseJson(summaryJson));
   if (summary === null) {
@@ -100,6 +125,7 @@ export function SummaryView({
   }
 
   const deadlineText = summary.deadline.text ?? notice.deadlineAt ?? '未标注';
+  const draft = draftAvailability(attachmentReport ?? null);
 
   return (
     <section className="summary-card" data-testid="ai-summary">
@@ -125,15 +151,26 @@ export function SummaryView({
           section={summary.afterDeadline}
           testId="summary-after-deadline"
         />
-        {/* 历史段：只可能在重刷完成前的存量摘要里出现 */}
+        {/* 条文要点（issue #57 第 6 步）：依据是附件正文，不是公告壳，所以每条都带出处 */}
         {summary.keyPoints.length > 0 ? (
           <div className="summary-section" data-testid="summary-key-points">
-            <h2 className="summary-section-title">关键条款</h2>
+            <h2 className="summary-section-title">草案条文要点</h2>
             <ul className="summary-points">
               {summary.keyPoints.map((point, index) => (
                 <li key={index}>
                   <p className="summary-section-text">{point.text}</p>
-                  {point.quote ? <SectionQuote notice={notice} quote={point.quote} /> : null}
+                  {point.quote ? (
+                    <SectionQuote
+                      notice={notice}
+                      quote={point.quote}
+                      href={point.sourceUrl ?? undefined}
+                    />
+                  ) : null}
+                  <p className="draft-point-source" data-testid="summary-draft-point-source">
+                    {point.source
+                      ? `出处：附件《${point.source}》（本站从附件逐字提取，未做改写）`
+                      : '出处：未标注（本条摘要生成于附件出处核对上线之前）'}
+                  </p>
                 </li>
               ))}
             </ul>
@@ -154,15 +191,30 @@ export function SummaryView({
       </div>
 
       <p className="summary-sources" data-testid="summary-sources">
-        {notice.attachments.length > 0 ? (
+        {draft.kind === 'read-and-used' ? (
           <>
-            本站索引的是公告本身；草案全文、标准文本与名单等<b>具体条文在官方附件里</b>，
-            请从下方附件清单或官方原文页面获取。
+            上方「草案条文要点」摘自<b>本站从随文附件里逐字读取的条文</b>（{draft.files} 份 /
+            约 {draft.chars} 字），条文本身以下方附件与官方原文为准。
           </>
-        ) : (
+        ) : draft.kind === 'read-not-used' ? (
+          <>
+            本站已能读取随文附件的草案条文（{draft.files} 份），<b>本页摘要未使用这些条文</b>；
+            具体规定请看下方附件清单或官方原文页面。
+          </>
+        ) : draft.kind === 'unreadable' ? (
+          <>
+            这份公示有 {draft.files} 份随文附件，但<b>本站未能读取其中的条文</b>
+            （源站拒绝访问，或该格式暂不支持解析）。请直接下载附件，或到官方原文页面查看。
+          </>
+        ) : draft.kind === 'no-attachments' ? (
           <>
             本站索引的是公告本身；这份公示<b>没有随文附件</b>，
             具体条文与完整内容以官方原文页面为准。
+          </>
+        ) : (
+          <>
+            本站索引的是公告本身；草案全文、标准文本与名单等<b>具体条文在官方附件里</b>，
+            请从下方附件清单或官方原文页面获取。
           </>
         )}
       </p>

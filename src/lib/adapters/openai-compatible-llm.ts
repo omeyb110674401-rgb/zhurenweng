@@ -1,4 +1,4 @@
-import type { LlmPort, LlmSummarizeInput, SummaryChannel, SummaryChannelKind } from '../ports.ts';
+import type { DraftSource, LlmPort, LlmSummarizeInput, SummaryChannel, SummaryChannelKind } from '../ports.ts';
 import {
   SUMMARY_CHANNEL_KINDS,
   type QuotedStructuredSummary,
@@ -32,6 +32,8 @@ import {
 const DEFAULT_TIMEOUT_MS = 60_000;
 /** 正文超过部分截断（国家级公示原文一般在数 KB 量级，上限防异常超大页面）。 */
 const MAX_BODY_CHARS = 12_000;
+/** 条文要点条数上限：提示词要 2-4 条，给一点余量；再多就是模型在凑数而不是在摘录。 */
+const MAX_KEY_POINTS = 6;
 
 /** 智谱开放平台默认基址与模型（glm 预设用）。 */
 export const GLM_DEFAULT_API_BASE = 'https://open.bigmodel.cn/api/paas/v4';
@@ -57,16 +59,20 @@ export const GLM_DEFAULT_MODEL = 'glm-4-flash';
  * 现在明确写成可缺段，并要求泛称留空。
  */
 const SYSTEM_PROMPT = [
-  '你是政府公示的「参与导引」助手。用户会给出一份公示的标题与网页正文纯文本。',
-  '重要背景：这类页面的正文通常只是公告本身，真正的草案条文、标准文本、名单在附件里，不在给你的文本中。',
-  '因此：不要编写、推测或概括任何「条款内容」，只回答公告里真实存在的参与信息。',
+  '你是政府公示的「参与导引」助手。用户会给出一份公示的标题与网页正文纯文本，可能还会附上本站从该公示官方文档里提取的「附件条文」。',
+  '重要背景：网页正文通常只是公告本身；草案条文、标准文本、名单在**附件**里，只有给了「附件条文」段落时你才真的看得到它们。',
+  '因此：没有「附件条文」段落时，不要编写、推测或概括任何「条款内容」，只回答公告里真实存在的参与信息。',
   '请只输出一个 JSON 对象（不要输出任何解释、markdown 代码围栏或其他文字），字段如下：',
-  '{"what":"这是什么：一句话概括这份公示在做什么，40 字以内","who":"影响谁：只有原文明确写出受这份文件影响的主体时才写（如运输机场运营人、医疗器械注册人、标准起草单位）；原文只写「社会公众」「有关单位和个人」这类泛称时**留空字符串** —— 那是「谁能提」，不是「影响谁」。这类页面的正文通常不含受影响主体（它在附件的草案里），宁可留空也不要推断","whoCanSubmit":"谁能提：原文写明的可提出意见的主体或范围；原文未提及则留空字符串","afterDeadline":"逾期会怎样：原文写明超过截止日期后如何处理（如逾期视为无意见、不再受理）；原文未提及则留空字符串","deadline":"截止日期：YYYY-MM-DD，原文未明确则为 null","howToComment":"如何提意见：一句话概述提交途径，40 字以内","channels":[{"kind":"email|phone|mail|online|other","value":"可直接使用的具体值"}],"quotes":{"what":"what 对应的原文引用片段（逐字摘录，不超过100字）","who":"who 对应的原文引用片段，留空时空字符串","whoCanSubmit":"谁能提对应的原文片段，没有则空字符串","afterDeadline":"逾期会怎样对应的原文片段，没有则空字符串","deadline":"截止日期对应的原文引用片段","howToComment":"如何提意见对应的原文引用片段","channels":["每条渠道对应的原文片段，顺序与 channels 严格一致"]}}',
+  '{"what":"这是什么：一句话概括这份公示在做什么，40 字以内","who":"影响谁：只有原文明确写出受这份文件影响的主体时才写（如运输机场运营人、医疗器械注册人、标准起草单位）；原文只写「社会公众」「有关单位和个人」这类泛称时**留空字符串** —— 那是「谁能提」，不是「影响谁」。这类页面的正文通常不含受影响主体（它在附件的草案里），宁可留空也不要推断","whoCanSubmit":"谁能提：原文写明的可提出意见的主体或范围；原文未提及则留空字符串","afterDeadline":"逾期会怎样：原文写明超过截止日期后如何处理（如逾期视为无意见、不再受理）；原文未提及则留空字符串","keyPoints":["草案条文要点：仅当给出「附件条文」时填写，2-4 条从条文中读到的实质规定，每条一句话、40 字以内；没有附件条文段落时必须为空数组"],"deadline":"截止日期：YYYY-MM-DD，原文未明确则为 null","howToComment":"如何提意见：一句话概述提交途径，40 字以内","channels":[{"kind":"email|phone|mail|online|other","value":"可直接使用的具体值"}],"quotes":{"what":"what 对应的原文引用片段（逐字摘录，不超过100字）","who":"who 对应的原文引用片段，留空时空字符串","whoCanSubmit":"谁能提对应的原文片段，没有则空字符串","afterDeadline":"逾期会怎样对应的原文片段，没有则空字符串","keyPoints":["与 keyPoints 一一对应的逐字条文原文，顺序严格一致，没有则为 null"],"deadline":"截止日期对应的原文引用片段","howToComment":"如何提意见对应的原文引用片段","channels":["每条渠道对应的原文片段，顺序与 channels 严格一致"]}}',
   '要求：',
   '1. 只依据给定原文，不编造、不猜测；原文没有的字段留空字符串或 null，宁可留空也不要凑。',
   '2. 引用必须是原文中的逐字连续片段。',
   '3. channels 的 value 只放地址本身（如 xxx@yyy.gov.cn、010-6601xxxx、含邮编的邮寄地址、网址），说明性文字放 howToComment；一份公示常同时给邮件、信函、传真、网址几种渠道，应全部列出。',
   '4. channels 没有可列的渠道时输出空数组。',
+  '5. keyPoints 是这份计划里**唯一**允许写条文内容的段落，它的依据只能是「附件条文」段落：',
+  '   - 每条要点都要在 quotes.keyPoints 给出对应的逐字条文原句（同一下标配对，错配比留空更糟）；',
+  '   - 附件条文可能只是草案的一部分（本站按字数预算截取），因此只写你确实在文本里读到的规定，不要用「规定了」「明确了」去概括看不到的部分；',
+  '   - 受影响主体（who）往往写在条文里（如「中华人民共和国境内的某某企业从事下列活动…」），给了条文时 who 可以据实填写，其引用取自条文。',
 ].join('\n');
 
 /** 已解析并校验通过的模型配置（工厂与门控共用）。 */
@@ -264,12 +270,32 @@ export function normalizeModelSummary(raw: unknown): QuotedStructuredSummary {
     };
   });
 
-  const quotes = readQuotes(record.quotes);
+  const rawQuotes = readQuotes(record.quotes);
+  // keyPoints 与它的引用必须**先按原始下标配好、再过滤空项** —— 这是 normalizeChannels
+  // 的同一条教训（issue #56）：先 filter 再取引用，第 3 条要点就会挂上第 2 条的原句，
+  // 而页面把它显示成「摘自官方原文」，读者无从发现配错了。
+  const rawKeyPoints = Array.isArray(record.keyPoints) ? record.keyPoints : [];
+  const rawKeyPointQuotes = Array.isArray(rawQuotes?.keyPoints) ? rawQuotes.keyPoints : [];
+  const keyPoints: string[] = [];
+  const keyPointQuotes: (string | null)[] = [];
+  rawKeyPoints.forEach((raw, index) => {
+    if (keyPoints.length >= MAX_KEY_POINTS) return;
+    const point = typeof raw === 'string' ? raw.trim() : '';
+    if (point === '') return;
+    const quote = rawKeyPointQuotes[index];
+    keyPoints.push(point);
+    keyPointQuotes.push(typeof quote === 'string' && quote.trim() !== '' ? quote.trim() : null);
+  });
+  const quotes = rawQuotes
+    ? { ...rawQuotes, ...(keyPointQuotes.length > 0 ? { keyPoints: keyPointQuotes } : { keyPoints: undefined }) }
+    : undefined;
+
   return {
     what,
     who: optionalText('who'),
     whoCanSubmit: optionalText('whoCanSubmit'),
     afterDeadline: optionalText('afterDeadline'),
+    ...(keyPoints.length > 0 ? { keyPoints } : {}),
     deadline,
     howToComment,
     channels,
@@ -290,6 +316,13 @@ function readQuotes(raw: unknown): SummaryQuotes | undefined {
         typeof item === 'string' && item.trim().length > 0 ? item.trim() : null,
       )
     : undefined;
+  // keyPoints 的引用允许缺项（null），由调用方与 keyPoints 一一对齐后再过滤 —— 
+  // 空串会被读成 null，这样「模型漏了第 2 条的引用」不会被误配到第 1 条上。
+  const keyPointQuotes = Array.isArray(record.keyPoints)
+    ? record.keyPoints.map((item) =>
+        typeof item === 'string' && item.trim().length > 0 ? item.trim() : null,
+      )
+    : undefined;
   return {
     what: quote('what'),
     who: quote('who'),
@@ -298,6 +331,7 @@ function readQuotes(raw: unknown): SummaryQuotes | undefined {
     deadline: quote('deadline'),
     howToComment: quote('howToComment'),
     ...(channelQuotes ? { channels: channelQuotes } : {}),
+    ...(keyPointQuotes ? { keyPoints: keyPointQuotes } : {}),
   };
 }
 
@@ -311,7 +345,40 @@ function userPrompt(input: LlmSummarizeInput): string {
     `官方原文链接：${input.url}`,
     '正文纯文本：',
     body.length > 0 ? body : '（未抓取到正文，仅能基于标题判断）',
-  ].join('\n');
+    draftBlock(input.draftSources),
+  ]
+    .filter((part) => part.length > 0)
+    .join('\n');
+}
+
+/** 附件条文的总字符上限（最后一道防线：调用方已按字数预算截取，这里挡住把整份文档直接塞进来的调用）。 */
+const MAX_DRAFT_TOTAL_CHARS = 24_000;
+
+/**
+ * 「附件条文」段落（issue #57 第 5 步）。
+ *
+ * 没有条文时返回**空串**（而不是「（无附件）」之类的占位）—— 提示词里那句
+ * 「没有『附件条文』段落时 keyPoints 必须为空数组」的依据就是这个段落出现与否，
+ * 占位文字会让「没给条文」和「给了空条文」看起来一样。
+ */
+export function draftBlock(sources: DraftSource[] | undefined): string {
+  const usable = (sources ?? []).filter((item) => item.text.trim().length > 0);
+  if (usable.length === 0) return '';
+  const parts: string[] = [
+    `附件条文（本站从该公示的官方附件中逐字提取，共 ${usable.length} 份。这是草案正文本身，不是公告；只写你在这里确实读到的规定）：`,
+  ];
+  let left = MAX_DRAFT_TOTAL_CHARS;
+  usable.forEach((item, index) => {
+    const label = `【附件 ${index + 1}：${item.name}】`;
+    if (left <= 0) {
+      parts.push(`…（另有 ${usable.length - index} 份附件条文超出字数预算，未提供）`);
+      return;
+    }
+    const text = item.text.trim().slice(0, left);
+    left -= text.length;
+    parts.push(label, text);
+  });
+  return parts.join('\n');
 }
 
 export class OpenAiCompatibleLlm implements LlmPort {

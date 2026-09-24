@@ -148,11 +148,22 @@ describe('shouldAlertForSourceFailure：第 2 轮必发，之后每 7 轮封顶�
 });
 
 describe('附件档位（ATTACHMENT_TEXT）：抽取与「摘要读」是两件事', () => {
-  it('未设置 → shadow（缺省必须是今天真会生效的那一档）', () => {
+  it('未设置 → on（条文已接入摘要，缺省必须是真会生效的那一档）', () => {
     withEnv('ATTACHMENT_TEXT', undefined, () => {
-      assert.equal(attachmentMode(), 'shadow');
-      assert.equal(attachmentExtractionEnabled(), true, 'shadow 仍要下载并解析 —— 审计数就靠这一轮出');
-      assert.equal(attachmentTextFeedsSummary(), false, 'shadow 不得让摘要读附件文本');
+      assert.equal(attachmentMode(), 'on');
+      assert.equal(attachmentExtractionEnabled(), true);
+      assert.equal(
+        attachmentTextFeedsSummary(),
+        true,
+        '缺省若收成 shadow，#57 抽出的 147 万字就还是不喂给摘要，页面一个字都不会变',
+      );
+    });
+  });
+
+  it('shadow 仍下载并解析，只是摘要不读 —— 这一档与 on 的唯一区别', () => {
+    withEnv('ATTACHMENT_TEXT', 'shadow', () => {
+      assert.equal(attachmentExtractionEnabled(), true, '影子轮的审计数就靠它');
+      assert.equal(attachmentTextFeedsSummary(), false, 'shadow 不得让摘要读附件文本（页面必须一字不变）');
     });
   });
 
@@ -168,11 +179,14 @@ describe('附件档位（ATTACHMENT_TEXT）：抽取与「摘要读」是两件�
   });
 
   it('空串与空白按未设置处理（compose 的 ${VAR:-} 会传空串），大小写不敏感', () => {
-    for (const value of ['', '   ', 'SHADOW']) {
+    for (const value of ['', '   ']) {
       withEnv('ATTACHMENT_TEXT', value, () => {
-        assert.equal(attachmentMode(), 'shadow', `${JSON.stringify(value)} 应落到 shadow`);
+        assert.equal(attachmentMode(), 'on', `${JSON.stringify(value)} 应落到缺省 on`);
       });
     }
+    withEnv('ATTACHMENT_TEXT', 'SHADOW', () => {
+      assert.equal(attachmentMode(), 'shadow', '档位名大小写不敏感');
+    });
   });
 
   it('档位写错当场报错，不静默当成 off', () => {

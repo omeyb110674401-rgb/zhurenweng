@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { describe, it } from 'node:test';
 import {
   SUMMARY_NOT_SUMMARIZED_STATUS,
+  draftAvailability,
   summaryDisplayState,
 } from '../../src/lib/summary-display.ts';
 
@@ -104,5 +105,55 @@ describe('SUMMARY_NOT_SUMMARIZED_STATUS 是队列与文案共用的唯一答案'
       /ne\(notices\.status,\s*SUMMARY_NOT_SUMMARIZED_STATUS\)/,
       '入队过滤必须引用同一个常量，否则「会不会生成」又变成两处各写一份',
     );
+  });
+});
+
+describe('draftAvailability：「条文在哪」这句话只说事实（issue #57 第 6 步）', () => {
+  it('读到了、并且用来写本页要点', () => {
+    assert.deepEqual(
+      draftAvailability({ total: 3, fedChars: 5210, okFiles: 2 }),
+      { kind: 'read-and-used', files: 2, chars: 5210 },
+    );
+  });
+
+  it('读到了但本页摘要没用（影子档）⇒ 不能说要点摘自条文', () => {
+    const state = draftAvailability({ total: 2, fedChars: 0, okFiles: 1 });
+    assert.equal(state.kind, 'read-not-used');
+    assert.equal(state.files, 1, '份数要说实读到的那几份，不是清单条数');
+  });
+
+  it('有附件但一份都没读到 ⇒ 明说读不到，而不是含糊指向附件清单', () => {
+    assert.deepEqual(draftAvailability({ total: 4, fedChars: 0, okFiles: 0 }), {
+      kind: 'unreadable',
+      files: 4,
+    });
+  });
+
+  it('抽取表里没行且公告确实无附件 ⇒ 没有随文附件', () => {
+    assert.deepEqual(draftAvailability({ total: 0, fedChars: 0, okFiles: 0 }), {
+      kind: 'no-attachments',
+    });
+  });
+
+  it('没探测过就是没探测过（抽取还没跑到这条时不能断言「没有附件」）', () => {
+    assert.deepEqual(draftAvailability(null), { kind: 'not-probed' });
+  });
+
+  it('fedChars>0 而 okFiles=0（不该发生）时份数至少报 1，别让页面写出「0 份 / 3 万字」', () => {
+    assert.deepEqual(draftAvailability({ total: 1, fedChars: 30_000, okFiles: 0 }), {
+      kind: 'read-and-used',
+      files: 1,
+      chars: 30_000,
+    });
+  });
+
+  it('详情页把附件报告接到了摘要卡（漏接＝四个分支永远走默认文案，且不会报错）', () => {
+    const pageText = readRepoFile('src/app/notices/[id]/page.tsx');
+    assert.match(
+      pageText,
+      /getNoticeAttachmentExtractReport\(notice\.id\)/,
+      '详情页应真的去查抽取状态 —— 不查就只能永远说"条文在附件里"',
+    );
+    assert.match(pageText, /attachmentReport=\{draftReport\}/, '查到却没传进摘要卡 = 白查');
   });
 });

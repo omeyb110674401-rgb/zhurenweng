@@ -56,3 +56,39 @@ export function summaryDisplayState(input: SummaryDisplayInput): SummaryDisplayS
   }
   return 'generating';
 }
+
+/**
+ * 「条文在哪」的四种答案（issue #57 第 6 步）。
+ *
+ * 判据只用**仓库里已经存在的事实**（附件行的状态与字数），不看 `ATTACHMENT_TEXT` 档位：
+ * 档位是运维配置，读者既不关心也看不懂；他们要的是「这页到底有没有替我读过条文」。
+ *
+ * 刻意区分「读到了」与「读到了并且用来写本页要点」：影子档下前者成立、后者不成立，
+ * 这时页面只说附件能读、不暗示摘要里有条文 —— 那正是 issue #22/#58 反复清掉的那类
+ * 「承诺还没发生的事」。
+ */
+export type DraftAvailability =
+  | { kind: 'read-and-used'; files: number; chars: number }
+  | { kind: 'read-not-used'; files: number }
+  | { kind: 'unreadable'; files: number }
+  | { kind: 'no-attachments' }
+  | { kind: 'not-probed' };
+
+/** `draftAvailability` 需要的字段（结构型入参，避免显示层依赖仓储模块）。 */
+export interface DraftAvailabilityInput {
+  total: number;
+  fedChars: number;
+  okFiles: number;
+}
+
+export function draftAvailability(report: DraftAvailabilityInput | null): DraftAvailability {
+  if (report === null) return { kind: 'not-probed' };
+  if (report.total === 0) return { kind: 'no-attachments' };
+  if (report.fedChars > 0) {
+    // 份数取上界 okFiles；一条都没标 ok 却又有 fedChars（不该发生）时至少报 1 份，
+    // 免得页面写出「已读取 0 份附件共 3 万字」这种自相矛盾的话。
+    return { kind: 'read-and-used', files: Math.max(report.okFiles, 1), chars: report.fedChars };
+  }
+  if (report.okFiles > 0) return { kind: 'read-not-used', files: report.okFiles };
+  return { kind: 'unreadable', files: report.total };
+}

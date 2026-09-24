@@ -54,14 +54,22 @@ export interface StubLlmOptions {
   callsFile?: string;
 }
 
-function failuresFromEnv(raw: string | undefined): number | 'always' {
-  if (raw === undefined || raw === '') return 0;
+function failuresFromEnv(raw: string | undefined): number | 'always' {  if (raw === undefined || raw === '') return 0;
   if (raw === 'always') return 'always';
   const parsed = Number(raw);
   if (!Number.isInteger(parsed) || parsed < 0) {
     throw new Error(`非法的 LLM_STUB_FAILURES "${raw}"（应为非负整数或 always）`);
   }
   return parsed;
+}
+
+/** 该份条文里第一个非空行 —— stub 的「逐字引用」取值，保证引用一定能在条文里找到。 */
+function firstLineOf(text: string): string {
+  const line = text
+    .split('\n')
+    .map((item) => item.trim())
+    .find((item) => item.length > 0);
+  return line ?? '';
 }
 
 export class StubLlm implements LlmPort {
@@ -96,6 +104,19 @@ export class StubLlm implements LlmPort {
     }
 
     const summary: QuotedStructuredSummary = { ...STUB_SUMMARY, quotes: { ...STUB_SUMMARY_QUOTES } };
+    // 附件条文决定 stub 是否产出条文要点（issue #57 第 5 步）—— 这不是为了模仿模型行为，
+    // 而是让「同一份夹具、档位不同 ⇒ 摘要内容不同」这件事可被 e2e 断言。
+    // 没有这条回响，`shadow` 与 `on` 在两档下会得到逐字相同的摘要，档位就还是个幽灵旋钮。
+    // 引用的取值刻意**逐字来自条文本身**（取该份条文的首个非空行），这样详情页的
+    // 出处反查（哪条要点来自哪个附件）在测试里走的是真实路径。
+    const draft = input.draftSources ?? [];
+    if (draft.length > 0) {
+      const quotes = draft.map((source) => firstLineOf(source.text));
+      summary.keyPoints = draft.map(
+        (source, index) => `【stub】条文要点 ${index + 1}：${quotes[index]}`,
+      );
+      summary.quotes = { ...summary.quotes, keyPoints: quotes };
+    }
     return summary;
   }
 

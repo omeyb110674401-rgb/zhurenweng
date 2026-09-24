@@ -4,6 +4,7 @@ import type { Metadata } from 'next';
 import { notFound } from 'next/navigation';
 import { getNoticeById } from '@/db/repo/notices';
 import { getNoticeSummary } from '@/db/repo/summaries';
+import { getNoticeAttachmentExtractReport } from '@/db/repo/attachments';
 import { getSourceById } from '@/db/repo/sources';
 import { Countdown, StatusBadge, formatDate } from '@/app/_lib/notice-display';
 import { NoticeBriefView, SubmissionChannels } from '@/app/_lib/notice-brief-view';
@@ -94,10 +95,20 @@ export default async function NoticeDetailPage({ params }: NoticeDetailPageProps
   // 来源名与摘要列互不依赖，并行取（issue #53）：此前是两次串行 await，等于把
   // 两个查询的往返时间相加。摘要列（issue #4）：done → 渲染五段式摘要；
   // pending / failed_review → 占位。
-  const [source, summaryInfo] = await Promise.all([
+  const [source, summaryInfo, attachmentRows] = await Promise.all([
     getSourceById(notice.sourceId),
     getNoticeSummary(notice.id),
+    getNoticeAttachmentExtractReport(notice.id),
   ]);
+  // 「条文在哪」这句话的依据（issue #57 第 6 步）。刻意不把「抽取表里没有行」直接当成
+  // 「没有随文附件」—— 前者也可能是抽取还没跑到这条（新入库条目，或该源被排除在抽取之外）。
+  // 分不清就报「未探测」，让页面回到通用文案，而不是说一句可能被数据打脸的话。
+  const draftReport =
+    attachmentRows.total > 0
+      ? attachmentRows
+      : notice.attachments.length === 0
+        ? { total: 0, fedChars: 0, okFiles: 0 }
+        : null;
   // 摘要区该说什么（issue #58）：判定收在纯函数里，页面只按态选块。注意传的是
   // **库列** notice.status 而不是上面的展示状态 —— 摘要任务的入队过滤看的就是它。
   const summaryDisplay = summaryDisplayState({
@@ -193,6 +204,7 @@ export default async function NoticeDetailPage({ params }: NoticeDetailPageProps
             notice={notice}
             summaryJson={summaryInfo.aiSummaryJson}
             summaryModel={summaryInfo.summaryModel}
+            attachmentReport={draftReport}
           />
         ) : (
           <>

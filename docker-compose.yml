@@ -133,9 +133,8 @@ services:
       # 附件条文读取（issue #57）：off / shadow / on。数值项留空即按代码缺省，
       # 所以这里只传空值占位——「填了就生效」必须是真话（契约由
       # tests/unit/deploy-env-contract.test.mjs 守）。
-      # 缺省 shadow：`on` 那一路（附件文本进摘要提示词）尚未接线，缺省写 on 会让
-      # 「改档位」这件事毫无效果 —— 与 issue #58 删掉的幽灵旋钮同一类缺陷。
-      ATTACHMENT_TEXT: ${ATTACHMENT_TEXT:-shadow}
+      # on = 摘要把附件条文当第二路输入（第 5 步已接线）；要退回「只解析不喂摘要」填 shadow。
+      ATTACHMENT_TEXT: ${ATTACHMENT_TEXT:-on}
       ATTACHMENT_EXCLUDE_SOURCES: ${ATTACHMENT_EXCLUDE_SOURCES:-npc}
       ATTACHMENT_MAX_FILES_PER_ROUND: ${ATTACHMENT_MAX_FILES_PER_ROUND:-}
       ATTACHMENT_ROUND_BUDGET_MS: ${ATTACHMENT_ROUND_BUDGET_MS:-}

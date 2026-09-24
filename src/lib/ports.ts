@@ -55,7 +55,9 @@ export interface StructuredSummary {
   whoCanSubmit: string;
   /** 逾期会怎样（原文未提及则为空串） */
   afterDeadline: string;
-  /** 关键条款的历史字段：新输出不再产生，仅为重刷期间读旧数据保留 */
+  /** 关键条款：仅在**给了附件条文**时才有内容（issue #57 第 5 步）。
+   *  #56 曾因「公告壳里没有条款可概括」停用本段，输入换成附件正文后重新启用 ——
+   *  没有条文输入时模型必须输出空数组，这条约束由提示词与归一化共同保证。 */
   keyPoints?: string[];
   /** 截止日期（ISO 8601），未知为 null */
   deadline: string | null;
@@ -65,11 +67,30 @@ export interface StructuredSummary {
   channels: SummaryChannel[];
 }
 
+/**
+ * 一路附件条文（issue #57 第 5 步）：本站从官方附件里**逐字**提取并已截取的草案文本。
+ *
+ * `name` 与 `url` 必须带着走完全程 —— 详情页要把「这条要点来自哪个附件」标出来，
+ * 而出处是**程序按引用反查**出来的（见 src/lib/draft-sources.ts），不让模型自报来源：
+ * 它会把两个附件的内容混引到同一个附件上，而那种错读者看不出来。
+ */
+export interface DraftSource {
+  name: string;
+  url: string;
+  text: string;
+}
+
 export interface LlmSummarizeInput {
   title: string;
   bodyText: string;
   /** 官方原文 URL，提示词中用于锚定引用 */
   url: string;
+  /**
+   * 附件条文（可选，issue #57 第 5 步）：空数组 / 未设置 = 只给公告壳，
+   * 此时提示词要求 keyPoints 留空。摘要是否读附件由 `ATTACHMENT_TEXT` 档位决定
+   * （见 src/lib/attachment-mode.ts 的 `attachmentTextFeedsSummary`）。
+   */
+  draftSources?: DraftSource[];
 }
 
 export interface LlmPort {
