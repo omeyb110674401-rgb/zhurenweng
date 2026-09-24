@@ -103,12 +103,15 @@ docx（`055ad65`）、OLE2 不按头部流名猜 doc（`f531d79`）、直连被�
 
 - 新增单测 `tests/unit/summary-draft-points.test.mjs`（11 例）：反查命中/改写不命中/太短不算
   出处/多附件不混标/下标对齐/无条文输入时模型编的要点全丢/落库回读保出处/旧格式回读为 null；
-- 新增 e2e `tests/e2e/summary-draft-input.test.mjs`（3 例）：shadow 与 on 的产出差异、
-  `fed_to_summary` 只在真用上时置位、空白表（字数不足）不喂；
+- 新增 e2e `tests/e2e/summary-draft-input.test.mjs`（7 例）：前 3 例钉住**同一份库两档产出的摘要
+  确实不同**（影子档 `keyPoints` 必空、不留 `fed_to_summary`；用到才标；空白表不喂）；
+  后 4 例从 `next build` 产物里抓真实 HTML，逐个验「条文在哪」四个分支确实印了出来 ——
+  判据函数的单测证明不了页面把出处印出来（issue #54 的那条教训反过来同样成立）。
+  其中「抽取表没行」那一例断言页面**不得**说「没有随文附件」：没探测过就不是本站能宣布的事。
 - `tests/unit/summary-display.test.mjs` 增 7 例（四分支 + 未探测 + 份数下界 + 详情页接线）；
 - `tests/unit/config-guards.test.mjs` 的档位用例改判为缺省 `on`，并补「shadow 与 on 的唯一区别」；
 - 自证门 `scripts/check-test-pins.mjs` 新增 6 条，总数 **41/41**；
-- 全量：tsc / next build 通过，单测 **315**、e2e **256** 全绿。
+- 全量：tsc / next build 通过，单测 **315**、e2e **260** 全绿。
 
 ## 八、未做（有意或待授权）
 
