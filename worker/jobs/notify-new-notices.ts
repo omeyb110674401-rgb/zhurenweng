@@ -84,7 +84,7 @@ export const notifyNewNoticesJob: Job = {
     }
     const subscriptions = await listActiveSubscriptions();
     if (subscriptions.length === 0) {
-      ctx.logger('无已确认订阅，新公示通知跳过');
+      ctx.logger('没有可通知的订阅（需已确认且未退订），新公示通知跳过');
       return;
     }
     const now = ctx.now();

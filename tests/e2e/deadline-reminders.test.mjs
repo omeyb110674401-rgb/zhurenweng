@@ -261,7 +261,7 @@ describe('issue #7：订阅 double opt-in → 截止提醒 → 一键退订', ()
     const run = await runWorkerOnce();
     assert.equal(run.code, 0, `worker 应正常退出，输出：${run.output}`);
     assert.match(run.output, /源 npc 抓取完成：列表 3 条，新增 3，更新 0/);
-    assert.match(run.output, /无已确认订阅，截止提醒任务跳过/);
+    assert.match(run.output, /没有可通知的订阅（需已确认且未退订），截止提醒任务跳过/);
     assert.equal(readOutbox().length, 0);
   });
 
@@ -332,7 +332,7 @@ describe('issue #7：订阅 double opt-in → 截止提醒 → 一键退订', ()
     const run = await runWorkerOnce();
     assert.equal(run.code, 0, `worker 应正常退出，输出：${run.output}`);
     // 订阅均为待确认状态 → 收件人为空
-    assert.match(run.output, /无已确认订阅，截止提醒任务跳过/);
+    assert.match(run.output, /没有可通知的订阅（需已确认且未退订），截止提醒任务跳过/);
     assert.equal(readOutbox().length, 3, 'outbox 应只有 3 封确认邮件，无任何提醒');
   });
 

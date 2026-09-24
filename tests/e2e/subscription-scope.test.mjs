@@ -211,7 +211,7 @@ describe('issue #60 第 2 刀：按机关订阅与「订全部新公示」', () 
 
     const everything = mailsTo('everything@example.test');
     assert.equal(everything.length, 2, '订全部 ⇒ 每条新公示的提醒都该收到');
-    assert.ok(!logs.join('\n').includes('无已确认订阅'));
+    assert.ok(!logs.join('\n').includes('没有可通知的订阅'));
   });
 });
 
