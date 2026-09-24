@@ -60,6 +60,10 @@ select count(*)                                as failed_review_rows,
  where summary_status = 'failed_review';
 
 \echo '=== 6) 出处正确性（不是"有没有出处字段"，而是**页面上那句引用真的在附件正文里**）'
+-- 注意写法：第 2/3 段里裸 `e ->> 'x'` 能跑，而这两段（jsonb_array_elements 出现在 CTE 的
+-- select 列表里）同写法报 `column e.quote does not exist`，所以显式命名输出列 `as e(item)`
+-- 并用 `e.item`。为什么两种上下文不一样我没查证 —— 这里只记"实测哪一种能跑"，
+-- 别顺手把四处统一成同一种写法，那会让其中两处变成跑不了的。
 -- 程序侧 `buildQuotedSummary` 本来就要求逐字对上才落库（单测钉着），这一段是拿**线上真数据**
 -- 独立复核一遍：如果这里出现 verifiable < total，说明要么落库路径绕过了反查，要么抽取文本
 -- 与喂给模型时已经不是同一份。两种都得查。空白全部去掉再比，与程序侧同一个口径（PDF 抽取带换行）。
