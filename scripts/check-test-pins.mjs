@@ -54,6 +54,8 @@ const TARGETS = {
   feed: 'src/lib/feed.ts',
   channelGuidance: 'src/lib/channel-guidance.ts',
   compose: 'docker-compose.yml',
+  journalPg: 'drizzle/postgres/meta/_journal.json',
+  journalSqlite: 'drizzle/sqlite/meta/_journal.json',
 };
 
 const CASES = [
@@ -746,6 +748,24 @@ const CASES = [
     to: '      false ||',
     pattern: '按来源筛选（issue #65）',
     test: 'tests/unit/home-query.test.mjs',
+  },
+  {
+    // 2026-09-24 生产事故（issue #66）的形状：手工补迁移时 `when` 写得比前一条早，
+    // drizzle 对**存量库**会静默跳过它 —— 全新库一次全跑，所以本地全绿也照样出事。
+    label: 'journal 的 when 再次非单调（postgres 结构守卫）',
+    file: 'journalPg',
+    from: '      "when": 1791072004000,',
+    to: '      "when": 1789000000004,',
+    pattern: 'journal 的 when 严格递增（postgres）',
+    test: 'tests/e2e/migrations-integrity.test.mjs',
+  },
+  {
+    label: 'journal 的 when 再次非单调（sqlite 行为守卫：两阶段迁移补不上晚到的列）',
+    file: 'journalSqlite',
+    from: '      "when": 1791072004000,',
+    to: '      "when": 1789000000004,',
+    pattern: '存量库向后迁移会补上晚到的迁移',
+    test: 'tests/e2e/migrations-integrity.test.mjs',
   },
 ];
 

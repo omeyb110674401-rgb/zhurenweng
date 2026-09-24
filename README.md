@@ -207,6 +207,12 @@ SOURCES_FIXTURE_BASE=http://127.0.0.1:4170 APP_BASE_URL=http://localhost:3000 WO
 数据库迁移在应用首连时自动应用（`drizzle/<driver>/`）；CI（GitHub Actions）运行
 lint 与 e2e 两个 job，同样只依赖 npm。
 
+- **手工补迁移时，`meta/_journal.json` 的 `when` 必须严格递增**（issue #66）：drizzle
+  对**存量库**只执行 `when` 晚于「最后一条已应用记录」的迁移，写早了就**静默跳过** ——
+  日志说「迁移已应用」、退出码 0，库里少一列。全新库一次全跑，所以本地测试看不见这条路径；
+  守卫在 `tests/e2e/migrations-integrity.test.mjs`（结构：`when` 递增；行为：两阶段迁移
+  复现「停在旧版」的库再向后跑），并已进 `check-test-pins`。
+
 ## RSS Feed（issue #6 建立，issue #63 起支持子 feed）
 
 - **端点**（`GET /feed.xml`，或 `GET /feed.xml?category=…&open=1&since=7`）：RSS 2.0，
