@@ -17,20 +17,29 @@ import { resolveSmtpOptions } from './adapters/smtp-mailer.ts';
 
 /** 邮件端口是否可用于对外订阅（true = 入口可见、表单可用）。 */
 export function mailerReady(env: NodeJS.ProcessEnv = process.env): boolean {
+  return mailerUnavailableReason(env) === null;
+}
+
+/**
+ * 不可用的原因（可用时返回 null）。
+ *
+ * 与 `llm-availability.ts` 同一手法：日志、worker 的跳过说明、页面提示都取这一个函数的说法，
+ * 于是"界面说的"和"判据说的"不会分家；换服务商时也不用逐处改文案。
+ * 判定复用端口构造的同一套解析（`resolveSmtpOptions`），包括端口号合法与凭据成对。
+ */
+export function mailerUnavailableReason(env: NodeJS.ProcessEnv = process.env): string | null {
   const provider = env.MAILER_PROVIDER ?? 'stub';
   try {
     switch (provider) {
       case 'stub':
-        return true;
+        return null;
       case 'smtp':
-        // 直接用端口构造的同一套解析（issue #25）：端口还额外校验端口号与
-        // 「半套凭据」——门控跟着一起判不可用，才不会出现「表单能提交但发信必失败」
         resolveSmtpOptions(env);
-        return true;
+        return null;
       default:
-        return false;
+        return `MAILER_PROVIDER=「${provider}」不是已知服务商（应为 smtp 或 stub）`;
     }
-  } catch {
-    return false;
+  } catch (error) {
+    return error instanceof Error ? error.message : String(error);
   }
 }

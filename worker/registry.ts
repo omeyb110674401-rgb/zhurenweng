@@ -9,6 +9,7 @@ import { crawlNoticesJob } from './jobs/crawl-notices.ts';
 import { extractAttachmentsJob } from './jobs/extract-attachments.ts';
 import { summarizeNoticesJob } from './jobs/summarize-notices.ts';
 import { sendDeadlineRemindersJob } from './jobs/send-deadline-reminders.ts';
+import { notifyNewNoticesJob } from './jobs/notify-new-notices.ts';
 import { reindexNoticesJob } from './jobs/reindex-notices.ts';
 
 export interface JobContext {
@@ -33,6 +34,9 @@ export const jobs: Job[] = [
   extractAttachmentsJob,
   summarizeNoticesJob,
   sendDeadlineRemindersJob,
+  // 新公示通知（issue #60）排在提醒之后：两者都是"替读者盯着"，但截止提醒有时效底线，
+  // 先保证它发出；通知用同一份匹配逻辑（matchesSubscriptionRules），不另写一套。
+  notifyNewNoticesJob,
   // 检索索引全量重建（issue #8）注册在末位：每轮先抓取 / 摘要，最后重刷索引
   reindexNoticesJob,
 ];

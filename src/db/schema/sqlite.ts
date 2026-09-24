@@ -75,8 +75,17 @@ export const notices = sqliteTable('notices', {
    * 抓取 upsert 不触碰本列（属摘要管线，与 ai_summary_json / summary_model 一致）。
    */
   summaryStatus: text('summary_status').notNull().default('pending'),
-  /** 抓取时间，ISO 8601 */
+  /** 抓取时间，ISO 8601。**每轮 upsert 都会覆盖**，所以它不是"首次收录"。 */
   fetchedAt: text('fetched_at').notNull(),
+  /**
+   * 首次收录时间（issue #60 第 3 刀）：只在建条目那一行时写入，之后**任何更新都不碰它**。
+   *
+   * 为什么需要它：新公示通知要判断"这条是不是新的"，而 `fetched_at` 每天被抓取覆盖
+   * （标题或截止日期修正也会刷新它），拿它当"新"就会把三个月前的条目天天重发。
+   * **存量为 NULL 且不回填**：NULL 表示"本次上线之前就在了"，一律不算新 ——
+   * 这样任何订阅者都不可能被历史条目轰炸（尤其是一个老邮箱刚确认订阅就收到 187 封的场景）。
+   */
+  firstSeenAt: text('first_seen_at'),
   /** 出站提意点击数（北极星指标） */
   outboundClicks: integer('outbound_clicks').notNull().default(0),
   /**
@@ -196,6 +205,26 @@ export const reminderSends = sqliteTable(
   (table) => [
     primaryKey({ columns: [table.noticeId, table.reminderStage, table.subscriptionId] }),
   ],
+);
+
+/**
+ * 新公示通知去重记录（issue #60 第 3 刀）：同一条目对同一订阅只进一次汇总邮件。
+ *
+ * 一封汇总邮件会为其中每条公示各写一行 —— 主键因此是（条目 × 订阅）而不是"每封信一行"。
+ * 发送失败的订阅**不写行**，下一轮重试（与截止提醒同一条 at-least-once 口径）。
+ */
+export const noticeNotifications = sqliteTable(
+  'notice_notifications',
+  {
+    noticeId: text('notice_id')
+      .notNull()
+      .references(() => notices.id),
+    subscriptionId: text('subscription_id')
+      .notNull()
+      .references(() => subscriptions.id),
+    sentAt: text('sent_at').notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.noticeId, table.subscriptionId] })],
 );
 
 /**

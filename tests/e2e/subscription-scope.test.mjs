@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { after, before, describe, it } from 'node:test';
+import Database from 'better-sqlite3';
 import { startAppServer } from './helpers/app-server.mjs';
 
 /**
@@ -211,5 +212,139 @@ describe('issue #60 第 2 刀：按机关订阅与「订全部新公示」', () 
     const everything = mailsTo('everything@example.test');
     assert.equal(everything.length, 2, '订全部 ⇒ 每条新公示的提醒都该收到');
     assert.ok(!logs.join('\n').includes('无已确认订阅'));
+  });
+});
+
+/**
+ * 新公示通知（issue #60 第 3 刀）。
+ *
+ * 与截止提醒的关键差别在**判据不是"还剩几天"而是"这条什么时候第一次进库"**，
+ * 而 `fetched_at` 每天被 upsert 覆盖，用它当判据会把老条目天天重发 —— 所以这里
+ * 专门验一次：把 `first_seen_at` 置 NULL（等价于本次上线之前就存在的存量条目）之后，
+ * 谁都不该收到它。这条断言是"刚确认订阅的老邮箱不会被历史条目轰炸"的唯一防线。
+ */
+describe('issue #60 第 3 刀：新公示通知（一人一封汇总、条目×订阅去重）', () => {
+  let notifyJob;
+
+  function mutate(sql, ...params) {
+    const db = new Database(dbFile);
+    try {
+      db.prepare(sql).run(...params);
+    } finally {
+      db.close();
+    }
+  }
+
+  before(async () => {
+    notifyJob = (await import('../../worker/jobs/notify-new-notices.ts')).notifyNewNoticesJob;
+  });
+
+  async function runNotify() {
+    logs = [];
+    fs.rmSync(outboxFile, { force: true });
+    await notifyJob.run(ctx);
+    return logs.join('\n');
+  }
+
+  const isNoticeMail = (mail) => mail.subject.includes('新公示');
+
+  it('命中规则的订阅者各收到一封汇总（不是一条一封），未确认的一封都不收', async () => {
+    const output = await runNotify();
+    assert.match(output, /新公示通知任务完成[^\n]*发送 \d+ 封/);
+
+    const everything = mailsTo('everything@example.test').filter(isNoticeMail);
+    assert.equal(everything.length, 1, '两条新公示应是**一封**两条目，而不是两封信');
+    assert.match(everything[0].text, /根据你订阅的条件，本站有新的公示收录/);
+    assert.ok(
+      everything[0].text.includes(JOINT_TITLE) && everything[0].text.includes(OTHER_TITLE),
+      '两条都要列出来',
+    );
+    assert.ok(everything[0].text.includes('unsubscribe?token='), '每封邮件都要能一键退订');
+    assert.ok(
+      !/AI 摘要/.test(everything[0].text),
+      '新公示的摘要可能还没生成，邮件里不能承诺"含 AI 摘要"',
+    );
+
+    const joint = mailsTo('joint@example.test').filter(isNoticeMail);
+    assert.equal(joint.length, 1);
+    assert.ok(joint[0].text.includes(JOINT_TITLE), '按机关订阅命中联合发文里的参与机关');
+    assert.ok(!joint[0].text.includes(OTHER_TITLE), '不命中规则的不进这封信');
+
+    // carol 只提交未确认：绝不该收到任何东西
+    assert.equal(mailsTo('carol@example.test').filter(isNoticeMail).length, 0);
+    assert.equal(mailsTo('nobody@example.test').length, 0, '被拒的提交不该收到任何邮件');
+  });
+
+  it('重复运行不发第二封（条目 × 订阅去重）', async () => {
+    await runNotify();
+    const output = await runNotify();
+    assert.match(output, /发送 0 封/);
+    assert.equal(readOutbox().filter(isNoticeMail).length, 0, '去重表已写过 ⇒ 本轮不该再发');
+  });
+
+  it('first_seen_at 为空 = 上线之前就存在的存量条目，永不通知', async () => {
+    mutate('update notices set first_seen_at = null');
+    const output = await runNotify();
+    assert.match(output, /回看 \d+ 天内无新收录条目，跳过新公示通知/);
+    assert.equal(readOutbox().filter(isNoticeMail).length, 0);
+
+    // 只把其中一条标成"新"，并清掉去重标记（否则它已被前面几轮通知过 —— 那才是正确行为，
+    // 不是本条要验的东西）：那一条要能被通知到，证明判据确实是 first_seen_at 这一列
+    mutate('delete from notice_notifications');
+    mutate('update notices set first_seen_at = ? where id = ?', new Date().toISOString(), jointId);
+    const again = await runNotify();
+    assert.match(again, /新公示通知任务完成[^\n]*发送 2 封/);
+    assert.equal(mailsTo('joint@example.test').filter(isNoticeMail).length, 1);
+    assert.ok(!mailsTo('everything@example.test').filter(isNoticeMail)[0].text.includes(OTHER_TITLE));
+  });
+
+  it('超出每封上限时只列一部分，没列进的**不写去重标记**（否则用户永远看不到它们）', async () => {    const nowIso = new Date().toISOString();
+    const extraIds = Array.from({ length: 21 }, (_v, i) => `${'e'.repeat(30)}${String(i).padStart(2, '0')}`);
+    for (const [index, id] of extraIds.entries()) {
+      mutate(
+        `insert into notices (id, source_id, title, agency, url, published_at, deadline_at, status,
+           category_tags_json, body_text, attachments_json, summary_status, fetched_at, outbound_clicks, first_seen_at)
+         values ('${id}', 'e2e-sub-scope', '批量新公示 ${index}', '生态环境部', 'https://source.test/batch-${index}.html',
+           date('now'), date('now','+20 day'), 'open', '[]', '正文', '[]', 'pending', '${nowIso}', 0, '${nowIso}')`,
+      );
+    }
+    const output = await runNotify();
+    const mail = mailsTo('everything@example.test').find(isNoticeMail);
+    assert.ok(mail, '订全部的人应收到这一封');
+    assert.match(mail.subject, /新公示 20 条/, '主题按实际列出的条数说，不是命中总数');
+    assert.equal((mail.text.match(/^· /gm) ?? []).length, 20, '正文只列 20 条');
+    assert.match(mail.text, /另有 1 条本次未列入/, '溢出的条数要如实说出来');
+    assert.match(output, /溢出未列=1/);
+
+    // 下一封必须只含没列进的那一条 —— 证明溢出部分没被误标成"已通知"
+    const secondOutput = await runNotify();
+    assert.match(secondOutput, /新公示通知任务完成[^\n]*发送 1 封/);
+    const second = mailsTo('everything@example.test').filter(isNoticeMail).at(-1);
+    assert.ok(second, '溢出那条应在下一封里发出');
+    assert.match(second.subject, /新公示 1 条|新公示：批量新公示 20/);
+  });
+
+  it('一封都没发出去时不能留下"已通知"的痕迹（下一轮还得再来一遍）', async () => {
+    mutate('delete from notice_notifications');
+    process.env.MAILER_STUB_FAILURES = 'always';
+    try {
+      const output = await runNotify();
+      assert.match(output, /新公示通知发送失败/);
+      assert.match(output, /发送 0 封/);
+      assert.equal(readOutbox().filter(isNoticeMail).length, 0);
+    } finally {
+      delete process.env.MAILER_STUB_FAILURES;
+    }
+    const db = new Database(dbFile, { readonly: true });
+    let marked = 0;
+    try {
+      marked = db.prepare('select count(*) as c from notice_notifications').get().c;
+    } finally {
+      db.close();
+    }
+    assert.equal(marked, 0, '发信失败却写了去重标记 ⇒ 这批条目永远不会再通知任何人');
+
+    const retried = await runNotify();
+    assert.match(retried, /新公示通知任务完成[^\n]*发送 [1-9]\d* 封/, '下一轮应把这批条目补上');
   });
 });

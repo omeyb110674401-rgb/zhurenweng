@@ -130,6 +130,8 @@ services:
       # 单次抓取请求的总预算（毫秒，issue #58）。慢源按源在适配器里声明
       # （src/sources/adapters/npc.ts 的 fetch.timeoutMs），这里只兜全局缺省。
       CRAWL_TIMEOUT_MS: ${CRAWL_TIMEOUT_MS:-}
+      # 新公示通知的回看窗口（天，issue #60）：只有这段时间内首次收录的条目才会进汇总信
+      NOTIFY_LOOKBACK_DAYS: ${NOTIFY_LOOKBACK_DAYS:-}
       # 附件条文读取（issue #57）：off / shadow / on。数值项留空即按代码缺省，
       # 所以这里只传空值占位——「填了就生效」必须是真话（契约由
       # tests/unit/deploy-env-contract.test.mjs 守）。

@@ -68,7 +68,13 @@ export const notices = pgTable('notices', {
    */
   summaryStatus: text('summary_status').notNull().default('pending'),
   /** 抓取时间，ISO 8601 */
+  /** 抓取时间，ISO 8601。**每轮 upsert 都会覆盖**，所以它不是"首次收录"。 */
   fetchedAt: text('fetched_at').notNull(),
+  /**
+   * 首次收录时间（issue #60 第 3 刀）：只在建行时写入，更新永不覆盖；存量为 NULL。
+   * NULL = 本次上线之前就收录 ⇒ 新公示通知一律不覆盖它（否则刚确认的老邮箱会被历史条目轰炸）。
+   */
+  firstSeenAt: text('first_seen_at'),
   /** 出站提意点击数（北极星指标） */
   outboundClicks: integer('outbound_clicks').notNull().default(0),
   /**
@@ -181,6 +187,26 @@ export const reminderSends = pgTable(
   (table) => [
     primaryKey({ columns: [table.noticeId, table.reminderStage, table.subscriptionId] }),
   ],
+);
+
+/**
+ * 新公示通知去重记录（issue #60 第 3 刀）。与 ./sqlite.ts 的 `noticeNotifications` 是镜像。
+ *
+ * 一封汇总邮件为其中每条公示各写一行，所以主键是（条目 × 订阅）而不是"每封信一行"；
+ * 发送失败的订阅不写行，下一轮重试（与截止提醒同一条 at-least-once 口径）。
+ */
+export const noticeNotifications = pgTable(
+  'notice_notifications',
+  {
+    noticeId: text('notice_id')
+      .notNull()
+      .references(() => notices.id),
+    subscriptionId: text('subscription_id')
+      .notNull()
+      .references(() => subscriptions.id),
+    sentAt: text('sent_at').notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.noticeId, table.subscriptionId] })],
 );
 
 /**

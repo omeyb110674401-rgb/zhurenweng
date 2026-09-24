@@ -27,6 +27,7 @@ function toNoticeRecord(row: typeof notices.$inferSelect): NoticeRecord {
     aiSummary: null,
     summaryModel: row.summaryModel,
     fetchedAt: row.fetchedAt,
+    firstSeenAt: row.firstSeenAt,
     outboundClicks: row.outboundClicks,
     versionOf: row.versionOf,
     versionSeq: row.versionSeq,

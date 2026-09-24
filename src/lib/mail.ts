@@ -243,3 +243,88 @@ export function buildReminderEmail(input: {
     headers: unsubscribeHeaders(input.unsubscribeToken),
   };
 }
+
+/** 一封新公示通知里最多列几条（超出部分只报数，不拆成第二封信） */
+export const MAX_NOTICES_PER_EMAIL = 20;
+
+/**
+ * 新公示通知（issue #60 第 3 刀）：一位订阅者一封汇总邮件。
+ *
+ * 为什么不是一条一封：日发信量有限制（个人 SMTP），而"新增三条就收到三封信"
+ * 比"一封里三条"更容易被当成骚扰直接退订。超出上限时列前 N 条 + 报剩余条数，
+ * 剩余那些仍会写去重标记吗？—— **不会**（见任务层）：没写进信里的条目下一轮还会带来，
+ * 否则用户就永远看不到它们却以为已通知过了。
+ *
+ * 刻意不提"含 AI 摘要"：新公示的摘要可能还没生成（摘要任务在通知之后或本轮失败），
+ * 邮件里承诺了页面上没有的东西，就是 issue #22/#58 反复清掉的那类谎。
+ */
+export function buildNewNoticesEmail(input: {
+  email: string;
+  notices: NoticeRecord[];
+  /** 因条数上限没列进本信的同组条目数（下一轮会再来） */
+  overflowCount: number;
+  unsubscribeToken: string;
+  now: string;
+}): MailMessage {
+  const first = input.notices[0];
+  const subject =
+    input.notices.length === 1
+      ? `【主人翁】新公示：${first.title}`
+      : `【主人翁】新公示 ${input.notices.length} 条：${first.title} 等`;
+  const unsubscribe = unsubscribeUrl(input.unsubscribeToken);
+  const lines = input.notices.map((notice) => {
+    const detail = noticeDetailUrl(notice.id);
+    return [
+      `· ${notice.title}`,
+      `  发布机关：${notice.agency}`,
+      `  截止日期：${notice.deadlineAt ?? '源站未标注'}`,
+      `  站内详情：${detail}`,
+      `  官方原文：${notice.url}`,
+    ].join('\n');
+  });
+  const overflowNote =
+    input.overflowCount > 0
+      ? `另有 ${input.overflowCount} 条本次未列入（每封邮件最多 ${MAX_NOTICES_PER_EMAIL} 条），会在下一封里发出。`
+      : '';
+  return {
+    to: input.email,
+    subject,
+    text: [
+      '根据你订阅的条件，本站有新的公示收录：',
+      '',
+      ...lines,
+      overflowNote === '' ? '' : overflowNote,
+      '',
+      '本站只聚合官方公开信息，不代替官方受理意见；提意见请前往上面的官方原文链接。',
+      '不想再收到这类通知？退订（打开页面后点确认）：',
+      unsubscribe,
+      '',
+      '——',
+      SITE_FOOTER,
+    ]
+      .filter((line) => line !== undefined)
+      .join('\n'),
+    html: [
+      '<p>根据你订阅的条件，本站有新的公示收录：</p>',
+      '<ul>',
+      input.notices
+        .map((notice) => {
+          const detail = noticeDetailUrl(notice.id);
+          return (
+            `<li><a href="${escapeHtml(detail)}">${escapeHtml(notice.title)}</a>`
+            + `<br>发布机关：${escapeHtml(notice.agency)}；截止日期：${escapeHtml(notice.deadlineAt ?? '源站未标注')}；`
+            + `<a href="${escapeHtml(notice.url)}">官方原文↗</a></li>`
+          );
+        })
+        .join('\n'),
+      '</ul>',
+      overflowNote === '' ? '' : `<p>${escapeHtml(overflowNote)}</p>`,
+      `<p>本站只聚合官方公开信息，不代替官方受理意见；提意见请点上面的官方原文链接。</p>`,
+      `<p>不想再收到这类通知？<a href="${escapeHtml(unsubscribe)}">退订（打开页面后点确认）</a>。</p>`,
+      `<p>——<br>${SITE_FOOTER}</p>`,
+    ]
+      .filter((part) => part !== '')
+      .join('\n'),
+    headers: unsubscribeHeaders(input.unsubscribeToken),
+  };
+}

@@ -80,7 +80,7 @@ export default async function SubscribePage({ searchParams }: SubscribePageProps
         <h1 className="brand">订阅公示提醒</h1>
         <p className="tagline">
           按关键词 / 领域 / 发布机关订阅，或直接订全部新公示：
-          征求意见截止前 7 天、3 天各收到一封提醒邮件。
+          有新公示时收到一封汇总，截止前 7 天、3 天各收到一封提醒邮件。
         </p>
       </header>
 
@@ -127,6 +127,7 @@ function SubscribeFormSection({
     <section className="subscribe-section" aria-labelledby="subscribe-form-title">
       <h2 id="subscribe-form-title">填写订阅规则</h2>
       <p className="section-hint">
+        订阅后会收到两类邮件：本站有新公示收录时的一封汇总，以及截止前 7 天、3 天的提醒。
         采用 double opt-in：提交后先收到一封确认邮件，点击确认链接后订阅才生效；
         每封邮件底部都可一键退订。本站仅存储订阅邮箱，不建立用户账号。
         {draft !== null ? '（已保留你上次填写的内容）' : null}

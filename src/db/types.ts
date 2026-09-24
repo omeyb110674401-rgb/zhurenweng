@@ -82,8 +82,13 @@ export interface NoticeRecord {
   aiSummary: unknown;
   /** 摘要模型名与版本 */
   summaryModel: string | null;
-  /** 抓取时间，ISO 8601 */
+  /** 抓取时间，ISO 8601（每轮 upsert 都会覆盖，不是"首次收录"） */
   fetchedAt: string;
+  /**
+   * 首次收录时间（issue #60 第 3 刀）：建行时写入、更新不再覆盖。
+   * null = 本次上线之前就存在 ⇒ 新公示通知一律不覆盖它（不回填存量是有意为之）。
+   */
+  firstSeenAt: string | null;
   /** 出站提意点击数（北极星指标） */
   outboundClicks: number;
   /** 版本链（issue #10）：上一轮版本条目 id；首版 / 未关联为 null */

@@ -396,6 +396,8 @@ export async function upsertNotice(input: UpsertNoticeInput): Promise<'inserted'
         bodyText: input.bodyText,
         attachmentsJson: JSON.stringify(input.attachments),
         fetchedAt: input.fetchedAt,
+        // first_seen_at 刻意不在更新分支里写：它是"这条什么时候第一次进库"，
+        // 更新时改写它就等于把老条目重新变成"新公示"，通知会天天重发。
       })
       .where(eq(notices.url, input.url));
     // 版本链同步（issue #10）：标题 / 机关变化时旧链同样重算
@@ -422,6 +424,8 @@ export async function upsertNotice(input: UpsertNoticeInput): Promise<'inserted'
     bodyText: input.bodyText,
     attachmentsJson: JSON.stringify(input.attachments),
     fetchedAt: input.fetchedAt,
+    // 首次收录时间：只在这一行被创建时写入（issue #60 第 3 刀）
+    firstSeenAt: input.fetchedAt,
   });
   // 版本链同步（issue #10）：首版入库时自动尝试与既有条目关联
   await syncNoticeVersionLinks({
@@ -474,6 +478,7 @@ function toNoticeRecord(row: typeof notices.$inferSelect): NoticeRecord {
     aiSummary: safeParseJson(row.aiSummaryJson),
     summaryModel: row.summaryModel,
     fetchedAt: row.fetchedAt,
+    firstSeenAt: row.firstSeenAt,
     outboundClicks: row.outboundClicks,
     versionOf: row.versionOf,
     versionSeq: row.versionSeq,

@@ -111,9 +111,22 @@ function mailsTo(email) {
   return readOutbox().filter((mail) => mail.to === email);
 }
 
+/**
+ * 只看截止提醒邮件（issue #60 第 3 刀之后必须区分）。
+ *
+ * worker 一轮里现在有两个发信任务（截止提醒 + 新公示通知），它们写同一个 outbox。
+ * 不按主题分流的话，「重复运行不重发」这类计数断言会把新公示通知当成提醒的重发 ——
+ * 那是把正确的行为测成失败。分流条件用主题前缀，比按条数硬编码稳。
+ */
+const isReminderMail = (mail) => mail.subject.includes('截止提醒');
+const reminderOutbox = () => readOutbox().filter(isReminderMail);
+const reminderMailsTo = (email) => reminderOutbox().filter((mail) => mail.to === email);
+
 /** 按「收件人 + 主题含片段」筛邮件并断言唯一。 */
 function assertOneMail(email, subjectPart) {
-  const mails = mailsTo(email).filter((mail) => mail.subject.includes(subjectPart));
+  const mails = reminderOutbox()
+    .filter((mail) => mail.to === email)
+    .filter((mail) => mail.subject.includes(subjectPart));
   assert.equal(
     mails.length,
     1,
@@ -385,19 +398,19 @@ describe('issue #7：订阅 double opt-in → 截止提醒 → 一键退订', ()
     const bobD7 = assertOneMail(BOB, TITLES.noiseD7);
     assert.match(bobD7.subject, /剩 7 天/);
     assert.equal(
-      mailsTo(BOB).filter((mail) => mail.subject.includes(TITLES.idCardD3)).length,
+      reminderMailsTo(BOB).filter((mail) => mail.subject.includes(TITLES.idCardD3)).length,
       0,
       'bob 不应收到规则外条目的提醒',
     );
 
     // 每位订阅者每条目只 1 封（同邮箱单行，未重复建行）
     for (const email of [ALICE, BOB]) {
-      const noiseMails = mailsTo(email).filter((mail) => mail.subject.includes(TITLES.noiseD7));
+      const noiseMails = reminderMailsTo(email).filter((mail) => mail.subject.includes(TITLES.noiseD7));
       assert.equal(noiseMails.length, 1, `${email} 对同一条目只应收到 1 封提醒`);
     }
 
     // 匹配规则外的条目（渔业法，+7 但无人命中）不发送
-    const fisheryMails = readOutbox().filter((mail) => mail.subject.includes(TITLES.fisheryD7));
+    const fisheryMails = reminderOutbox().filter((mail) => mail.subject.includes(TITLES.fisheryD7));
     assert.equal(fisheryMails.length, 0);
   });
 
@@ -409,11 +422,11 @@ describe('issue #7：订阅 double opt-in → 截止提醒 → 一键退订', ()
     const warm = await runWorkerOnce();
     assert.equal(warm.code, 0, `worker 应正常退出，输出：${warm.output}`);
 
-    const before = readOutbox().length;
+    const before = reminderOutbox().length;
     const run = await runWorkerOnce();
     assert.equal(run.code, 0, `worker 应正常退出，输出：${run.output}`);
     assert.match(run.output, /发送 0 封，去重跳过 \d+ 次/, '到档且已发过的组合应全部走去重分支');
-    assert.equal(readOutbox().length, before, '重复运行不得产生新邮件');
+    assert.equal(reminderOutbox().length, before, '重复运行不得重发提醒');
   });
 
   it('领域匹配：领域标签命中的条目触发提醒（关键词不命中的订阅者不受影响）', async () => {
@@ -433,11 +446,11 @@ describe('issue #7：订阅 double opt-in → 截止提醒 → 一键退订', ()
       fetchedAt: new Date().toISOString(),
     });
 
-    const before = readOutbox().length;
+    const before = reminderOutbox().length;
     const run = await runWorkerOnce();
     assert.equal(run.code, 0, `worker 应正常退出，输出：${run.output}`);
-    assert.match(run.output, /发送 1 封/);
-    assert.equal(readOutbox().length, before + 1);
+    assert.match(run.output, /截止提醒任务完成.*发送 1 封/);
+    assert.equal(reminderOutbox().length, before + 1);
 
     const aliceMail = assertOneMail(ALICE, EXTRA.categoryD7.title);
     assert.match(aliceMail.subject, /剩 7 天/);
@@ -451,18 +464,18 @@ describe('issue #7：订阅 double opt-in → 截止提醒 → 一键退订', ()
     );
     // bob 的规则（仅关键词）不命中该条目
     assert.equal(
-      mailsTo(BOB).filter((mail) => mail.subject.includes(EXTRA.categoryD7.title)).length,
+      reminderMailsTo(BOB).filter((mail) => mail.subject.includes(EXTRA.categoryD7.title)).length,
       0,
       'bob 不应收到领域命中的提醒（其订阅无领域规则）',
     );
   });
 
   it('再次重复运行仍不重发', async () => {
-    const before = readOutbox().length;
+    const before = reminderOutbox().length;
     const run = await runWorkerOnce();
     assert.equal(run.code, 0, `worker 应正常退出，输出：${run.output}`);
-    assert.match(run.output, /发送 0 封/);
-    assert.equal(readOutbox().length, before);
+    assert.match(run.output, /截止提醒任务完成.*发送 0 封/);
+    assert.equal(reminderOutbox().length, before);
   });
 
   it('退订链接是只读确认页（issue #34）：打开不退订，点确认才退订；无效链接展示失败态', async () => {
@@ -558,11 +571,11 @@ describe('issue #7：订阅 double opt-in → 截止提醒 → 一键退订', ()
     // 基线取"本轮之前的实际封数"而不是写死 5 —— 补发会让历史封数变化，
     // 这条断言要表达的是「退订之后一封都不再加」，不是「她一共只该收到几封」。
     const aliceBefore = mailsTo(ALICE).length;
-    const before = readOutbox().length;
+    const before = reminderOutbox().length;
     const run = await runWorkerOnce();
     assert.equal(run.code, 0, `worker 应正常退出，输出：${run.output}`);
-    assert.match(run.output, /发送 1 封/);
-    assert.equal(readOutbox().length, before + 1);
+    assert.match(run.output, /截止提醒任务完成.*发送 1 封/);
+    assert.equal(reminderOutbox().length, before + 1);
 
     // bob（未退订，关键词命中标题）收到新条目提醒
     const bobMail = assertOneMail(BOB, EXTRA.keywordD3.title);
