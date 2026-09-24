@@ -311,6 +311,14 @@ worker 注册表中的 `summarize-notices` 任务（`worker/jobs/summarize-notic
   且 `shadow` 与 `on` 的产出差异由 `tests/e2e/summary-draft-input.test.mjs` 钉住 ——
   这一档曾经没有调用者，属于 issue #58 定性的「幽灵旋钮」，接线后才改回 `on`。
 
+- **翻档位不影响存量**（issue #67）：入队条件是「摘要列为空」，所以 `shadow → on` 之后只有
+  **新入库**条目会带上条文要点，已有的摘要一条都不会自动重跑（有意为之：不覆盖人工复核过的
+  结果，也不会每天重烧一遍调用）。要让存量也补上得显式置换 ——
+  `scripts/reset-summaries-for-redraft.mjs`（默认只读列名单，`--apply --limit 3` 是金丝雀，
+  `--all` 要显式写；清空前把旧摘要**连模型名**一起备份，判据复用 `draftSourcesForSummary()`
+  所以"会不会喂进条文"与真跑时同源；已经带出可核对要点的条目自动跳过，工具因此可重复跑）。
+  2026-09-24 用它置换了 49 条，过程与两处坑记在 `docs/pending-issues/67-summaries-redraft.md`。
+
 - **失败策略**：单条条目失败后重试 `SUMMARY_MAX_RETRIES` 次（默认 3，指数退避），
   仍失败置 `summary_status=failed_review` 转人工复核，worker 不再自动重试；
   已截止条目不生成摘要。

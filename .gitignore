@@ -19,3 +19,6 @@ data/
 
 # 线上核查用的临时落地页（curl -o 抓下来的 HTML，别进仓库）
 .live-*
+
+# check-test-pins.mjs 的"正在撤哪一处"留痕（跑完自动删除；残留说明上次被强杀，下次启动会自愈）
+.pins-inflight.json

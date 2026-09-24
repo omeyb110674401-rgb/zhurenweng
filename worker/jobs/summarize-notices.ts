@@ -63,7 +63,12 @@ function errorMessage(error: unknown): string {
  * `ATTACHMENT_TEXT` 不是 `on` 时返回空数组 —— 这就是 `shadow` 与 `on` 的**唯一**区别：
  * 影子档照样下载、解析、写库出审计数，只是不喂给模型，所以页面一个字都不会变。
  */
-async function draftSourcesForSummary(target: PendingSummaryTarget): Promise<DraftSource[]> {
+/**
+ * 导出给 `scripts/reset-summaries-for-redraft.mjs` 用（issue #67）：判断「这条现在重跑
+ * 到底会不会带上条文」必须与真正喂提示词时**同一条判据**，不能在脚本里另写一份
+ * （门槛、预算、档位三处都可能漂移，而漂移的表现是脚本说"有条文"、真跑起来却没有）。
+ */
+export async function draftSourcesForSummary(target: PendingSummaryTarget): Promise<DraftSource[]> {
   if (!attachmentTextFeedsSummary()) return [];
   const rows = await listAttachmentsForSummary(target.id, {
     minChars: MIN_DRAFT_CJK_CHARS,

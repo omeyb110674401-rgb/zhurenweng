@@ -11,7 +11,11 @@
  * 退出码非 0 的情况：某条断言撤掉实现后仍然为绿（说明它没钉住任何东西），
  * 或者某个 `from` 片段在源码里找不到（说明代码改过、这条用例已经过期）。
  *
- * 注意：每次都会把源码原样写回，所以只读不脏工作区；但**别在它跑的时候改同一批文件**。
+ * 本脚本会**改写工作区里的源码**，所以跑它的时候不要同时跑别的读源码的东西
+ * （`npm run build` / `npm run e2e` / 编辑器保存）。为什么单独强调：2026-09-24 把它
+ * 扔在后台和 build 并行跑，撤掉一半的假代码被编进 `.next`，e2e 当场报了一条与本次
+ * 改动毫无关系的红，看着像 #67 引入了回归。被强杀留下的假代码尚能自愈（见
+ * `recoverInflight`），但「并行读源码」这件事没有补救办法 —— 只能不并行。
  *
  * 选测试的两条硬规则：
  * 1. 被撤的实现必须**从源码被执行**。e2e 里 `startAppServer` 跑的是 `.next` 构建产物，
@@ -25,8 +29,12 @@
  * 3. `from` 片段**写成一行**。工作区里部分 .ts 是 CRLF（`core.autocrlf=true`，提交时才归一成
  *    LF），多行片段里的 `\n` 在那些文件里匹配不上，脚本会把这条报成"用例已过期"。
  *    2026-09-24 实测踩过一次（issue #62 的 `openOnly` 日期条件）。
+ * 4. `from` 那串在目标文件里**第一次出现的地方必须就是要撤的那一处**：`String#replace` 只换
+ *    第一个匹配。这条在把脚本自己也当靶子时特别容易破 —— 用例里写着要撤的那行代码，于是
+ *    第一次命中的是 CASES 里那行"引用"，撤完什么也没变、用例永远为绿。同一天的第二发
+ *    （issue #67 的自愈用例），靠"撤掉修复必须当场真会红"这条自查出来。
  */
-import { readFileSync, writeFileSync } from 'node:fs';
+import { readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 
 const TARGETS = {
@@ -46,6 +54,7 @@ const TARGETS = {
   reminders: 'worker/jobs/send-deadline-reminders.ts',
   subscription: 'src/lib/subscription.ts',
   subsRepo: 'src/db/repo/subscriptions.ts',
+  summariesRepo: 'src/db/repo/summaries.ts',
   noticesRepo: 'src/db/repo/notices.ts',
   noticeRecency: 'src/lib/notice-recency.ts',
   homeQuery: 'src/app/_lib/home-query.ts',
@@ -56,6 +65,8 @@ const TARGETS = {
   compose: 'docker-compose.yml',
   journalPg: 'drizzle/postgres/meta/_journal.json',
   journalSqlite: 'drizzle/sqlite/meta/_journal.json',
+  // 本脚本自己：它改写工作区源码，所以"崩了能不能自愈"和任何一处实现同样需要钉住
+  pinsScript: 'scripts/check-test-pins.mjs',
 };
 
 const CASES = [
@@ -767,6 +778,36 @@ const CASES = [
     pattern: '存量库向后迁移会补上晚到的迁移',
     test: 'tests/e2e/migrations-integrity.test.mjs',
   },
+  {
+    label: '置换时不置回 pending（清空了摘要却永远不再被生成）',
+    file: 'summariesRepo',
+    from: "    .set({ aiSummaryJson: null, summaryModel: null, summaryStatus: 'pending' })",
+    to: '    .set({ aiSummaryJson: null, summaryModel: null })',
+    pattern: 'issue #67：clearSummaryForRedraft',
+    test: 'tests/e2e/summary-redraft.test.mjs',
+  },
+  {
+    label: '放回队列时漏清模型名（恢复核对时对不上旧值）',
+    file: 'summariesRepo',
+    from: "    .set({ aiSummaryJson: null, summaryModel: null, summaryStatus: 'pending' })",
+    to: "    .set({ aiSummaryJson: null, summaryStatus: 'pending' })",
+    pattern: 'issue #67：clearSummaryForRedraft',
+    test: 'tests/e2e/summary-redraft.test.mjs',
+  },
+  // 「空名单提前返回」那道保护**不占 pin 位**（2026-09-24 实测）：撤掉 `if (ids.length === 0) return []`
+  // 之后 e2e 仍然全绿 —— drizzle 把空的 `inArray` 编成恒假条件而不是非法 SQL，那句没有可观测行为。
+  // 记在这里而不是删掉不留痕：留一条钉不住的 pin，下一轮就会以为它被验证过。
+  {
+    label: '崩溃后不自愈（工作区留着撤掉实现后的假代码，还能被编进构建产物）',
+    file: 'pinsScript',
+    // 撤的是"写回原样"那一句，不是 `recoverInflight` 的调用。为什么下面这串要拆成两截：
+    // 本用例的靶子就是本脚本，整串写在这里会让第一次命中的是这一行"引用"而不是被撤的实现
+    // （`.replace` 只换第一个匹配），于是撤了个寂寞、用例永远为绿 —— 规则 4 的第二发
+    from: '    writeFileSync(record.file, record.' + 'original);',
+    to: '',
+    pattern: 'issue #67：撤实现脚本的崩溃自愈',
+    test: 'tests/unit/pins-self-heal.test.mjs',
+  },
 ];
 
 let red = 0;
@@ -782,16 +823,69 @@ const problems = [];
  */
 let pending = null;
 
+/**
+ * 强杀留痕与自愈。
+ *
+ * 为什么 `process.on('exit')` 不够：Windows 上终止进程走 TerminateProcess，退出钩子
+ * 一个都不会跑（2026-09-24 实测：这个脚本被中途终止，工作区留下 `registered: true`
+ * 的假实现）。留痕文件在改写源码**之前**落盘，还原成功后删掉；下次启动若看到残留，
+ * 说明上一次是异常结束。
+ *
+ * 还原条件刻意收紧成「当前内容与当时写入的假代码逐字节相同」：中途文件又被改过
+ * （人工编辑、切分支）时**不动它**，只报出来让人核对 —— 自动写回一份过期原文，
+ * 会把别人的改动一起抹掉，那比留一处假代码严重。
+ */
+const INFLIGHT_FILE = '.pins-inflight.json';
+
+function saveInflight(record) {
+  writeFileSync(INFLIGHT_FILE, JSON.stringify(record));
+}
+
+function clearInflight() {
+  rmSync(INFLIGHT_FILE, { force: true });
+}
+
+function recoverInflight() {
+  let record = null;
+  try {
+    record = JSON.parse(readFileSync(INFLIGHT_FILE, 'utf8'));
+  } catch {
+    return; // 没有留痕：上一次正常结束
+  }
+  const current = readFileSync(record.file, 'utf8');
+  if (current === record.original) {
+    console.log(`（上次运行异常结束，但 ${record.file} 已是原样，无需还原）`);
+  } else if (current === record.mutated) {
+    writeFileSync(record.file, record.original);
+    console.log(
+      `!! 上次运行在「${record.label}」被强杀，工作区留着撤掉实现后的假代码 —— 已还原 ${record.file}`,
+    );
+  } else {
+    console.error(
+      `!! 上次运行在「${record.label}」被强杀，而 ${record.file} 之后又被改过，` +
+        `不敢自动还原。请人工核对这一处：git diff ${record.file}`,
+    );
+    process.exitCode = 1;
+  }
+  clearInflight();
+}
+
 function restorePending() {
   if (pending === null) return;
   const { file, original } = pending;
   pending = null;
-  if (readFileSync(file, 'utf8') === original) return;
+  if (readFileSync(file, 'utf8') === original) {
+    clearInflight();
+    return;
+  }
   // EBUSY / EMFILE 在这台机器上是瞬时的：等一下再写就好
   for (let attempt = 1; attempt <= 8; attempt += 1) {
     try {
       writeFileSync(file, original);
-      if (readFileSync(file, 'utf8') === original) return;
+      if (readFileSync(file, 'utf8') === original) {
+        clearInflight();
+        return;
+      }
     } catch {
       // 交给下一次重试
     }
@@ -811,6 +905,12 @@ function restorePending() {
 
 process.on('exit', restorePending);
 
+recoverInflight();
+
+// 只做崩溃自愈那一步就退出（给 tests/unit/pins-self-heal.test.mjs 用：它要的正是
+// 「上一次被强杀之后」这个状态，跑完整用例既慢又会真的改写工作区源码）
+if (process.argv.includes('--recover-only')) process.exit(process.exitCode ?? 0);
+
 for (const testCase of CASES) {
   const file = TARGETS[testCase.file];
   const original = readFileSync(file, 'utf8');
@@ -819,7 +919,9 @@ for (const testCase of CASES) {
     console.log(`?? ${problems[problems.length - 1]}`);
     continue;
   }
-  writeFileSync(file, original.replace(testCase.from, testCase.to));
+  const mutated = original.replace(testCase.from, testCase.to);
+  saveInflight({ label: testCase.label, file, original, mutated });
+  writeFileSync(file, mutated);
   pending = { file, original };
   let out = '';
   try {
