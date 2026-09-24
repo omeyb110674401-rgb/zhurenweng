@@ -33,6 +33,35 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+/**
+ * 档位判定按**窗口 + 已发标记**，不按「剩余天数正好等于 7 / 3」。
+ *
+ * 旧写法 `days === entry.days` 有个静默的漏发：调度是每日一轮，只要那一天任务没跑成
+ * （容器重启、发布窗口错开、源站拖垮整轮），条目就从「剩 8 天」直接跳到「剩 6 天」，
+ * 7 天档**永远不会再命中** —— 用户少收一封提醒，而日志上看不出任何异常。
+ * 改成「已到该档且该档尚未发过」之后，漏掉的那一档会在下一轮补发一次；
+ * 去重键（条目 × 订阅 × 档）仍然保证每条公示每档至多一封，所以补发不会变成重发。
+ *
+ * 两档都命中时取**更靠前的那档**（先 7 后 3），于是每轮每人每条至多一封；
+ * 「本轮该发哪一档」必须**按订阅**判 —— 同一条目上甲可能早已收到 7 天档、乙是中途才订阅的。
+ *
+ * `days < 0` 必须挡掉：库列 `status` 是抓取口径的缓存（issue #43），已过期但还没被
+ * 下一轮抓取改口的条目仍是 `open`，按窗口判定会把「已过截止」的条目算成「该发」。
+ *
+ * 返回值里的 `allSent` 表示"到档都已发过"，用于区分跳过是幂等还是没到 —— 日志口径要准。
+ */
+export async function pickDueStage(
+  remainingDays: number,
+  isSent: (stage: ReminderStage) => Promise<boolean>,
+): Promise<{ stage: { days: number; stage: ReminderStage } | undefined; allSent: boolean }> {
+  if (remainingDays < 0) return { stage: undefined, allSent: false };
+  const due = REMINDER_DAYS.filter((entry) => remainingDays <= entry.days);
+  for (const entry of due) {
+    if (!(await isSent(entry.stage))) return { stage: entry, allSent: false };
+  }
+  return { stage: undefined, allSent: due.length > 0 };
+}
+
 export const sendDeadlineRemindersJob: Job = {
   name: 'send-deadline-reminders',
   description:
@@ -54,13 +83,17 @@ export const sendDeadlineRemindersJob: Job = {
     for (const notice of notices) {
       const days = daysUntil(notice.deadlineAt, now);
       if (days === null) continue;
-      const stage = REMINDER_DAYS.find((entry) => entry.days === days);
-      if (stage === undefined) continue;
 
       for (const subscription of subscriptions) {
         if (!matchesSubscriptionRules(subscription, notice)) continue;
-        if (await hasReminderSend(notice.id, subscription.id, stage.stage)) {
-          skippedDuplicates += 1;
+        // 本轮该发哪一档是**按订阅**判的：去重键里有订阅，同一条目上甲已收到 7 天档、
+        // 乙可能还没收到（中途才订阅），所以不能按条目算一次给所有人用。
+        const due = await pickDueStage(days, (candidate) =>
+          hasReminderSend(notice.id, subscription.id, candidate),
+        );
+        const stage = due.stage;
+        if (stage === undefined) {
+          if (due.allSent) skippedDuplicates += 1;
           continue;
         }
         try {

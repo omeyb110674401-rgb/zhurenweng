@@ -40,6 +40,8 @@ const TARGETS = {
   attachmentMode: 'src/lib/attachment-mode.ts',
   summarize: 'worker/jobs/summarize-notices.ts',
   noticePage: 'src/app/notices/[id]/page.tsx',
+  reminders: 'worker/jobs/send-deadline-reminders.ts',
+  mail: 'src/lib/mail.ts',
   compose: 'docker-compose.yml',
 };
 
@@ -391,6 +393,30 @@ const CASES = [
     to: '            attachmentReport={null}',
     pattern: '详情页把附件报告接到了摘要卡',
     test: 'tests/unit/summary-display.test.mjs',
+  },
+  {
+    label: '提醒退回「剩余天数正好等于档」的旧规则（停摆一天就永久丢档）',
+    file: 'reminders',
+    from: '  const due = REMINDER_DAYS.filter((entry) => remainingDays <= entry.days);',
+    to: '  const due = REMINDER_DAYS.filter((entry) => remainingDays === entry.days);',
+    pattern: 'pickDueStage',
+    test: 'tests/unit/reminder-stages.test.mjs',
+  },
+  {
+    label: '过期不再被挡住（库列还写着 open 的过期条目会收到提醒）',
+    file: 'reminders',
+    from: '  if (remainingDays < 0) return { stage: undefined, allSent: false };',
+    to: '  if (false) return { stage: undefined, allSent: false };',
+    pattern: '已过截止一封都不发',
+    test: 'tests/unit/reminder-stages.test.mjs',
+  },
+  {
+    label: '补发不标注（剩 5 天却自称「截止前 7 天档」）',
+    file: 'mail',
+    from: '  return days === nominal',
+    to: '  return true || days === nominal',
+    pattern: '提醒邮件的档位措辞与实际剩余一致',
+    test: 'tests/unit/reminder-stages.test.mjs',
   },
 ];
 

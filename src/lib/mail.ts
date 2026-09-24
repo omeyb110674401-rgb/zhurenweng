@@ -121,6 +121,26 @@ export function buildConfirmationEmail(input: {
 
 const STAGE_LABELS: Record<ReminderStage, string> = { d7: '截止前 7 天', d3: '截止前 3 天' };
 
+/** 各档的名义天数（补发标注用）：提醒按「已到档且未发过」判定，所以实际发出时可能已晚几天。 */
+const STAGE_NOMINAL_DAYS: Record<ReminderStage, number> = { d7: 7, d3: 3 };
+
+/**
+ * 截止日那一行的文案。
+ *
+ * 不写「截止前 7 天提醒」而实际剩 2 天 —— 那是界面在撒谎。任务停摆导致补发时如实标注，
+ * 顺带也解释了为什么有人会比别人晚收到一封。
+ */
+function reminderStageNote(stage: ReminderStage, days: number): string {
+  const nominal = STAGE_NOMINAL_DAYS[stage];
+  return days === nominal
+    ? `${STAGE_LABELS[stage]}档`
+    : `${STAGE_LABELS[stage]}档补发（原定提前 ${nominal} 天，实际剩 ${days} 天）`;
+}
+
+/** 订阅侧的固定承诺：两档各一封，漏跑的那天下一轮补上。 */
+const REMINDER_POLICY_TEXT =
+  '本提醒按你的订阅规则发送，每条公示的截止前 7 天、3 天各提醒一次；某一天任务没跑成，该档会在下一轮补发一次（不会重复发）。';
+
 /**
  * 任务失败告警邮件（issue #12）：worker 任务失败时发给站长（ALERT_EMAIL）。
  * 内容含任务名、源（任务级失败为「—」）、发生时间与错误摘要（截断防爆炸）；
@@ -197,13 +217,13 @@ export function buildReminderEmail(input: {
       `你订阅的公示「${notice.title}」征求意见即将截止：`,
       '',
       `标题：${notice.title}`,
-      `截止日期：${notice.deadlineAt ?? '未标注'}（还剩 ${days} 天，${STAGE_LABELS[stage]}提醒）`,
+      `截止日期：${notice.deadlineAt ?? '未标注'}（还剩 ${days} 天，${reminderStageNote(stage, days)}）`,
       `站内详情（含 AI 摘要与提意指引）：`,
       detail,
       `官方原文（请前往官方渠道提交意见）：`,
       notice.url,
       '',
-      `本提醒按你的订阅规则发送，每条公示截止前 7 天、3 天各提醒一次。`,
+      `${REMINDER_POLICY_TEXT}`,
       `不想再收到提醒？退订（打开页面后点确认）：`,
       unsubscribe,
       '',
@@ -212,10 +232,10 @@ export function buildReminderEmail(input: {
     ].join('\n'),
     html: [
       `<p>你订阅的公示「${escapeHtml(notice.title)}」征求意见即将截止：</p>`,
-      `<p>截止日期：<strong>${escapeHtml(notice.deadlineAt ?? '未标注')}</strong>（还剩 ${days} 天，${STAGE_LABELS[stage]}提醒）</p>`,
+      `<p>截止日期：<strong>${escapeHtml(notice.deadlineAt ?? '未标注')}</strong>（还剩 ${days} 天，${reminderStageNote(stage, days)}）</p>`,
       `<p><a href="${escapeHtml(detail)}">站内详情（含 AI 摘要与提意指引）</a></p>`,
       `<p><a href="${escapeHtml(notice.url)}">官方原文（请前往官方渠道提交意见）</a></p>`,
-      `<p>本提醒按你的订阅规则发送，每条公示截止前 7 天、3 天各提醒一次。不想再收到提醒？<a href="${escapeHtml(unsubscribe)}">退订（打开页面后点确认）</a>。</p>`,
+      `<p>${escapeHtml(REMINDER_POLICY_TEXT)}不想再收到提醒？<a href="${escapeHtml(unsubscribe)}">退订（打开页面后点确认）</a>。</p>`,
       `<p>——<br>${SITE_FOOTER}</p>`,
     ].join('\n'),
     headers: unsubscribeHeaders(input.unsubscribeToken),

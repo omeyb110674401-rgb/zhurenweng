@@ -402,10 +402,17 @@ describe('issue #7：订阅 double opt-in → 截止提醒 → 一键退订', ()
   });
 
   it('重复运行提醒任务：不重发任何邮件（条目×档×订阅去重）', async () => {
+    // 先跑一轮把「本轮该发的」发完。窗口化（issue #60）之后这一轮**可能补发某一档** ——
+    // 那是补上以前会因为停摆一天而永远丢掉的提醒，不属于重发。
+    // 所以这里不能用「第一次运行也必须 0 封」当断言（那等于把旧的精确档规则钉死）；
+    // 幂等性的准确测法是：稳定一轮之后，再跑必须绝对静默。
+    const warm = await runWorkerOnce();
+    assert.equal(warm.code, 0, `worker 应正常退出，输出：${warm.output}`);
+
     const before = readOutbox().length;
     const run = await runWorkerOnce();
     assert.equal(run.code, 0, `worker 应正常退出，输出：${run.output}`);
-    assert.match(run.output, /发送 0 封，去重跳过 3 次/);
+    assert.match(run.output, /发送 0 封，去重跳过 \d+ 次/, '到档且已发过的组合应全部走去重分支');
     assert.equal(readOutbox().length, before, '重复运行不得产生新邮件');
   });
 
@@ -547,6 +554,10 @@ describe('issue #7：订阅 double opt-in → 截止提醒 → 一键退订', ()
       fetchedAt: new Date().toISOString(),
     });
 
+    // alice 已退订：其规则同样命中该条目，但不再收到任何邮件。
+    // 基线取"本轮之前的实际封数"而不是写死 5 —— 补发会让历史封数变化，
+    // 这条断言要表达的是「退订之后一封都不再加」，不是「她一共只该收到几封」。
+    const aliceBefore = mailsTo(ALICE).length;
     const before = readOutbox().length;
     const run = await runWorkerOnce();
     assert.equal(run.code, 0, `worker 应正常退出，输出：${run.output}`);
@@ -558,15 +569,14 @@ describe('issue #7：订阅 double opt-in → 截止提醒 → 一键退订', ()
     assert.match(bobMail.subject, /剩 3 天/);
     assert.ok(bobMail.text.includes(EXTRA.keywordD3.url));
 
-    // alice 已退订：其规则同样命中该条目，但不再收到任何邮件
     const aliceMailsAfter = mailsTo(ALICE).filter((mail) =>
       mail.subject.includes(EXTRA.keywordD3.title),
     );
     assert.equal(aliceMailsAfter.length, 0, '退订后不得再收到任何提醒');
     assert.equal(
       mailsTo(ALICE).length,
-      5,
-      'alice 的邮件总数应停在退订前（2 封确认 + 3 封提醒），不再新增',
+      aliceBefore,
+      `退订前 alice 已有 ${aliceBefore} 封，本轮之后必须一封都不多`,
     );
   });
 
