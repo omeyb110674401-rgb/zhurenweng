@@ -22,6 +22,9 @@
  *    前面的用例，而那些用例正是「造成被断言的那个状态」的轮次（实测踩过：撤掉
  *    「成功清错误列」，只跑第 3 轮的断言照样绿 —— 因为第 1、2 轮没跑，那列本来就是空的）。
  *    这种套件要按 **describe 名**匹配，让整组按顺序跑完。
+ * 3. `from` 片段**写成一行**。工作区里部分 .ts 是 CRLF（`core.autocrlf=true`，提交时才归一成
+ *    LF），多行片段里的 `\n` 在那些文件里匹配不上，脚本会把这条报成"用例已过期"。
+ *    2026-09-24 实测踩过一次（issue #62 的 `openOnly` 日期条件）。
  */
 import { readFileSync, writeFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
@@ -44,6 +47,8 @@ const TARGETS = {
   subscription: 'src/lib/subscription.ts',
   subsRepo: 'src/db/repo/subscriptions.ts',
   noticesRepo: 'src/db/repo/notices.ts',
+  noticeRecency: 'src/lib/notice-recency.ts',
+  homeQuery: 'src/app/_lib/home-query.ts',
   notify: 'worker/jobs/notify-new-notices.ts',
   mail: 'src/lib/mail.ts',
   compose: 'docker-compose.yml',
@@ -503,6 +508,86 @@ const CASES = [
     to: '  if (rows[0].confirmed === 1) {',
     pattern: '提交修改后：新规则进待确认',
     test: 'tests/e2e/subscription-scope.test.mjs',
+  },
+  {
+    label: '列表排序参数被忽略（四档排序全退成默认倒计时序）',
+    file: 'noticesRepo',
+    from: "  return ORDERS[sort ?? 'deadline'];",
+    to: '  return AGGREGATION_ORDER;',
+    pattern: 'issue #62 仓储层：排序档位',
+    test: 'tests/e2e/discovery-repo.test.mjs',
+  },
+  {
+    label: '「只看未截止」只看库里状态（刚过截止、抓取还没改口的条目混进来）',
+    file: 'noticesRepo',
+    from: '          sql`substr(${notices.deadlineAt}, 1, 10) >= ${siteDateIso(new Date())}`,',
+    to: '          sql`1 = 1`,',
+    pattern: 'issue #62 仓储层：只看未截止与最近新增',
+    test: 'tests/e2e/discovery-repo.test.mjs',
+  },
+  {
+    label: '「最近新增」按 fetched_at 判（每天被重抓的老条目天天算新增）',
+    file: 'noticesRepo',
+    from: '      gte(notices.firstSeenAt, recencyCutoffIso(new Date(), options.firstSeenWithinDays)),',
+    to: '      gte(notices.fetchedAt, recencyCutoffIso(new Date(), options.firstSeenWithinDays)),',
+    pattern: 'issue #62 仓储层：只看未截止与最近新增',
+    test: 'tests/e2e/discovery-repo.test.mjs',
+  },
+  {
+    label: '「最近新增」条件根本不进 WHERE（入口在、什么都不筛）',
+    file: 'noticesRepo',
+    from: '      gte(notices.firstSeenAt, recencyCutoffIso(new Date(), options.firstSeenWithinDays)),',
+    to: '      sql`1 = 1`,',
+    pattern: 'issue #62 仓储层：只看未截止与最近新增',
+    test: 'tests/e2e/discovery-repo.test.mjs',
+  },
+  {
+    label: '收录时间窗口把天当成分钟（「近 7 天」实为 7 分钟）',
+    file: 'noticeRecency',
+    from: '  return new Date(now.getTime() - days * DAY_MS).toISOString();',
+    to: '  return new Date(now.getTime() - days * 60_000).toISOString();',
+    pattern: 'issue #62：recencyCutoffIso 的形状与算法',
+    test: 'tests/unit/notice-recency.test.mjs',
+  },
+  {
+    label: '「新」角标的比较方向反了（老条目带角标、新条目不带）',
+    file: 'noticeRecency',
+    from: '  return seenAt >= Date.parse(recencyCutoffIso(now, days));',
+    to: '  return seenAt <= Date.parse(recencyCutoffIso(now, days));',
+    pattern: 'issue #62：isNewNotice',
+    test: 'tests/unit/notice-recency.test.mjs',
+  },
+  {
+    label: '排序值不做白名单（任意 `?sort=` 都当一档传下去）',
+    file: 'homeQuery',
+    from: '  return isNoticeSortKey(raw) ? raw : undefined;',
+    to: '  return raw as NoticeSortKey;',
+    pattern: '排序与收录范围（issue #62）',
+    test: 'tests/unit/home-query.test.mjs',
+  },
+  {
+    label: 'since 越界被夹到上限（读者要全部，页面给的是窄的一页）',
+    file: 'homeQuery',
+    from: '  if (!Number.isInteger(parsed) || parsed < 1 || parsed > MAX_SINCE_DAYS) return undefined;',
+    to: '  if (!Number.isInteger(parsed) || parsed < 1) return undefined;',
+    pattern: '排序与收录范围（issue #62）',
+    test: 'tests/unit/home-query.test.mjs',
+  },
+  {
+    label: 'open=0 / open=任意值都被当成「只看未截止」',
+    file: 'homeQuery',
+    from: "  return firstParam(value) === '1';",
+    to: '  return firstParam(value) !== undefined;',
+    pattern: '排序与收录范围（issue #62）',
+    test: 'tests/unit/home-query.test.mjs',
+  },
+  {
+    label: '「只看未截止」不算筛选维度（这一页可被收录，条数文案也不说口径）',
+    file: 'homeQuery',
+    from: '      openOnly ||',
+    to: '      false ||',
+    pattern: '排序与收录范围（issue #62）',
+    test: 'tests/unit/home-query.test.mjs',
   },
 ];
 

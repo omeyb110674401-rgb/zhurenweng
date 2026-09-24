@@ -8,6 +8,8 @@
 
 import { isKnownCategory } from '../../lib/categories.ts';
 import { isPeriodBucketKey, type PeriodBucketKey } from '../../lib/notice-period.ts';
+import { MAX_SINCE_DAYS } from '../../lib/notice-recency.ts';
+import { isNoticeSortKey, type NoticeSortKey } from '../../lib/notice-sort.ts';
 
 /** 首页接受的 querystring 参数（Next 的 searchParams 形状：值可能是数组）。 */
 export interface HomeSearchParams {
@@ -20,6 +22,9 @@ export interface HomeSearchParams {
   from?: string | string[];
   to?: string | string[];
   period?: string | string[];
+  sort?: string | string[];
+  open?: string | string[];
+  since?: string | string[];
 }
 
 /** 取 querystring 参数首值并去空白；空串视为未传。 */
@@ -85,6 +90,38 @@ export function periodParam(value: string | string[] | undefined): PeriodBucketK
   return isPeriodBucketKey(raw) ? raw : undefined;
 }
 
+/**
+ * 取 querystring 里的排序档位（issue #62）：只认 `notice-sort.ts` 清单里的 key，
+ * 未知值不生效（= 默认排序），而不是报错或空页 —— 与未知领域值同一处理。
+ */
+export function sortParam(value: string | string[] | undefined): NoticeSortKey | undefined {
+  const raw = firstParam(value);
+  if (raw === undefined) return undefined;
+  return isNoticeSortKey(raw) ? raw : undefined;
+}
+
+/**
+ * `?open=1`：只看还没截止的条目。只认 `1`（与 `?lead=1` 同一形状）——
+ * `?open=0` 表示"不限制"，与不带参数同义，不必再造一档实现。
+ */
+export function openOnlyParam(value: string | string[] | undefined): boolean {
+  return firstParam(value) === '1';
+}
+
+/**
+ * `?since=N`：只看最近 N 天内首次收录的条目（issue #62）。
+ *
+ * 为什么超出 `MAX_SINCE_DAYS` 不夹取而是**不生效**：来路是"把窗口放宽到比 90 天更久"，
+ * 夹到 90 天给出的是一份**更窄**的结果 —— 读者以为看了全部，实际被悄悄切掉一截。
+ * 不生效则返回全部条目，那才是他要求的集合的上界（同一件事见 `monthRangeParam`
+ * 的「宁可不筛，也不给假空态」）。首页的入口只给 7 / 30 / 90 三档，越界值来自手改 URL。
+ */
+export function sinceParam(value: string | string[] | undefined): number | undefined {
+  const parsed = Number(firstParam(value) ?? '');
+  if (!Number.isInteger(parsed) || parsed < 1 || parsed > MAX_SINCE_DAYS) return undefined;
+  return parsed;
+}
+
 /** 首页当前生效的查询状态 */
 export interface HomeQuery {
   /** 领域标签（未知值不生效：避免任意 querystring 触发无效筛选） */
@@ -99,9 +136,18 @@ export interface HomeQuery {
   to?: string;
   /** 公示期分桶 key（issue #47：统计页公示期分布钻取用） */
   period?: PeriodBucketKey;
+  /**
+   * 排序档位（issue #62）；未传 / 未知值 = 默认排序。**不算筛选**：
+   * 换排序不改变结果集合，所以不进 `hasFilter`（否则每个排序档都会多出一个 noindex 变体）。
+   */
+  sort?: NoticeSortKey;
+  /** 只看还没截止的条目（issue #62） */
+  openOnly: boolean;
+  /** 只看最近 N 天内首次收录的条目（issue #62）；undefined = 不限制收录时间 */
+  sinceDays?: number;
   /** 请求的页码（已夹到正整数；实际页码还要按总数夹一次） */
   page: number;
-  /** 是否带了筛选维度（领域 / 机关 / 关键词 / 月份）—— 决定「筛选后共 N 条」与索引口径 */
+  /** 是否带了筛选维度（领域 / 机关 / 关键词 / 月份 / 公示期 / 未截止 / 最近新增）—— 决定「筛选后共 N 条」与索引口径 */
   hasFilter: boolean;
 }
 
@@ -122,6 +168,9 @@ export function parseHomeQuery(params: HomeSearchParams): HomeQuery {
   const from = range.from ?? legacyMonth;
   const to = range.to ?? legacyMonth;
   const period = periodParam(params.period);
+  const sort = sortParam(params.sort);
+  const openOnly = openOnlyParam(params.open);
+  const sinceDays = sinceParam(params.since);
   return {
     category,
     agency,
@@ -129,6 +178,9 @@ export function parseHomeQuery(params: HomeSearchParams): HomeQuery {
     from,
     to,
     period,
+    sort,
+    openOnly,
+    sinceDays,
     leadAgencyOnly: firstParam(params.lead) === '1',
     page: pageParam(params.page),
     hasFilter:
@@ -137,6 +189,8 @@ export function parseHomeQuery(params: HomeSearchParams): HomeQuery {
       keyword !== undefined ||
       from !== undefined ||
       to !== undefined ||
-      period !== undefined,
+      period !== undefined ||
+      openOnly ||
+      sinceDays !== undefined,
   };
 }

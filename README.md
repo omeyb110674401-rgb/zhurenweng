@@ -373,8 +373,19 @@ worker 注册表中的 `summarize-notices` 任务（`worker/jobs/summarize-notic
   - 三维度可任意组合且全部落在 querystring（`/?category=…&agency=…&q=…`），
     可直接分享；结果计数与当前筛选摘要随页展示；无结果渲染空态并提供
     「清除全部筛选」入口；未知领域参数不生效（避免任意串触发无效筛选）。
-- **与倒计时排序叠加**：筛选只过滤行、不改变排序——过滤结果始终是未筛选
-  列表（征求意见中在前、截止日期升序）的同序子序列。仓库层新增
+- **排序与收录范围（issue #62）**：筛选条上方一排普通链接给四个排序档
+  （`?sort=deadline|published|newest|clicks`，默认档不写进链接）与两个范围维度
+  （`?open=1` 只看未截止、`?since=N` 最近 N 天收录）。三条口径值得记：
+  `?open=1` 按**展示口径**判（库里 `status` 是抓取时的缓存，刚过截止的条目仍写 `open`，
+  见 issue #43）；`?since=` 用 `first_seen_at` 而不是每天被覆盖的 `fetched_at`；
+  越界的 `since` **不生效而不是夹取**（夹窄会少给条目且看不出来）。排序不进 `hasFilter`
+  （结果集合没变，不该因此多出一批 noindex 变体），另两个维度进。档位清单在
+  `src/lib/notice-sort.ts`、时间窗口在 `src/lib/notice-recency.ts`，SQL 实现在
+  `src/db/repo/notices.ts` 的 `ORDERS`（`Record<NoticeSortKey, SQL[]>`，少一档编译不过）。
+- **与倒计时排序叠加**：不带 `?sort=` 时筛选只过滤行、不改变排序——过滤结果始终是未筛选
+  列表（征求意见中在前、截止日期升序）的同序子序列；这一条从 issue #9 起保持不变。
+  每一档排序的末位都强制唯一键 `asc(id)`（issue #54：排序不唯一时 `LIMIT/OFFSET`
+  会在页边界重复一行、挤掉另一行）。仓库层新增
   `listNoticesFiltered` / `listNoticeAgencies`（`src/db/repo/notices.ts`），
   排序表达式与 `listNotices` 共用同一常量；不改动既有查询函数语义。
 - **单元**：`tests/unit/categories.test.mjs` —— 规则表逐条钉死：关键词命中标题 /

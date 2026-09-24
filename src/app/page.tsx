@@ -6,6 +6,8 @@ import { NoticeItem } from '@/app/_lib/notice-item';
 import { SearchForm } from '@/app/_lib/search-form';
 import { parseHomeQuery, type HomeSearchParams } from '@/app/_lib/home-query';
 import { periodBucketLabel, type PeriodBucketKey } from '@/lib/notice-period';
+import { NOTICE_SORT_KEYS, NOTICE_SORT_LABELS, type NoticeSortKey } from '@/lib/notice-sort';
+import { SINCE_OPTION_DAYS } from '@/lib/notice-recency';
 import { buildNoticeListJsonLd, serializeJsonLd } from '@/lib/notice-jsonld';
 import { DOMAIN_CATEGORIES } from '@/lib/categories';
 import { siteUrl } from '@/lib/site-url';
@@ -85,6 +87,15 @@ interface FilterState {
    * 从下拉框自己选的机关不带这个参数 —— 那时是「任一参与机关」（issue #21）。
    */
   leadAgencyOnly?: boolean;
+  /**
+   * 排序档位（issue #62）：`undefined` = 默认倒计时序，不写进链接（首页地址保持干净，
+   * 也让所有既有的分享链接一字不差地照旧）。
+   */
+  sort?: NoticeSortKey;
+  /** 只看还没截止的条目（issue #62） */
+  openOnly?: boolean;
+  /** 只看最近 N 天内首次收录的条目（issue #62） */
+  sinceDays?: number;
   /** 页码；1 为默认，不写入链接（保持首页地址干净） */
   page?: number;
 }
@@ -105,6 +116,9 @@ function buildFilterHref(current: FilterState, next: Partial<FilterState>): stri
   if (merged.from) search.set('from', merged.from);
   if (merged.to) search.set('to', merged.to);
   if (merged.period) search.set('period', merged.period);
+  if (merged.sort) search.set('sort', merged.sort);
+  if (merged.openOnly) search.set('open', '1');
+  if (merged.sinceDays) search.set('since', String(merged.sinceDays));
   if (merged.page !== undefined && merged.page > 1) search.set('page', String(merged.page));
   const qs = search.toString();
   return qs.length > 0 ? `/?${qs}` : '/';
@@ -137,6 +151,9 @@ export default async function HomePage({ searchParams }: HomePageProps) {
     period: query.period,
     // 只有「带了机关 + lead=1」才算牵头口径；裸 lead=1 不改变任何结果
     leadAgencyOnly: query.leadAgencyOnly,
+    sort: query.sort,
+    openOnly: query.openOnly,
+    sinceDays: query.sinceDays,
   };
   const { category, agency, keyword, from, to, period } = current;
   const hasFilter = query.hasFilter;
@@ -152,6 +169,9 @@ export default async function HomePage({ searchParams }: HomePageProps) {
     publishedToMonth: to,
     periodBucket: period,
     leadAgencyOnly: current.leadAgencyOnly && agency !== undefined,
+    sort: query.sort,
+    openOnly: query.openOnly,
+    firstSeenWithinDays: query.sinceDays,
   };
 
   // 仓库层排序：征求意见中在前、截止日期升序（即将截止在前）、无截止日期靠后；
@@ -193,6 +213,10 @@ export default async function HomePage({ searchParams }: HomePageProps) {
     keyword ? `关键词：${keyword}` : '',
     monthFilterSummary(from, to),
     period ? `公示期：${periodBucketLabel(period) ?? period}` : '',
+    // 「只看未截止」「最近新增」也要进摘要（issue #62）：这行文字是「筛选后共 N 条」
+    // 里 N 的口径说明，少说一个维度，读者就只能猜这个 0 是谁造成的
+    current.openOnly ? '只看未截止' : '',
+    current.sinceDays ? `最近 ${current.sinceDays} 天收录` : '',
   ]
     .filter(Boolean)
     .join(' · ');
@@ -271,7 +295,11 @@ export default async function HomePage({ searchParams }: HomePageProps) {
             口径全挤在同一个段落里，窄屏下是一整块文字墙，RSS / 邮件提醒两个入口也
             读起来像正文的一部分。文案与 testid 一字未改，只换了容器。 */}
         <p className="list-actions">
-          按征求意见截止日期排序，即将截止的排在最前。
+          {/* 默认排序的文案保持原样（既有 e2e 与读者的既定印象都锚在这句上）；
+              换档时才改口说当前是哪一档 —— 说明必须与页面真实的顺序一致 */}
+          {current.sort === undefined
+            ? '按征求意见截止日期排序，即将截止的排在最前。'
+            : `按${NOTICE_SORT_LABELS[current.sort]}排序。`}
           {/* RSS 订阅入口（issue #6）：页面可见入口，配合 head 内的自动发现链接 */}
           <a className="rss-link" href="/feed.xml" data-testid="rss-feed-link">
             RSS 订阅
@@ -283,6 +311,49 @@ export default async function HomePage({ searchParams }: HomePageProps) {
             </a>
           ) : null}
         </p>
+
+        {/* 排序与收录范围入口（issue #62）：全是普通链接，切换时保留其余维度、页码归 1，
+            与下方筛选条同一套「零客户端 JS」的做法 */}
+        <nav className="view-controls" data-testid="view-controls" aria-label="排序与收录范围">
+          <span className="view-controls-group">排序</span>
+          {NOTICE_SORT_KEYS.map((key) => {
+            const active = (current.sort ?? 'deadline') === key;
+            return (
+              <a
+                key={key}
+                className={`view-chip${active ? ' view-chip-active' : ''}`}
+                href={buildFilterHref(current, { sort: key === 'deadline' ? undefined : key })}
+                data-testid="sort-link"
+                aria-current={active ? 'true' : undefined}
+              >
+                {NOTICE_SORT_LABELS[key]}
+              </a>
+            );
+          })}
+          <span className="view-controls-group">范围</span>
+          <a
+            className={`view-chip${current.openOnly ? ' view-chip-active' : ''}`}
+            href={buildFilterHref(current, { openOnly: !current.openOnly })}
+            data-testid="open-only-link"
+            aria-current={current.openOnly ? 'true' : undefined}
+          >
+            只看未截止
+          </a>
+          {SINCE_OPTION_DAYS.map((days) => {
+            const active = current.sinceDays === days;
+            return (
+              <a
+                key={days}
+                className={`view-chip${active ? ' view-chip-active' : ''}`}
+                href={buildFilterHref(current, { sinceDays: active ? undefined : days })}
+                data-testid="since-link"
+                aria-current={active ? 'true' : undefined}
+              >
+                {`近 ${days} 天收录`}
+              </a>
+            );
+          })}
+        </nav>
 
         {/* 分类浏览筛选条（issue #9）：领域标签云 + 机关下拉 + 关键词框，
             全部经 URL 参数驱动、服务端渲染，不依赖客户端 JS */}
@@ -322,6 +393,16 @@ export default async function HomePage({ searchParams }: HomePageProps) {
             {from !== undefined && <input type="hidden" name="from" value={from} />}
             {to !== undefined && <input type="hidden" name="to" value={to} />}
             {period !== undefined && <input type="hidden" name="period" value={period} />}
+            {/* 排序与范围同样要留住（issue #62，与 issue #50 的 lead 同一件事）：
+                表单里没这些字段时，用户只填个关键词点「筛选」就会静默回到默认排序 +
+                全部条目，页面顶部却还显示着他刚选的那一档 */}
+            {current.sort !== undefined && (
+              <input type="hidden" name="sort" value={current.sort} />
+            )}
+            {current.openOnly && <input type="hidden" name="open" value="1" />}
+            {current.sinceDays !== undefined && (
+              <input type="hidden" name="since" value={String(current.sinceDays)} />
+            )}
             {/*
               牵头口径也要留住（issue #50）：从统计页钻取进来的是 `?agency=X&lead=1`
               （牵头机关，表格数字按它算），而表单此前只保留 category / from / to /

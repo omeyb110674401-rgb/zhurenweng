@@ -216,6 +216,18 @@ body {
   line-height: 1;
 }
 
+/* 「新」角标（issue #62）：刻意比状态徽标弱一档（描边而非填色）——
+   它只是「最近才收录」的提示，不该和「征求意见中 / 已截止」抢注意力。 */
+.notice-new-badge {
+  font-size: 12px;
+  line-height: 1;
+  padding: 4px 8px;
+  border-radius: 999px;
+  color: var(--accent);
+  background: #fff;
+  border: 1px dashed var(--accent);
+}
+
 .countdown-urgent {
   color: #b91c1c;
   background: #fee2e2;
@@ -1154,6 +1166,46 @@ body {
   border-color: #fcd34d;
 }
 
+/* ===== 排序与收录范围入口（issue #62）=====
+   外观沿用 category-chip 的胶囊，但放在筛选条**外面**：这一排改的是「怎么看」
+   （排序 / 收录时间 / 是否未截止），领域与机关那排改的是「看哪些内容」，
+   混在一起会读成一件事，而它们的分享链接语义不同。 */
+.view-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  margin: 0 0 12px;
+}
+
+.view-controls-group {
+  font-size: 12px;
+  color: var(--ink-soft);
+  letter-spacing: 0.04em;
+}
+
+.view-chip {
+  font-size: 13px;
+  color: var(--ink-soft);
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 4px 12px;
+  text-decoration: none;
+}
+
+.view-chip:hover {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+.view-chip-active {
+  color: #92400e;
+  font-weight: 600;
+  background: #fffbeb;
+  border-color: #fcd34d;
+}
+
 .filter-form {
   display: flex;
   flex-wrap: wrap;
@@ -1449,6 +1501,7 @@ body {
    WCAG 2.5.8 的最低目标是 24px，iOS HIG 建议 44px —— 折中取 40px。 */
 @media (pointer: coarse) {
   .category-chip,
+  .view-chip,
   .pagination-link,
   .pagination-disabled,
   .filter-button,

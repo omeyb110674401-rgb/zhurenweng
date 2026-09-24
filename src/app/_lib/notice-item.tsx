@@ -2,6 +2,7 @@ import Link from 'next/link';
 import type { NoticeRecord } from '@/db/types';
 import { Countdown, StatusBadge, formatDate } from '@/app/_lib/notice-display';
 import { effectiveStatus } from '@/lib/notice-status';
+import { isNewNotice } from '@/lib/notice-recency';
 
 /**
  * 公示条目的列表项展示（issue #8 自列表页抽取共用）：聚合列表页与
@@ -18,6 +19,14 @@ export function NoticeItem({ notice }: { notice: NoticeRecord }) {
       <div className="notice-item-head">
         <StatusBadge status={effectiveStatus(notice, now)} />
         <Countdown notice={notice} now={now} />
+        {/* 「新」= 最近被收录（issue #62，判据是 first_seen_at 而非抓取时间）。
+            与首页的「近 N 天收录」入口是两套窗口：角标固定 7 天，不跟筛选走 ——
+            选「近 90 天」时若人人带角标，这个标记就不再传递任何信息 */}
+        {isNewNotice(notice.firstSeenAt, now) ? (
+          <span className="notice-new-badge" data-testid="notice-new-badge">
+            新
+          </span>
+        ) : null}
       </div>
       <Link className="notice-title" href={`/notices/${notice.id}`} data-testid="notice-title-link">
         {notice.title}

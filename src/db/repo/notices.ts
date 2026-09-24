@@ -1,10 +1,12 @@
-import { and, asc, desc, eq, inArray, or, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, gte, inArray, isNull, or, sql, type SQL, type SQLWrapper } from 'drizzle-orm';
 import { currentDriver, getDb } from '../client.ts';
 import { notices, outboundClickDaily } from '../schema/sqlite.ts';
 import { syncNoticeVersionLinks } from './versions.ts';
 import { siteDateIso } from '../../lib/dates.ts';
 import { splitSearchTerms } from '../../lib/search/search-text.ts';
 import { PERIOD_BUCKETS, type PeriodBucketKey } from '../../lib/notice-period.ts';
+import { recencyCutoffIso } from '../../lib/notice-recency.ts';
+import type { NoticeSortKey } from '../../lib/notice-sort.ts';
 import { deriveCategoryTags } from '../../lib/categories.ts';
 import { agencyKeysOf, canonicalAgency, splitAgencies } from '../../lib/agencies.ts';
 import {
@@ -69,6 +71,40 @@ const AGGREGATION_ORDER = [
   asc(notices.id),
 ];
 
+/**
+ * 各排序档位的 SQL 实现（issue #62；档位清单在 lib/notice-sort.ts，那里说明为什么
+ * 清单不放这一层）。默认 `deadline` 就是原来的 `AGGREGATION_ORDER` —— 不传参数时
+ * **一字不差**，首页与既有钻取链接、以及所有没改过的调用方行为不变。
+ *
+ * 写成 `Record<NoticeSortKey, …>` 而不是 switch：加一档而忘了在这里补实现会**编译不过**，
+ * switch 带 default 时则会静默退化成默认排序（`?sort=` 看着生效了，实际什么都没变）。
+ *
+ * 每一档末位都必须是 `asc(id)`：#54 的教训是「排序不唯一 ⇒ `LIMIT/OFFSET` 分页会在页边界
+ * 重复一行、挤掉另一行」，而并列在这几个字段上极常见（同一轮抓进来的批次时间戳相同、
+ * 点击数大量为 0）。新增排序时若忘了这个尾键，测试照样全绿、线上才会出错。
+ */
+const NULLS_LAST = (column: SQLWrapper) => sql`case when ${column} is null then 1 else 0 end`;
+
+const ORDERS: Record<NoticeSortKey, SQL[]> = {
+  deadline: AGGREGATION_ORDER,
+  // 最新发布：缺发布日期的沉底（与统计页「缺发布日期不计入分布」同一口径）
+  published: [
+    NULLS_LAST(notices.publishedAt),
+    desc(notices.publishedAt),
+    desc(notices.fetchedAt),
+    asc(notices.id),
+  ],
+  // 最近收录：按 first_seen_at（建行时写入、不随每日抓取覆盖），不是 fetched_at
+  newest: [NULLS_LAST(notices.firstSeenAt), desc(notices.firstSeenAt), asc(notices.id)],
+  // 提意见最多：并列（大量条目为 0）时再按倒计时排，避免"同分随机序"
+  clicks: [desc(notices.outboundClicks), ...AGGREGATION_ORDER],
+};
+
+function orderFor(sort: NoticeSortKey | undefined): SQL[] {
+  return ORDERS[sort ?? 'deadline'];
+}
+
+/** 未带筛选的全量列表（RSS / feed 与内部脚本用）：固定默认倒计时序，不受 `?sort=` 影响。 */
 export async function listNotices(options: ListNoticesOptions = {}): Promise<NoticeRecord[]> {
   const db = await getDb();
   const rows = await db
@@ -81,8 +117,8 @@ export async function listNotices(options: ListNoticesOptions = {}): Promise<Not
 
 /**
  * 分类浏览查询（issue #9）：领域标签 / 发布机关 / 关键词三维度可任意组合
- * （全部可分享于 querystring：/?category=…&agency=…&q=…），排序沿用
- * AGGREGATION_ORDER 的倒计时排序 —— 筛选只过滤行，不改变顺序。
+ * （全部可分享于 querystring：/?category=…&agency=…&q=…），默认排序沿用
+ * AGGREGATION_ORDER 的倒计时排序；传 sort 换口径（issue #62，见 NOTICE_SORT_KEYS）。
  *
  * 过滤语义：
  * - category：领域标签精确命中（categoryTagsJson 存 JSON 数组文本，用带引号
@@ -127,8 +163,21 @@ export interface ListNoticesFilteredOptions {
    */
   periodBucket?: PeriodBucketKey;
   limit?: number;
-  /** 分页偏移（首页分页用；默认 0）。排序是确定性的（见 AGGREGATION_ORDER），
-   *  故同一查询条件下 offset 分页不会重复或漏行。 */
+  /**
+   * 排序口径（issue #62）：未传 = 默认倒计时序（`deadline`），与首页既有行为一字不差。
+   * 档位清单在 lib/notice-sort.ts；每档的末位都强制 `asc(id)`，理由见上面 `ORDERS` 的注释。
+   */
+  sort?: NoticeSortKey;
+  /**
+   * 只看"还没截止"的条目（issue #62）。按**展示口径**判而不是库列：
+   * 已过截止但还没被下一轮抓取改口的条目不该出现在这里（#43 的同一件事）。
+   */
+  openOnly?: boolean;
+  /** 只看最近 N 天内首次收录的条目（「最近新增」；`first_seen_at` 为 NULL 的存量不进来） */
+  firstSeenWithinDays?: number;
+  /**
+   * 分页偏移（issue #19 的翻页）。排序必须**全序**（每档末位的 `asc(id)` 尾键，见 `ORDERS`），
+   * 故同一查询条件下 offset 分页不会重复或漏行。 */
   offset?: number;
 }
 
@@ -249,6 +298,29 @@ function filterConditions(options: ListNoticesFilteredOptions) {
     const keyword = keywordCondition(options.keyword);
     if (keyword) conditions.push(keyword);
   }
+  if (options.openOnly) {
+    // 「还没截止」按**展示口径**判，与页面上的徽标同源（issue #43 的那件事）：
+    // 库内 status 是抓取时推导的，刚过截止的条目在下一轮抓取前仍写着 open。
+    // 只看未截止的人若拿到那条，看到的徽标却是「已截止」—— 筛选器在说谎。
+    // 截止日为空的条目留下：它没有"已过"的截止日，effectiveStatus 也判它 open。
+    conditions.push(
+      and(
+        eq(notices.status, 'open'),
+        or(
+          isNull(notices.deadlineAt),
+          sql`substr(${notices.deadlineAt}, 1, 10) >= ${siteDateIso(new Date())}`,
+        ),
+      ),
+    );
+  }
+  if (options.firstSeenWithinDays !== undefined) {
+    // 同形状的 UTC ISO 字符串按字节序比较 = 按时间先后比较；下界形状的出处见
+    // lib/notice-recency.ts 的 recencyCutoffIso。first_seen_at 为 NULL 的存量行
+    // 不满足比较（NULL 在任何比较里都不成立）→ 天然被排除，与角标同一判定。
+    conditions.push(
+      gte(notices.firstSeenAt, recencyCutoffIso(new Date(), options.firstSeenWithinDays)),
+    );
+  }
   return conditions;
 }
 
@@ -261,7 +333,7 @@ export async function listNoticesFiltered(
     .select()
     .from(notices)
     .where(conditions.length > 0 ? and(...conditions) : undefined)
-    .orderBy(...AGGREGATION_ORDER)
+    .orderBy(...orderFor(options.sort))
     .limit(options.limit ?? 50)
     .offset(options.offset ?? 0);
   return rows.map(toNoticeRecord);

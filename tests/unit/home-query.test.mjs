@@ -7,6 +7,9 @@ import {
   pageParam,
   parseHomeQuery,
   periodParam,
+  sinceParam,
+  sortParam,
+  openOnlyParam,
 } from '../../src/app/_lib/home-query.ts';
 
 /**
@@ -156,9 +159,56 @@ describe('parseHomeQuery：筛选状态与索引口径', () => {
       from: undefined,
       to: undefined,
       period: undefined,
+      sort: undefined,
+      openOnly: false,
+      sinceDays: undefined,
       leadAgencyOnly: false,
       page: 3,
       hasFilter: true,
     });
+  });
+});
+
+describe('sortParam / openOnlyParam / sinceParam：排序与收录范围（issue #62）', () => {
+  it('排序只认 notice-sort.ts 清单里的档位，未知值不生效（= 默认排序）', () => {
+    for (const key of ['deadline', 'published', 'newest', 'clicks']) {
+      assert.equal(sortParam(key), key);
+    }
+    for (const bad of ['Deadline', 'title', 'old', '__proto__', '', '   ', undefined]) {
+      assert.equal(sortParam(bad), undefined, `sort=${JSON.stringify(bad)} 应不生效`);
+    }
+  });
+
+  it('换排序**不算筛选**：结果集合没变，不该因此多出一堆 noindex 变体', () => {
+    assert.equal(parseHomeQuery({ sort: 'newest' }).hasFilter, false);
+    assert.equal(parseHomeQuery({ sort: 'newest' }).sort, 'newest');
+    // 但和其他筛选一起用时，那一筛说了算
+    assert.equal(parseHomeQuery({ sort: 'newest', q: '意见' }).hasFilter, true);
+  });
+
+  it('open 只认 1（与 lead 同一形状），其余值一律不筛', () => {
+    assert.equal(openOnlyParam('1'), true);
+    for (const value of ['0', 'true', 'yes', '', '   ', undefined]) {
+      assert.equal(openOnlyParam(value), false, `open=${JSON.stringify(value)} 应为假`);
+    }
+    assert.equal(parseHomeQuery({ open: '1' }).openOnly, true);
+    assert.equal(parseHomeQuery({ open: '1' }).hasFilter, true, '只看未截止是筛选维度');
+  });
+
+  it('since 认 1..90 的整数', () => {
+    assert.equal(sinceParam('7'), 7);
+    assert.equal(sinceParam('90'), 90);
+    assert.equal(sinceParam('1'), 1);
+  });
+
+  it('since 越界不夹取、直接不生效：夹到 90 会给出比读者要求的更窄的一页', () => {
+    assert.equal(sinceParam('91'), undefined);
+    assert.equal(sinceParam('99999'), undefined);
+    assert.equal(sinceParam('0'), undefined);
+    assert.equal(sinceParam('-7'), undefined);
+    assert.equal(sinceParam('7.5'), undefined);
+    assert.equal(sinceParam('abc'), undefined);
+    assert.equal(sinceParam(''), undefined);
+    assert.equal(parseHomeQuery({ since: '99999' }).hasFilter, false, '不生效就不该算筛选');
   });
 });
