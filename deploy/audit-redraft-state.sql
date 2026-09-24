@@ -50,3 +50,11 @@ select count(*)                                    as queued_now
  where ai_summary_json is null
    and summary_status = 'pending'
    and status <> 'closed';
+
+\echo '=== 5) 人工复核那一侧（#56 上线后重置重跑就能成功的存量，是下一次授权的候选）'
+select count(*)                                as failed_review_rows,
+       count(*) filter (where status <> 'closed') as failed_review_still_open,
+       min(substr(published_at, 1, 10))          as oldest_published,
+       max(substr(published_at, 1, 10))          as newest_published
+  from notices
+ where summary_status = 'failed_review';
