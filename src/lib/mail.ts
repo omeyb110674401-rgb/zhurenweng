@@ -76,8 +76,10 @@ export function noticeDetailUrl(noticeId: string): string {
 
 function rulesText(rules: RuleMatchableSubscription): string {
   const parts: string[] = [];
+  if (rules.scope === 'all') return '订阅范围：收录的全部新公示（不限关键词 / 领域 / 机关）';
   if (rules.keywords.length > 0) parts.push(`关键词：${rules.keywords.join('、')}`);
   if (rules.categories.length > 0) parts.push(`领域：${rules.categories.join('、')}`);
+  if ((rules.agencies ?? []).length > 0) parts.push(`发布机关：${rules.agencies.join('、')}`);
   return parts.join('\n');
 }
 

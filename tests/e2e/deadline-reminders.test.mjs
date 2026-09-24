@@ -240,7 +240,7 @@ describe('issue #7：订阅 double opt-in → 截止提醒 → 一键退订', ()
     assert.equal(response.status, 303);
     assert.match(response.headers.get('location'), /error=no_rules/);
     const { html } = await followGet(`${app.url}/subscribe?error=no_rules`);
-    assert.match(html, /请至少填写一个关键词或选择一个领域/);
+    assert.match(html, /请至少填写一个关键词、选择一个领域或一个发布机关；或改选「订全部新公示」。/);
     assert.equal(readOutbox().length, 0);
   });
 

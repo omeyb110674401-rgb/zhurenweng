@@ -548,6 +548,20 @@ body {
   color: #57534e;
 }
 
+/* 订阅范围（issue #60）：两个选项竖排，让「选全部时下面不再生效」这句话读得到 */
+.scope-options {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.scope-option {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 14px;
+}
+
 /* 「具体条文在附件里」的明示：与其让摘要装作总结了条文，
    不如把读者准确地送到条文所在 */
 .summary-sources {

@@ -24,15 +24,27 @@ export interface SubscribeDraft {
   email: string;
   keywords: string;
   categories: string[];
+  /** 勾选的发布机关（issue #60 第 2 刀） */
+  agencies: string[];
+  /** 订阅范围原始值（'rules' / 'all'），回填单选框用 */
+  scope: string;
 }
 
 /** 长度上限（RFC 5321 的邮箱上限 + 给关键词与领域留足余量），同时保证 cookie 远小于 4KB。 */
 const MAX_EMAIL = 254;
 const MAX_KEYWORDS = 300;
 const MAX_CATEGORIES = 20;
+const MAX_AGENCIES = 30;
 
 export function hasDraftContent(draft: SubscribeDraft): boolean {
-  return draft.email !== '' || draft.keywords !== '' || draft.categories.length > 0;
+  return (
+    draft.email !== ''
+    || draft.keywords !== ''
+    || draft.categories.length > 0
+    || draft.agencies.length > 0
+    // scope 单独为 'all' 也算有内容：那是用户明确选的范围，不该被当成空草稿丢掉
+    || draft.scope === 'all'
+  );
 }
 
 export function encodeSubscribeDraft(draft: SubscribeDraft): string {
@@ -40,6 +52,8 @@ export function encodeSubscribeDraft(draft: SubscribeDraft): string {
     email: draft.email.slice(0, MAX_EMAIL),
     keywords: draft.keywords.slice(0, MAX_KEYWORDS),
     categories: draft.categories.slice(0, MAX_CATEGORIES),
+    agencies: draft.agencies.slice(0, MAX_AGENCIES),
+    scope: draft.scope === 'all' ? 'all' : 'rules',
   };
   return Buffer.from(JSON.stringify(capped), 'utf8').toString('base64url');
 }
@@ -62,6 +76,12 @@ export function decodeSubscribeDraft(raw: string | undefined): SubscribeDraft | 
             .filter((value): value is string => typeof value === 'string')
             .slice(0, MAX_CATEGORIES)
         : [],
+      agencies: Array.isArray(record.agencies)
+        ? record.agencies
+            .filter((value): value is string => typeof value === 'string')
+            .slice(0, MAX_AGENCIES)
+        : [],
+      scope: record.scope === 'all' ? 'all' : 'rules',
     };
     return hasDraftContent(draft) ? draft : null;
   } catch {

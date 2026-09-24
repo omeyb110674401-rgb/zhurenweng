@@ -150,6 +150,17 @@ export const subscriptions = sqliteTable('subscriptions', {
   keywordsJson: text('keywords_json').notNull().default('[]'),
   /** JSON 存 TEXT：领域规则数组（命中条目领域标签） */
   categoriesJson: text('categories_json').notNull().default('[]'),
+  /**
+   * JSON 存 TEXT：发布机关规则数组（issue #60 第 2 刀，归一后的机关名）。
+   * 匹配时对条目的复合机关串（`splitAgencies`）逐个精确相等，不做子串。
+   */
+  agenciesJson: text('agencies_json').notNull().default('[]'),
+  /**
+   * 订阅范围（issue #60）：'rules' = 只收命中关键词 / 领域 / 机关的条目；
+   * 'all' = 收录的全部新公示。刻意不用「规则为空即视为全部」表达后者 ——
+   * 空规则更可能是漏填，把漏填解释成「订全部」会让用户事后才发现自己没设过条件。
+   */
+  scope: text('scope').notNull().default('rules'),
   /** 0 = 待确认 / 1 = 已确认（双方言交集内没有 boolean，用 INTEGER 表达） */
   confirmed: integer('confirmed').notNull().default(0),
   /** 订阅确认令牌（确认邮件链接） */

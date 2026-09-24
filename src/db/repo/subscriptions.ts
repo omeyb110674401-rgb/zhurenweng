@@ -2,7 +2,7 @@ import { randomBytes, randomUUID } from 'node:crypto';
 import { and, eq, isNull } from 'drizzle-orm';
 import { getDb } from '../client.ts';
 import { subscriptions } from '../schema/sqlite.ts';
-import type { SubscriptionRecord } from '../types.ts';
+import type { SubscriptionRecord, SubscriptionScope } from '../types.ts';
 
 /**
  * 订阅仓库（issue #7）：double opt-in 的持久化层。
@@ -22,6 +22,8 @@ function toSubscriptionRecord(row: typeof subscriptions.$inferSelect): Subscript
     email: row.email,
     keywords: safeParseArray(row.keywordsJson),
     categories: safeParseArray(row.categoriesJson),
+    agencies: safeParseArray(row.agenciesJson),
+    scope: row.scope === 'all' ? 'all' : 'rules',
     confirmed: row.confirmed === 1,
     confirmToken: row.confirmToken,
     unsubscribeToken: row.unsubscribeToken,
@@ -52,7 +54,25 @@ export interface UpsertSubscriptionInput {
   email: string;
   keywords: string[];
   categories: string[];
+  /** 发布机关规则（issue #60 第 2 刀，已归一的机关名） */
+  agencies: string[];
+  /** 订阅范围（issue #60）：'rules' 按条件 / 'all' 全部新公示 */
+  scope: SubscriptionScope;
   now: Date;
+}
+
+/**
+ * 规则列的落库形状 —— upsert 的三条写入路径（新建 / 已确认改规则 / 待确认改规则）
+ * **共用这一份**。分家的后果是这个仓库反复记过的那种：一处写了 agencies，
+ * 另一处忘了写，于是"重新提交订阅"会静默把机关规则清掉。
+ */
+function ruleColumns(input: Pick<UpsertSubscriptionInput, 'keywords' | 'categories' | 'agencies' | 'scope'>) {
+  return {
+    keywordsJson: JSON.stringify(input.keywords),
+    categoriesJson: JSON.stringify(input.categories),
+    agenciesJson: JSON.stringify(input.agencies),
+    scope: input.scope,
+  };
 }
 
 /**
@@ -89,8 +109,7 @@ export async function upsertSubscriptionRules(input: UpsertSubscriptionInput): P
   const row = {
     id: randomUUID(),
     email: input.email,
-    keywordsJson: JSON.stringify(input.keywords),
-    categoriesJson: JSON.stringify(input.categories),
+    ...ruleColumns(input),
     confirmed: 0,
     confirmToken: newToken(),
     unsubscribeToken: newToken(),
@@ -136,17 +155,12 @@ async function applyRulesToExisting(
   if (wasConfirmed) {
     await db
       .update(subscriptions)
-      .set({
-        keywordsJson: JSON.stringify(input.keywords),
-        categoriesJson: JSON.stringify(input.categories),
-        updatedAt: nowIso,
-      })
+      .set({ ...ruleColumns(input), updatedAt: nowIso })
       .where(eq(subscriptions.id, existing.id));
     return {
       subscription: toSubscriptionRecord({
         ...existing,
-        keywordsJson: JSON.stringify(input.keywords),
-        categoriesJson: JSON.stringify(input.categories),
+        ...ruleColumns(input),
         updatedAt: nowIso,
       }),
       outcome: 'confirmed-updated',
@@ -164,8 +178,7 @@ async function applyRulesToExisting(
   const confirmToken = newToken();
   const updated = {
     ...existing,
-    keywordsJson: JSON.stringify(input.keywords),
-    categoriesJson: JSON.stringify(input.categories),
+    ...ruleColumns(input),
     confirmed: 0,
     confirmToken,
     confirmedAt: null,
@@ -175,8 +188,7 @@ async function applyRulesToExisting(
   await db
     .update(subscriptions)
     .set({
-      keywordsJson: updated.keywordsJson,
-      categoriesJson: updated.categoriesJson,
+      ...ruleColumns(input),
       confirmed: 0,
       confirmToken,
       confirmedAt: null,

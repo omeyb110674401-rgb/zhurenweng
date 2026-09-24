@@ -142,6 +142,10 @@ export const subscriptions = pgTable('subscriptions', {
   keywordsJson: text('keywords_json').notNull().default('[]'),
   /** JSON 存 TEXT：领域规则数组（命中条目领域标签） */
   categoriesJson: text('categories_json').notNull().default('[]'),
+  /** JSON 存 TEXT：发布机关规则数组（issue #60 第 2 刀，归一后的机关名，逐个精确相等） */
+  agenciesJson: text('agencies_json').notNull().default('[]'),
+  /** 订阅范围（issue #60）：'rules' 按条件 / 'all' 全部新公示；空规则不等于「全部」 */
+  scope: text('scope').notNull().default('rules'),
   /** 0 = 待确认 / 1 = 已确认（双方言交集内没有 boolean，用 INTEGER 表达） */
   confirmed: integer('confirmed').notNull().default(0),
   /** 订阅确认令牌（确认邮件链接） */

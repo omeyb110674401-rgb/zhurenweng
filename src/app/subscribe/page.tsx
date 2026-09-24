@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import { cookies } from 'next/headers';
 import { CATEGORY_OPTIONS } from '@/lib/subscription';
+import { listNoticeAgencies } from '@/db/repo/notices';
 import { mailerReady } from '@/lib/mailer-availability';
 import { simplePageMetadata } from '@/lib/page-metadata';
 import {
@@ -27,16 +28,16 @@ import { SiteFooter } from '@/app/_lib/site-footer';
 export const dynamic = 'force-dynamic';
 
 export const metadata = simplePageMetadata({
-  title: '订阅截止提醒',
+  title: '订阅公示提醒',
   description:
-    '按关键词或领域订阅政府公示与征求意见稿的截止提醒：在截止前 7 天、3 天各收到一封邮件。采用 double opt-in（先确认再生效），每封邮件底部都能一键退订，本站只存邮箱、不建账号。',
+    '按关键词、领域或发布机关订阅政府公示与征求意见稿，也可直接订全部新公示：在截止前 7 天、3 天各收到一封提醒邮件。采用 double opt-in（先确认再生效），每封邮件底部都能一键退订，本站只存邮箱、不建账号。',
   path: '/subscribe',
 });
 
 const ERROR_MESSAGES: Record<string, string> = {
   invalid_email: '邮箱格式不正确，请检查后重试。',
   invalid_form: '提交的数据格式不正确，请从订阅页重新提交。',
-  no_rules: '请至少填写一个关键词或选择一个领域。',
+  no_rules: '请至少填写一个关键词、选择一个领域或一个发布机关；或改选「订全部新公示」。',
   unknown_category: '包含未知领域，请重新选择。',
   send_failed: '确认邮件发送失败，请稍后重试。',
   mailer_unavailable: '邮件订阅暂未开放（邮件通道配置中），请先用 RSS 订阅。',
@@ -64,6 +65,11 @@ export default async function SubscribePage({ searchParams }: SubscribePageProps
       ? decodeSubscribeDraft((await cookies()).get(SUBSCRIBE_DRAFT_COOKIE)?.value)
       : null;
 
+  // 机关候选取库内实际出现过的发布机关（issue #60）：写死一份清单必然过期。
+  // 表单不可用时不查（那条路径根本不渲染选择项）。
+  const mailReady = mailerReady();
+  const agencyOptions = mailReady ? await listNoticeAgencies() : [];
+
   return (
     <main id="main-content">
       <nav className="breadcrumb">
@@ -71,9 +77,10 @@ export default async function SubscribePage({ searchParams }: SubscribePageProps
       </nav>
 
       <header className="site-header">
-        <h1 className="brand">订阅截止提醒</h1>
+        <h1 className="brand">订阅公示提醒</h1>
         <p className="tagline">
-          按关键词 / 领域订阅公示提醒：征求意见截止前 7 天、3 天各收到一封提醒邮件。
+          按关键词 / 领域 / 发布机关订阅，或直接订全部新公示：
+          征求意见截止前 7 天、3 天各收到一封提醒邮件。
         </p>
       </header>
 
@@ -90,15 +97,32 @@ export default async function SubscribePage({ searchParams }: SubscribePageProps
         </p>
       ) : null}
 
-      {mailerReady() ? <SubscribeFormSection draft={draft} /> : <SubscribeUnavailableSection />}
+      {mailReady ? (
+        <SubscribeFormSection draft={draft} agencyOptions={agencyOptions} />
+      ) : (
+        <SubscribeUnavailableSection />
+      )}
 
       <SiteFooter />
     </main>
   );
 }
 
-/** 可用态：订阅规则表单（邮箱 + 关键词 + 领域多选）。`draft` 非空时回填上一次的输入。 */
-function SubscribeFormSection({ draft }: { draft: SubscribeDraft | null }) {
+/**
+ * 可用态：订阅规则表单（邮箱 + 范围 + 关键词 / 领域 / 机关）。
+ * `draft` 非空时回填上一次的输入（issue #53）。
+ *
+ * 范围放在条件**之前**（issue #60）：选「全部新公示」时下面三项不再生效，
+ * 这个先后关系必须一眼看得见 —— 否则用户会以为自己勾的关键词还在起作用，
+ * 而实际上他收到的是每一条新公示。
+ */
+function SubscribeFormSection({
+  draft,
+  agencyOptions,
+}: {
+  draft: SubscribeDraft | null;
+  agencyOptions: string[];
+}) {
   return (
     <section className="subscribe-section" aria-labelledby="subscribe-form-title">
       <h2 id="subscribe-form-title">填写订阅规则</h2>
@@ -126,6 +150,32 @@ function SubscribeFormSection({ draft }: { draft: SubscribeDraft | null }) {
             data-testid="subscribe-email"
           />
         </div>
+
+        <fieldset className="form-field">
+          <legend>订阅范围</legend>
+          <div className="scope-options" data-testid="subscribe-scope">
+            <label className="scope-option">
+              <input
+                type="radio"
+                value="rules"
+                name="scope"
+                defaultChecked={(draft?.scope ?? 'rules') !== 'all'}
+                data-testid="subscribe-scope-rules"
+              />
+              只订命中我下面所选条件的公示
+            </label>
+            <label className="scope-option">
+              <input
+                type="radio"
+                value="all"
+                name="scope"
+                defaultChecked={draft?.scope === 'all'}
+                data-testid="subscribe-scope-all"
+              />
+              订全部新公示（不限条件；选这项时下面三项不再生效）
+            </label>
+          </div>
+        </fieldset>
 
         <div className="form-field">
           <label htmlFor="subscribe-keywords">
@@ -159,11 +209,32 @@ function SubscribeFormSection({ draft }: { draft: SubscribeDraft | null }) {
           </div>
         </fieldset>
 
+        {agencyOptions.length > 0 ? (
+          <fieldset className="form-field">
+            <legend>发布机关（可多选，联合发文按每一个参与机关算）</legend>
+            <div className="category-options" data-testid="subscribe-agencies">
+              {agencyOptions.map((agency) => (
+                <label key={agency} className="category-option">
+                  <input
+                    type="checkbox"
+                    name="agencies"
+                    value={agency}
+                    defaultChecked={draft?.agencies.includes(agency) ?? false}
+                    data-testid="subscribe-agency-option"
+                  />
+                  {agency}
+                </label>
+              ))}
+            </div>
+          </fieldset>
+        ) : null}
+
         <button type="submit" className="go-button" data-testid="subscribe-submit">
           提交订阅
         </button>
         <p className="section-hint">
-          至少填写一个关键词或选择一个领域；确认邮件发送后订阅才会生效。
+          「只订命中条件的」时需至少填写一个关键词、选一个领域或一个机关；
+          确认邮件发送后订阅才会生效。
         </p>
       </form>
     </section>

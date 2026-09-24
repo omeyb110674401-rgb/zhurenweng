@@ -119,6 +119,12 @@ export type ReminderStage = 'd7' | 'd3';
  * 邮件订阅（double opt-in，issue #7）。
  * 未确认（confirmed=false）的订阅绝不接收任何提醒；退订后不再发送任何邮件。
  */
+/**
+ * 订阅范围（issue #60 第 2 刀）。`'all'` 必须是用户显式选的 ——
+ * 「规则为空」不代表"什么都要"，更常见的是漏填。
+ */
+export type SubscriptionScope = 'rules' | 'all';
+
 export interface SubscriptionRecord {
   id: string;
   /** 仅存储订阅邮箱（PRD 合规姿态），统一小写 */
@@ -127,6 +133,10 @@ export interface SubscriptionRecord {
   keywords: string[];
   /** 领域规则：命中条目领域标签 */
   categories: string[];
+  /** 发布机关规则（issue #60 第 2 刀）：归一后的机关名，逐个精确相等匹配参与机关 */
+  agencies: string[];
+  /** 订阅范围（issue #60）：'rules' 只收命中条件的；'all' 全部新公示 */
+  scope: SubscriptionScope;
   /** false = 待确认 / true = 已确认 */
   confirmed: boolean;
   /** 确认令牌（确认邮件链接） */

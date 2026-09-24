@@ -2,8 +2,10 @@ import { buildConfirmationEmail } from '@/lib/mail';
 import { createMailerPort } from '@/lib/ports';
 import {
   CATEGORY_OPTIONS,
+  normalizeAgencies,
   normalizeEmail,
   normalizeKeywords,
+  normalizeScope,
   validateSubscriptionRules,
 } from '@/lib/subscription';
 import { upsertSubscriptionRules } from '@/db/repo/subscriptions';
@@ -84,6 +86,8 @@ export async function POST(request: Request): Promise<Response> {
     email: String(form.get('email') ?? ''),
     keywords: String(form.get('keywords') ?? ''),
     categories: form.getAll('categories').map((value) => String(value)),
+    agencies: form.getAll('agencies').map((value) => String(value)),
+    scope: String(form.get('scope') ?? 'rules'),
   };
 
   const email = normalizeEmail(String(form.get('email') ?? ''));
@@ -96,7 +100,11 @@ export async function POST(request: Request): Promise<Response> {
     .getAll('categories')
     .map((value) => String(value))
     .filter((value) => (CATEGORY_OPTIONS as readonly string[]).includes(value));
-  const rules = validateSubscriptionRules(keywords, categoryInput);
+  // 机关不做"必须在已有清单内"的白名单过滤：机构名以库为准，页面下拉只是便捷输入；
+  // 用户手输一个还没出现过的新机关，订阅该条正是他想要的（等该机关入库就自然命中）。
+  const agencies = normalizeAgencies(form.getAll('agencies').map((value) => String(value)));
+  const scope = normalizeScope(String(form.get('scope') ?? 'rules'));
+  const rules = validateSubscriptionRules(keywords, categoryInput, agencies, scope);
   if (!rules.ok) {
     return redirectWithDraft(`/subscribe?error=${rules.reason}`, draft);
   }
@@ -105,6 +113,8 @@ export async function POST(request: Request): Promise<Response> {
     email,
     keywords,
     categories: categoryInput,
+    agencies,
+    scope,
     now: new Date(),
   });
 
