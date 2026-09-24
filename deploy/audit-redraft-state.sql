@@ -58,3 +58,50 @@ select count(*)                                as failed_review_rows,
        max(substr(published_at, 1, 10))          as newest_published
   from notices
  where summary_status = 'failed_review';
+
+\echo '=== 6) 出处正确性（不是"有没有出处字段"，而是**页面上那句引用真的在附件正文里**）'
+-- 程序侧 `buildQuotedSummary` 本来就要求逐字对上才落库（单测钉着），这一段是拿**线上真数据**
+-- 独立复核一遍：如果这里出现 verifiable < total，说明要么落库路径绕过了反查，要么抽取文本
+-- 与喂给模型时已经不是同一份。两种都得查。空白全部去掉再比，与程序侧同一个口径（PDF 抽取带换行）。
+with p as (
+  select n.id,
+         e.item ->> 'quote'  as quote,
+         e.item ->> 'source' as source
+    from notices n,
+         jsonb_array_elements(n.ai_summary_json::jsonb -> 'keyPoints') as e(item)
+   where n.ai_summary_json like '{%'
+     and coalesce(e.item ->> 'source', '') <> ''
+     and coalesce(e.item ->> 'quote', '') <> ''
+)
+select count(*)                                              as points_with_source,
+       count(*) filter (where exists (select 1
+                                        from notice_attachments a
+                                       where a.notice_id = p.id
+                                         and regexp_replace(coalesce(a.extracted_text, ''),
+                                                            '[[:space:]]', '', 'g')
+                                             like '%' || regexp_replace(p.quote, '[[:space:]]', '', 'g') || '%')) as verifiable_in_attachment,
+       count(*) filter (where not exists (select 1
+                                        from notice_attachments a
+                                       where a.notice_id = p.id
+                                         and regexp_replace(coalesce(a.extracted_text, ''),
+                                                            '[[:space:]]', '', 'g')
+                                             like '%' || regexp_replace(p.quote, '[[:space:]]', '', 'g') || '%')) as NOT_found
+  from p;
+
+\echo '=== 7) 对不上的那些长什么样（正常应为 0 行；有行就是缺陷，别放过）'
+with p as (
+  select n.id, left(n.title, 22) as title, e.item ->> 'quote' as quote, e.item ->> 'source' as source
+    from notices n,
+         jsonb_array_elements(n.ai_summary_json::jsonb -> 'keyPoints') as e(item)
+   where n.ai_summary_json like '{%'
+     and coalesce(e.item ->> 'source', '') <> ''
+     and coalesce(e.item ->> 'quote', '') <> ''
+)
+select id, title, source, left(regexp_replace(quote, '[[:space:]]', ' ', 'g'), 70) as quote
+  from p
+ where not exists (select 1
+                     from notice_attachments a
+                    where a.notice_id = p.id
+                      and regexp_replace(coalesce(a.extracted_text, ''), '[[:space:]]', '', 'g')
+                           like '%' || regexp_replace(p.quote, '[[:space:]]', '', 'g') || '%')
+ limit 10;
