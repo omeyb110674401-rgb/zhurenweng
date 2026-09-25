@@ -46,7 +46,10 @@ docker compose up -d worker          # 让常驻容器也换到新镜像，否�
 - `Caddyfile` —— 反向代理与证书（见 `docs/deploy.md` 第 5 节）
 - `daily-backup.sh` —— **每日备份 + 恢复校验**（服务器上由 root crontab 触发）：导出 `-Fc`
   归档后把它**真的恢复进临时库**并比对 6 项计数，对不上非零退出；保留 7 份。
-  用法与安装见 `docs/deploy.md` 第 8 节
+  失败会发信（issue #71，`scripts/alert-backup-failure.mjs` 复用 worker 的告警出口，当日去重）；
+  安装命令与"为什么 crontab 必须带 `CRON_TZ=UTC`"写在 `deploy/daily-backup.sh` 头注与
+  `docs/deploy.md` 第 8 节（宿主机是 Asia/Shanghai，缺了它 `30 19` 就是 19:30 北京时间）。
+  用法与恢复校验的判据见 `docs/deploy.md` 第 8 节
 - `audit-sources-flaky.sql` —— **只读**：间歇性慢源的信号、死源与摘要文案口径核对
   （issue #58）。每段开头标了该在迁移前还是迁移后跑：DROP COLUMN 之前要确认
   `schedule_config_json` 无人用过，删除死行之前要确认它名下 0 条目

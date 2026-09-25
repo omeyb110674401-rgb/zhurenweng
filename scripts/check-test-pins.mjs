@@ -64,6 +64,7 @@ const TARGETS = {
   channelGuidance: 'src/lib/channel-guidance.ts',
   compose: 'docker-compose.yml',
   dailyBackup: 'deploy/daily-backup.sh',
+  alertBackup: 'scripts/alert-backup-failure.mjs',
   journalPg: 'drizzle/postgres/meta/_journal.json',
   journalSqlite: 'drizzle/sqlite/meta/_journal.json',
   // 本脚本自己：它改写工作区源码，所以"崩了能不能自愈"和任何一处实现同样需要钉住
@@ -802,6 +803,22 @@ const CASES = [
     to: 'crontab -l 2>/dev/null | {',
     pattern: '每日备份的安装片段带 CRON_TZ=UTC',
     test: 'tests/unit/deploy-env-contract.test.mjs',
+  },
+  {
+    label: '脚本自己 exit 1 的那两处不发信（只剩 EXIT trap 能抓住校验不通过）',
+    file: 'dailyBackup',
+    from: "trap 'rc=$?; if [ \"$rc\" -ne 0 ]; then alert_failure \"$rc\"; fi; exit \"$rc\"' EXIT",
+    to: '',
+    pattern: 'issue #71：每日备份失败要发一封告警',
+    test: 'tests/e2e/backup-failure-alert.test.mjs',
+  },
+  {
+    label: '告警的 jobName 写错（收信人认不出这是备份还是某个抓取源）',
+    file: 'alertBackup',
+    from: "    jobName: 'daily-backup',",
+    to: "    jobName: 'crawl-notices',",
+    pattern: 'issue #71：告警脚本自己（复用 worker 的告警出口）',
+    test: 'tests/e2e/backup-failure-alert.test.mjs',
   },
   // 「空名单提前返回」那道保护**不占 pin 位**（2026-09-24 实测）：撤掉 `if (ids.length === 0) return []`
   // 之后 e2e 仍然全绿 —— drizzle 把空的 `inArray` 编成恒假条件而不是非法 SQL，那句没有可观测行为。
