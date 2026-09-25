@@ -27,6 +27,11 @@ bash deploy/sync-files-local.sh src/app/page.tsx src/lib/dates.ts
 docker compose run --rm   -v /opt/zhurenweng/scripts/audit-search-index.mjs:/app/scripts/audit-search-index.mjs:ro   worker node scripts/audit-search-index.mjs --stride 6
 ```
 
+**这条捷径只对"判据没变、只是脚本自己改了"的探针成立**。像 `scripts/audit-rss-feed.mjs`
+（issue #75）这种把判定放在 `src/lib/pipeline-health.ts` 里的，镜像里那份判据是旧的 ——
+新函数 import 不到会直接报错（这一类是硬失败，不是静默不对，所以还算好查）。要么先 `build`，
+要么把 `src/lib/pipeline-health.ts` 一起 `-v ...:ro` 挂进去。
+
 真正要被常驻进程长期执行的改动，仍然要走 `build` + `up -d`（下面三条）。
 
 改完脚本要在容器里跑，先重建再跑：

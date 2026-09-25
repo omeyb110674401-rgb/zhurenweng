@@ -119,6 +119,9 @@ services:
       MEILI_MASTER_KEY: ${MEILI_MASTER_KEY:?必须在服务器 .env 中设置 MEILI_MASTER_KEY}
       # 任务失败告警收件邮箱（issue #12；未配置则不发告警）
       APP_BASE_URL: ${APP_BASE_URL:-}
+      # 对外地址：worker 里的任务不读它，但只读探针 scripts/audit-rss-feed.mjs 要知道
+      # "读者去取哪个 feed.xml"、以及链接该指向哪个宿主（issue #75）。未配则探针报 unknown。
+      SITE_URL: ${SITE_URL:-}
       ALERT_EMAIL: ${ALERT_EMAIL:-}
       # 调度间隔：默认每日一轮（86_400_000ms）。worker 代码内默认 60s 只适合本地，
       # 生产若沿用会把政府站点敲成每分钟一次，极易被限流封 IP。

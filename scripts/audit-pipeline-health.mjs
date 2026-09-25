@@ -28,9 +28,11 @@ import path from 'node:path';
 import { Client } from 'pg';
 import { getDb } from '../src/db/client.ts';
 import { listAllNoticesForReindex } from '../src/db/repo/notices.ts';
+import { FEED_MAX_ITEMS } from '../src/lib/feed.ts';
 import { createSearchPort } from '../src/lib/ports.ts';
 import {
   auditIndexSampling,
+  auditRssFeed,
   backupFreshness,
   crawlFreshness,
   indexHealth,
@@ -124,6 +126,18 @@ for (const miss of sampling.missed.slice(0, 5)) {
   const kind = miss.total === -1 ? `查询报错：${miss.why}` : `total=${miss.total}`;
   console.log(`  索引漏网 ${miss.id} 词「${miss.query}」 ${kind}`);
 }
+
+// ── RSS feed 产物（第三条读者入口，判据与 #75 的专用审计同一份函数）──────────────
+const siteBase = (process.env.SITE_URL || '').replace(/\/+$/, '');
+const rss = await auditRssFeed({
+  url: siteBase === '' ? '' : `${siteBase}/feed.xml`,
+  siteBase,
+  records: all,
+  maxItems: FEED_MAX_ITEMS,
+});
+checks.push(rss.check);
+for (const id of rss.missingIds.slice(0, 3)) console.log(`  feed 缺条目 ${id}`);
+for (const link of rss.badLinks.slice(0, 2)) console.log(`  feed 链接不指向本站 ${link}`);
 
 await pg.end();
 
