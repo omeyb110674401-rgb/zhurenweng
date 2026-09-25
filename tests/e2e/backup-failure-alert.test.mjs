@@ -5,6 +5,7 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { describe, it } from 'node:test';
+import { resolveBash } from './helpers/bash.mjs';
 
 /**
  * 端到端（issue #71）：备份脚本**失败时真的会去发信**，成功时一封都不发。
@@ -52,7 +53,9 @@ function runBackup({ failAt }) {
   const log = path.join(dir, 'docker.log');
   fs.writeFileSync(log, '');
 
-  const run = spawnSync('bash', ['daily-backup.sh'], {
+  // 必须是真 bash（脚本用了 trap / `2>&1` 这类 sh 兼容语法）；`resolveBash()` 会把
+  // 「PATH 上的 bash 其实是 WSL 启动器」这种情况绕开，见该 helper 的模块注释。
+  const run = spawnSync(resolveBash(), ['daily-backup.sh'], {
     cwd: root,
     encoding: 'utf8',
     timeout: 120_000,

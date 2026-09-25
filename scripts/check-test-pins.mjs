@@ -72,6 +72,12 @@ const TARGETS = {
   journalSqlite: 'drizzle/sqlite/meta/_journal.json',
   // 本脚本自己：它改写工作区源码，所以"崩了能不能自愈"和任何一处实现同样需要钉住
   pinsScript: 'scripts/check-test-pins.mjs',
+  // 门的入口守卫：它认的就是本脚本留下的留痕，所以和本脚本一样属于"会被自己咬到"的那一类
+  pinsClean: 'scripts/check-pins-clean.mjs',
+  // e2e 的 bash 解析：解析错了的表现是一条与被测代码毫无关系的红，所以它自己要被钉住
+  bashHelper: 'tests/e2e/helpers/bash.mjs',
+  // 文档结构门：判据就写在这个测试文件里，所以钉的就是它自己
+  docsIntegrity: 'tests/unit/docs-integrity.test.mjs',
 };
 
 const CASES = [
@@ -973,6 +979,31 @@ const CASES = [
     pattern: 'issue #76 第 3 刀：段落隔离',
     test: 'tests/unit/explanation-points.test.mjs',
   },
+  {
+    label: '强杀留痕不再拦截（门放行，人对着与被测改动毫无关系的红自己猜）',
+    file: 'pinsClean',
+    from: 'if (existsSync(MARKER)) {',
+    to: 'if (false) {',
+    pattern: '并说出当时撤的是哪一条',
+    test: 'tests/unit/pins-clean-guard.test.mjs',
+  },
+  {
+    label: 'ZW_BASH 写错了悄悄退回自动探测（覆盖值变成一个"改了没效果"的旋钮）',
+    file: 'bashHelper',
+    from: '    if (!works(override)) {',
+    to: '    if (false) {',
+    pattern: '不静默退回自动探测',
+    test: 'tests/unit/bash-resolver.test.mjs',
+  },
+  {
+    label: '转义的竖线也被当成列分隔（合法的 GFM 写法被误报，门开始骗人）',
+    file: 'docsIntegrity',
+    // 用 String.raw：这串里有三个反斜杠，写成普通字符串是 `\\\\` 那种没人看得懂的样子
+    from: String.raw`.split(/(?<!\\)\|/).length;`,
+    to: '.split(/\\|/).length;',
+    pattern: '转义过的竖线',
+    test: 'tests/unit/docs-integrity.test.mjs',
+  },
 ];
 
 let red = 0;
@@ -1076,7 +1107,31 @@ recoverInflight();
 // 「上一次被强杀之后」这个状态，跑完整用例既慢又会真的改写工作区源码）
 if (process.argv.includes('--recover-only')) process.exit(process.exitCode ?? 0);
 
-for (const testCase of CASES) {
+/**
+ * `--only <子串>`：只跑 label 里含这个子串的用例。
+ *
+ * 加它的理由是本刀自己的教训：全套要为上百条用例逐个撤实现再跑测试，**长到会被外层
+ * 超时杀掉** —— 而杀掉它正是 issue #77 那起「工作区留下假代码」的事故。加了这条，
+ * 新写一条 pin 可以当场验证，不必赌自己能在超时前跑完（`scripts/check-pins-clean.mjs`
+ * 只能事后拦，拦不住损失的时间）。
+ *
+ * 它不改判据、也不改执行方式（仍然串行、仍然逐条还原），只是少跑几条 ——
+ * **所以它不能替代全套**：报出来的永远是"这几条成立"，不是"N/N 全绿"。
+ */
+const onlyAt = process.argv.indexOf('--only');
+const only = onlyAt < 0 ? null : (process.argv[onlyAt + 1] ?? '');
+if (onlyAt >= 0 && (only === '' || only.startsWith('--'))) {
+  console.error('--only 后面要跟一个用来筛选用例的子串，例如：--only 竖线');
+  process.exit(2);
+}
+const selected = only === null ? CASES : CASES.filter((c) => c.label.includes(only));
+if (selected.length === 0) {
+  console.error(`--only ${only} 没有匹配到任何用例（label 是逐条比对的，换个更短的子串试试）`);
+  process.exit(2);
+}
+if (only !== null) console.log(`[--only ${only}] 只跑 ${selected.length}/${CASES.length} 条\n`);
+
+for (const testCase of selected) {
   const file = TARGETS[testCase.file];
   const original = readFileSync(file, 'utf8');
   if (!original.includes(testCase.from)) {
@@ -1113,7 +1168,11 @@ for (const testCase of CASES) {
   }
 }
 
-console.log(`\n撤掉实现后变红 ${red}/${CASES.length}`);
+console.log(
+  only === null
+    ? `\n撤掉实现后变红 ${red}/${CASES.length}`
+    : `\n撤掉实现后变红 ${red}/${selected.length}（--only 子集，**不是**全套的 ${CASES.length} 条）`,
+);
 if (problems.length > 0) {
   console.log(`有问题 ${problems.length} 条：`);
   for (const problem of problems) console.log(`  · ${problem}`);

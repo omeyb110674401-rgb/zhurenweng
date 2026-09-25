@@ -87,6 +87,29 @@ npm run e2e            # 端到端层：next build + 进程内生产应用 + fix
 npm test               # 等价命令：依次跑上面两层
 ```
 
+**Windows 上从 Git Bash 跑**（CLAUDE.md 的环境约定）：PATH 里排在前面的
+`C:\Windows\System32\bash.exe` 是 **WSL 启动器**，而
+`tests/e2e/backup-failure-alert.test.mjs` 要用**仓库里那份真 bash 脚本**
+（`deploy/daily-backup.sh`）验证 trap 行为 —— 走 WSL 桩会报出一条与备份逻辑毫无关系的红
+（issue #71 的用例在 PowerShell 里必红、Git Bash 里全绿）。用例现在自己解析可用的 bash
+（`tests/e2e/helpers/bash.mjs`：先试 Git Bash 的常见安装位置，再试 PATH 上的 `bash`，
+**能用才采用**），所以两个 shell 都能跑。Git Bash 装在非默认位置时用 `ZW_BASH` 指过去；
+**给了却不可用会当场报错**，不会悄悄退回自动探测（写错的覆盖值应当吵，而不是变成
+一个「改了没效果」的旋钮）。
+
+**三个门都带前置检查**（`package.json` 的 `prebuild` / `pree2e` / `pretest:unit` → 
+`scripts/check-pins-clean.mjs`）：`check-test-pins.mjs` 靠「撤掉实现、要求测试变红」自证，
+所以它运行期间工作区里**真的躺着被撤掉的实现**；被强杀时只留下 `.pins-inflight.json` 留痕，
+而自愈要等它**自己下一次启动**。在那之前跑测试会得到一批与被测改动毫无关系的红
+（2026-09-25 实测：5 条 `crawl-timeout-guard` 失败，看着像抓取层回归，其实只是那行
+`signal: AbortSignal.timeout(...)` 被撤掉了）。现在这个状态会在门的入口被报出来并给出
+还原命令：`node scripts/check-test-pins.mjs --recover-only`。
+**跑 `check-test-pins.mjs` 本身要留足超时** —— 它要为上百条用例逐个撤实现再跑测试，
+远超两分钟。验证**单条** pin 用 `--only <label 里的子串>`：它只跑匹配的几条，
+结论行会写明"**不是**全套的 N 条"（所以不能拿它声称"N/N 全绿"）。
+被强杀留下留痕时先 `--recover-only` 还原。详情见 `docs/pending-issues/FOLLOWUPS.md`
+与 `scripts/check-test-pins.mjs` 的头部注释。
+
 一条命令完成：`next build` → node:test 启动**进程内生产模式应用**（随机端口）+
 本地 fixture 源站，环境注入 SQLite 临时库与 stub LLM / stub 邮件，从 HTTP 层断言：
 
@@ -649,7 +672,6 @@ worker 注册表中的 `summarize-notices` 任务（`worker/jobs/summarize-notic
 | `miit` | 工业和信息化部「意见征集」<br>`https://www.miit.gov.cn/gzcy/yjzj/` | 无特殊要求；列表同上 TRS jpaas 接口（参数不同） | 截止日期在列表隐藏字段 `span.endtime` 的**毫秒时间戳**（与详情正文「请于…前反馈意见」互为印证）；正文 `#con_con`；附件是正文内的 pdf 链接；标题多为「关于公开征求…的公示」，机关兜底为部本级 |
 | `moe` | 教育部「征求意见」<br>`http://www.moe.gov.cn/jyb_xwfb/s248/` | 无特殊要求（静态 HTML） | 列表 `#list li`，**标题必须取 `title` 属性**（联合发布条目的链接文本被截断）；状态标注在标题前缀；正文 `.moe-detail-box .TRS_Editor`（页面尾部的 `#detail-editor` 只是「责任编辑」一行，不是正文）。**该栏目自 2024-02 起未再更新**（历史归档，52 条全部已截止），接入理由见适配器文件头 |
 | `ndrc` | 国家发展改革委「意见征求」<br>`https://www.ndrc.gov.cn/hdjl/yjzq/` | 无特殊要求；**正文需链式跳转**（见下方「链式跳转」） | 列表 `ul.u-list > li > a[title] + span`，标题带 `【进行中】` 前缀 / `[已结束]` 后缀（两种都剥离）；条目链接是数据服务域名下的前端渲染页 `sa.html#/<shortKey>`；正文与截止日期（「此次公开征求意见的时间为 X 至 Y」）都在 `getArticleDetail` 接口返回的 `articleContent` 里，附件是正文 HTML 内的绝对链接；接口返回的标题含 `<BR>` 换行标签，入库前剥掉 |
-
 | `mohurd` | 住房城乡建设部「征求意见」<br>`https://www.mohurd.gov.cn/gongkai/fdzdgknr/zqyj/index.html` | 无特殊要求（爬虫 UA 直接 200）；列表是站内 TRS jpaas 接口（与 samr / miit 同族，参数不同）。**中文查询参数必须用 UTF-8 百分号编码**——Windows 上用 `curl --data-urlencode "tagId=内容1"` 会编成 GBK，接口匹配不到 tag 就返回 `success:false`，曾被误判成站点加了「授权读取」校验（详见适配器文件头） | 列表行 `li.long-deta` **直接带截止日期**（`span.date-info`「截止日期 X」），本源没有状态列也没有发布日期列（发布日期由详情 `meta PubDate` 补）；正文 `.editor-content`；附件在 `.editorContent-download`，链接是下载接口 `/document/download?fileUrl=…`**没有扩展名**，故按容器 + 路径收集而非按扩展名。**只取接口第 1 页（20 条）**：分页参数只在前端脚本里消费（`pageNo`/`page`/`limit` 回传均被忽略），而列表按截止日期降序 → 新条目截止日必然更大、永远落在第 1 页顶部，掉出第 1 页的都是已入库的旧条目 |
 | `cac` | 国家网信办「网信@你」<br>`https://www.cac.gov.cn/hdfw/wxan/A093802index_1.htm` | 无特殊要求（爬虫 UA 直接 200，静态 HTML） | 栏目**不在首页导航里**（挂在「互动服务 → 网信@你」，首页那栏只是 3 条切片），单页 20 条、无第二页（`…index_2.htm` 404），覆盖最近约 9 个月。列表 `#loadingInfoPage li`（标题取 `title` 属性），**没有截止日期也没有状态列** —— 两者都从详情正文抽；详情 `h1.title` / `#pubtime`（带时分的「2026年09月18日 17:00」）/ 正文 `#BodyLabel`（尾部内联 `pagestat` 脚本由 blockText 剔除）；附件是 `downloadfile.jsp?filepath=…&fText=…`**无扩展名**下载接口（名字取 `fText`）。**栏目混排通知公告**（实测 20 条里 8 条是征求意见），适配器按标题 `征求…意见` 过滤，否则招聘公告、结果公示会混进来 |
 第三源为何不是中国政府网：原 `govcn`（中国政府网「政策 → 意见征集」）实测**已下线**

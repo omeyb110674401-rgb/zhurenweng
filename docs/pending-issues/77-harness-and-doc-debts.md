@@ -1,0 +1,147 @@
+# 77 — 工具链与文档的坏账（全项目分析时实测踩出来的那几处）
+
+## 一、这条的起因（2026-09-25 全项目分析）
+
+用户要求"分析项目情况"。**核验过程本身踩出了两处工具链缺陷**，另有文档坏账在盘点时暴露。
+它们都不是产品功能问题，但都属于"会让下一个人多花半天"的那一类，所以先清掉。
+证据按发生顺序记，含我自己造成的那一条 —— 它恰好是最有说服力的样本。
+
+1. **`check-test-pins.mjs` 被强杀 ⇒ 工作区留下假代码，而门一声不吭。**
+   我为核对文档里"pin 108/108"的说法运行了它，**外层只给了 120s 超时** —— 脚本被杀在
+   「撤掉实现、等测试变红」的中途，`worker/jobs/crawl-notices.ts` 留在
+   `return fetch(url, { headers, redirect: 'manual' });`（少了
+   `signal: AbortSignal.timeout(timeoutMs)`）。紧接着 `npm run e2e` 报出 **5 条
+   `crawl-timeout-guard` 失败**，症状是"停滞请求跑满 5s、完全不超时"，看着像抓取层真的回归了。
+   定位靠的是 `git blame` 报出该行 "Not Committed Yet"，而分析开始时 `git status` 是干净的
+   —— 这两条对不上才锁定到 pins 脚本。
+   **自愈机制本来就有**（`recoverInflight()` + `.pins-inflight.json`），问题在于它只在
+   **脚本自己下一次启动**时才跑：先跑 e2e 的人看不到任何提示，只会对着一堆假红查代码。
+2. **`npm run e2e` 从 PowerShell 跑必红。** `tests/e2e/backup-failure-alert.test.mjs` 用
+   `spawnSync('bash', …)` 跑仓库里那份真 `deploy/daily-backup.sh`（验的是 shell trap），
+   而 Windows 的 PATH 上排在前面的 `C:\Windows\System32\bash.exe` 是 **WSL 启动器**
+   —— Git Bash 反而排在它后面。没装 WSL 发行版时它打印"未安装用于 Linux 的 Windows 子系统"
+   并以非零退出 ⇒ 用例报出一条与备份逻辑毫无关系的红。
+   实测（这条单跑，与上面那条 pin 残留无关）：`node --test tests/e2e/backup-failure-alert.test.mjs`
+   从 **PowerShell** 跑，那 3 条要起 bash 的 trap 用例全红，错误正文就是 WSL 那句
+   "未安装用于 Linux 的 Windows 子系统"；同一条命令从 **Git Bash** 跑是 7/7 全绿
+   （那时它还是直接 `spawnSync('bash')`，没改过）。改完再从 PowerShell 跑，7/7 通过。
+   CLAUDE.md 写了"shell 为 Git Bash"，所以这是**有记录但容易踩**——任何按 CI 习惯从
+   PowerShell 调门的人都会撞上。
+3. **仓库根目录躺着两个 0 字节的跟踪文件 `file` 与 `sqlite`**：`git ls-files` 可见，
+   `git cat-file -s` 都是 0，由 `cb9c2e7`（#76 第 1 刀）加进来。全仓库没有任何代码引用
+   这两个路径，是某次 shell 重定向手滑的产物。
+4. **文档坏账（三处，全都不是本刀改出来的）**：
+   - `FOLLOWUPS.md` 有 4 个 U+3401 乱码字符、1 处多余的行内竖线、5 处被空行截断的表格
+     （第 1 节的第 8 条因此成了"独立小表"，第 2 节被切成 6 张）；
+   - `README.md` 的「接入的源」表被一个空行切成两张（`ndrc` 与 `mohurd` 之间）；
+   - `docs/pending-issues/README.md` 的 `67-summaries-redraft.md` 那一行被拆成 **5 行**
+     （中间三行不以 `|` 开头 ⇒ 表到这里就断了，后半段会渲染成普通段落）。
+   另外 README 的"运行测试"没记 shell 前提，也没记 pins 脚本的超时要求。
+
+## 二、本刀做了什么
+
+### 1. 强杀留痕提到门的入口
+
+- 新增 `scripts/check-pins-clean.mjs`：发现 `.pins-inflight.json` 就**非零退出**，报出
+  留痕里的 `label`（即当时撤的是哪一条）、说明后果、给出唯一正确的下一步
+  `node scripts/check-test-pins.mjs --recover-only`。它**只报告不还原** —— 还原交给
+  `--recover-only`，那条路径有它自己的守卫（文件被人工改过时不许自动写回）。
+- 拦的判据是「留痕还在」而**不是**「留痕可读」：文件坏了照样拦（最该拦的正是这种半坏状态）。
+  顺手容忍 BOM —— 它是人可能手改的文件，读不出名字不该让这条报告失去价值。
+- 挂在 `package.json` 的 **`prebuild` / `pree2e` / `pretest:unit`** 三个钩子上。
+  加 `prebuild` 是因为 #67 记过同一族事故的另一半：假代码与 `npm run build` 并行时
+  **被编进 `.next`**，于是报出一条与当次改动毫无关系的红。
+
+### 2. e2e 自己解析可用的 bash
+
+- 新增 `tests/e2e/helpers/bash.mjs`：按「显式覆盖 `ZW_BASH` → Git Bash 常见安装位置
+  → PATH 上的 `bash`」探测，**真跑一次探针、能用才采用**；一个都用不了就抛错并列出
+  试过哪些候选（静默跳过等于把"没跑"当"通过"）。
+- 显式覆盖是**严格**的：`ZW_BASH` 给了却不可用**当场报错**，不悄悄退回自动探测 ——
+  否则它就是一个"改了没效果"的假旋钮，正是 #58/#63 反复在删的东西。
+- `backup-failure-alert.test.mjs` 改用它。**验证方式就是对症下药**：
+  特意从 PowerShell 跑完整 e2e，354/354 全绿（改之前这条路必红）。
+
+### 3. 删掉误提交的空文件
+
+`git rm file sqlite`（两个 0 字节、无引用）。顺带用 `git ls-files` 盘了一遍根目录
+被跟踪的文件，确认没有第二处同类。
+
+### 4. 文档
+
+- `FOLLOWUPS.md`：4 个 U+3401 乱码字符按上下文改回顿号 / 分号，删掉多余的行内竖线，
+  5 处空行截断合并回两张完整表（第 1 节 8 条、第 2 节 49 条）。改完复核：
+  U+3401 计数 0、断裂 0、两张表列数各自自洽。
+- `README.md`：接回被空行切断的「接入的源」表；「运行测试」补两段 ——
+  **Windows 上从 Git Bash 跑**（含 WSL 启动器这件事与 `ZW_BASH` 出口），以及
+  **三个门都带前置检查**、跑 pins 脚本要留足超时。刻意不写死 pin 条数
+  （它每刀都在涨，写死必烂）—— 只说"上百条"。
+- `docs/pending-issues/README.md`：把 `67-*` 那 5 行并回一行。写回前先核对
+  （合并后 1,393 字符、3 列、结尾恰是 `| （本轮） |`），不满足就不写。
+
+### 5. 顺手固化成一条门（`tests/unit/docs-integrity.test.mjs`）
+
+**在 GitHub 停用期间，`docs/pending-issues/` 就是本项目的事实 tracker** —— 没有第二条路
+能替代它。而上面那三类坏法全都**悄无声息**：表被空行截断、单元格混进没转义的竖线、
+编码手滑留下的乱码，谁都不会主动去找。所以把判据固化成一条门，只收"任何情况下都是错"的
+四种：U+3401 / U+FFFD 乱码；空行夹在两张表格行之间；同一张表内列数不一致
+（`\|` 是转义、不计入列分隔）；表头后面缺分隔行。围栏代码块整块跳过 ——
+那里画表格是合法的，列数不必自洽。
+
+判据导出成纯函数 `findMarkdownProblems(text)`，所以它自己也有一组用例：
+三条防误报（转义竖线、代码块、正常表）+ 一条**防假绿**（扫到的 md 少于 20 个就报红，
+免得遍历写错、扫了个空目录还全绿）。
+
+**写这条门的时候我自己先踩了一次**：为了说明问题，我把 U+3401 那个字符和一个裸竖线
+当例子写进了 `docs/pending-issues/README.md` 的**表格单元格**里 —— 当场复现了正要修的
+那个错（那一行多出一列）。修掉之后才让这条门转绿，也就是说它不是假想出来的判据。
+
+## 三、有意不做
+
+- **不删根目录的 58 个 `.live-*` 抓取件**（1.34 MB，`.gitignore` 里）：`51-*.md` 与
+  `54-*.md` 把它们当作线上核查的原始材料引用，删了等于把审计证据一起带走。
+  `.dockerignore` 已排除它们，不再进镜像。
+- **不给 pin 加"跑到一半也能原子还原"的更强保证**：Windows 上终止进程不跑
+  `process.on('exit')`（`pins-self-heal.test.mjs` 的注释里已经写明），硬杀本来就抓不住。
+  能做的两件事都做了：能捕获的信号仍走原还原路径，捕不到的那次由门入口报出来。
+- **不改 `check-test-pins.mjs` 的"并行"**：头部注释记过"并行读源码这件事没有补救办法，
+  只能不并行"，这条不动。
+- **（更正一处初稿的判断）初稿写的是"也不加子集过滤"，后来又加了** —— 见下一条。
+  留着这行是因为它本身也说明一件事：卡着"本刀无关"的边界不放，会让下一刀继续用
+  "赌自己能在超时前跑完"的方式验证 pin，而那正是事故的起点。
+- **加了 `--only <子串>` 子集过滤**（`scripts/check-test-pins.mjs`）：理由就是本刀的教训
+  —— 全套长得会被外层超时杀掉，而杀掉它正是这起事故的起点。有了它，新写一条 pin 可以
+  当场跑真 harness 验证，不必赌。它**不改判据、不改执行方式**（仍然串行、仍然逐条还原），
+  只是少跑几条，所以结论行里明写"**不是**全套的 N 条" —— 它不能替代全套，
+  也不能用来声称"N/N 全绿"。
+
+## 四、本刀的底数（当次实测，不凭印象）
+
+| 门 | 改前 | 改后 |
+| --- | --- | --- |
+| `npx tsc --noEmit` | 0 | **0** |
+| `npm run lint` | 0 | **0** |
+| `npm run test:unit` | 430/430 | **446/446**（+16：bash 解析 4、门入口守卫 4、文档结构 8） |
+| `node --test tests/e2e/backup-failure-alert.test.mjs`（**从 PowerShell**） | 3 条红（WSL 桩，错误正文就是那句"未安装…子系统"） | **7/7 全绿** |
+| `npm run e2e`（从 Git Bash） | 354/354 | **354/354** |
+| `npm run e2e`（**从 PowerShell**） | 有红（两种成因叠加：WSL 桩 3 条 + pin 残留 5 条，**不是一次干净的量测**） | **354/354 全绿** |
+| pin | 108 | **111**（新增 3 条，三条都用真 harness 的 `--only` 跑过，各自 1/1 变红） |
+
+**一处口径要写清**：PowerShell 那一行"改前"的红是**两种独立成因叠在一起**的
+（WSL 桩只影响 `backup-failure-alert` 那 3 条；pin 残留影响 5 条 `crawl-timeout-guard`），
+所以它不是 WSL 桩这一件事的干净量测。干净的那次量测是上表第 4 行（单跑那个文件、只切 shell）。
+
+三条新 pin 在 `scripts/check-test-pins.mjs` 的 `CASES` 里，并加进了 `TARGETS`：
+
+- `pinsClean` —— 撤掉「留痕在就拦」⇒ `pins-clean-guard.test.mjs` 变红；
+- `bashHelper` —— 撤掉「`ZW_BASH` 不可用就抛」⇒ `bash-resolver.test.mjs` 变红；
+- `docsIntegrity` —— 把「转义竖线不算列分隔」的负向断言撤掉 ⇒ `docs-integrity.test.mjs` 变红。
+
+三条都**用真 harness 跑过**（`node scripts/check-test-pins.mjs --only <子串>`，
+各 1/1 变红），不是手工模拟的；跑完 `git status` 与跑之前完全一致，说明逐条还原是好的。
+
+## 五、还欠的一步
+
+`check-test-pins.mjs` 的**全套复跑（111 条）没做**，所以"111/111"这个数本轮**没有验证**，
+只能说新增的三条各自成立。下一次要动实现之前，找一段完整时间跑一次全套并把这个数补齐
+（现在可以先用 `--only` 分组跑，但分组跑不等于全套）。
