@@ -85,3 +85,12 @@
   需要时再单独决定。
 - 未做：磁盘写满、`/var/backups` 权限异常这类失败同样会走 ERR trap ⇒ 会发信，
   但邮件内容只有阶段与退出码，不会有 `df` 的输出。要更准就得多写日志抓取，暂不值。
+
+## 部署与生产实测（2026-09-25，用户打字授权）
+
+- 同步 `deploy/daily-backup.sh` + `scripts/alert-backup-failure.mjs`，`build worker` + `up -d worker`。
+- **成功路径发 0 封**：手跑一次 `daily-backup.sh`，6 项恢复校验全过、新 dump 1,233,829 字节、exit 0、无告警输出。
+- **失败路径真发信**：手跑 `alert-backup-failure.mjs` 一条测试告警 ⇒ 信真的出去了，`alert_sends` 由 13 行变 14 行。
+- 一个当时要判断的相互作用：去重键是**站点日历日**（`siteDateIso`，按 Asia/Shanghai）× 任务名 × 源，
+  所以这条测试信占掉的是"北京 9-25"那天 `daily-backup` 的额度；今晚 19:30 UTC 的自然运行是**北京 9-26 03:30**，
+  跨了站点日 ⇒ 没被吃掉。反过来说：同一天内若既有测试又有真故障，真故障那封会被去重掉。
