@@ -170,3 +170,34 @@ select case when anchors > 0 then '附件有条文锚点' else '附件无条文�
   from per_notice
  group by 1, 2
  order by 1, 2;
+
+\echo '=== 10) 抽取文本里"汉字占字符的比例"分布（决定要不要在截取层做空白归一）'
+-- 起因：`4815e769` 那条送入摘要的窗口 7,974 字符里只有 1,432 个汉字 —— PDF 逐字定位抽出来的
+-- 文本每两个字之间都带空格，再加上一整页目录的点线（............），于是**每份 8,000 字符的
+-- 预算被噪声吃掉大半**，模型实际看到的正文比"8,000 字"少得多。
+-- 这一段落 distribution：如果低比例（<0.5）的行占可观份额，值得在 `excerptForPrompt` 前
+-- 做空白归一 + 点线删除；如果只是零星几条，就别为一行数据改共用逻辑。
+with t as (
+  select a.notice_id,
+         a.status,
+         a.fed_to_summary,
+         length(coalesce(a.extracted_text, ''))                                    as chars,
+         length(regexp_replace(coalesce(a.extracted_text, ''), '[^一-鿿]', '', 'g')) as cjk,
+         length(regexp_replace(coalesce(a.extracted_text, ''), '\.{6,}', '', 'g'))   as no_dots
+    from notice_attachments a
+   where coalesce(a.extracted_text, '') <> ''
+)
+select case
+         when chars < 2000 then 'a. <2k 字'
+         when chars < 8000 then 'b. 2k–8k'
+         when chars < 20000 then 'c. 8k–20k'
+         else 'd. >=20k'
+       end                                                        as 抽取规模,
+       count(*)                                                   as 文件数,
+       round(avg(cjk::numeric / nullif(chars, 0)), 3)              as 平均汉字占比,
+       count(*) filter (where cjk::numeric / nullif(chars, 0) < 0.5) as 占比低于一半的文件数,
+       count(*) filter (where chars - no_dots > 500)               as 点线超500字符的文件数
+  from t
+ group by 1
+ order by 1;
+
