@@ -20,6 +20,15 @@ bash deploy/sync-files-local.sh src/app/page.tsx src/lib/dates.ts
 加上幂等过滤后同步上去，dry-run 仍然把 3 条已经补好的条目列为候选（旧版没有那个过滤），
 因为 worker 镜像还是构建于加过滤之前。
 
+**但只读探针不必为此重建镜像** —— 把宿主机的单个文件挂进临时容器即可（镜像 `WORKDIR=/app`，
+脚本 import 的 `src/**` 本来就在镜像里；`:ro` 保证探针改不到代码，跑完容器就消失）：
+
+```bash
+docker compose run --rm   -v /opt/zhurenweng/scripts/audit-search-index.mjs:/app/scripts/audit-search-index.mjs:ro   worker node scripts/audit-search-index.mjs --stride 6
+```
+
+真正要被常驻进程长期执行的改动，仍然要走 `build` + `up -d`（下面三条）。
+
 改完脚本要在容器里跑，先重建再跑：
 
 ```bash
