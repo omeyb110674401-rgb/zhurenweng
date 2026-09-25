@@ -204,8 +204,15 @@ SOURCES_FIXTURE_BASE=http://127.0.0.1:4170 APP_BASE_URL=http://localhost:3000 WO
   无效 token 按普通订阅页渲染、不带出任何人的订阅内容）。
 - **合规**：仅存储订阅邮箱，不建用户账号；确认 / 提醒邮件均可一键退订。
 
-数据库迁移在应用首连时自动应用（`drizzle/<driver>/`）；CI（GitHub Actions）运行
-lint 与 e2e 两个 job，同样只依赖 npm。
+数据库迁移在应用首连时自动应用（`drizzle/<driver>/`）。
+
+- **CI 现在不执行任何检查**（issue #70）：`.github/workflows/ci.yml` 配的是 lint 与 e2e 两个
+  job，但触发条件是 `push` / `pull_request`，而 GitHub 账号自 2026-09-21 停用、提交推不出去
+  ⇒ 这套 CI 从那天起一次都没跑过（**这是从"没有推送"推出来的，不是从 Actions 页面看到的**）。
+  实际的门是**本地手动跑 + 在 commit message 里写清跑到了什么数**：`npx tsc --noEmit`、
+  `npm run build`、`npm run lint`、`node --test tests/unit/**`、`npm run e2e`，
+  外加 `node scripts/check-test-pins.mjs`（撤掉实现要真会红的自证清单）。
+  恢复托管后第一件事就是把 CI 重新跑绿一次，别把"配置文件还在"当成"检查还在跑"。
 
 - **手工补迁移时，`meta/_journal.json` 的 `when` 必须严格递增**（issue #66）：drizzle
   对**存量库**只执行 `when` 晚于「最后一条已应用记录」的迁移，写早了就**静默跳过** ——
@@ -729,6 +736,7 @@ npm run db:migrate         # 对当前 DB_DRIVER 的库应用迁移
 
 `docker-compose.yml` 编排 web / worker / PostgreSQL / Meilisearch 四服务，与 PRD
 部署方案一致。**注意：开发机没有 Docker，该文件在开发机不可运行**，仅供生产部署
-对齐（ADR-0001）；本地与 CI 的验收标准是 `npm run e2e` 全绿 + compose 文件与服务
-清单一致。相关 Dockerfile（`Dockerfile.web` / `Dockerfile.worker`）同样未在本地
+对齐（ADR-0001）；**本地**的验收标准是 `npm run e2e` 全绿 + compose 文件与服务
+清单一致（CI 目前不执行，见「订阅与通知」一节那条），所以这两个数只有人跑才算数。
+相关 Dockerfile（`Dockerfile.web` / `Dockerfile.worker`）同样未在本地
 实际构建过，部署时按环境微调。
