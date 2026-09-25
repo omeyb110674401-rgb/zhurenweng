@@ -63,6 +63,7 @@ const TARGETS = {
   feed: 'src/lib/feed.ts',
   channelGuidance: 'src/lib/channel-guidance.ts',
   compose: 'docker-compose.yml',
+  dailyBackup: 'deploy/daily-backup.sh',
   journalPg: 'drizzle/postgres/meta/_journal.json',
   journalSqlite: 'drizzle/sqlite/meta/_journal.json',
   // 本脚本自己：它改写工作区源码，所以"崩了能不能自愈"和任何一处实现同样需要钉住
@@ -793,6 +794,14 @@ const CASES = [
     to: "    .set({ aiSummaryJson: null, summaryStatus: 'pending' })",
     pattern: 'issue #67：clearSummaryForRedraft',
     test: 'tests/e2e/summary-redraft.test.mjs',
+  },
+  {
+    label: '每日备份的安装片段丢掉 CRON_TZ=UTC（`30 19` 就变成北京时间，备份静默不跑）',
+    file: 'dailyBackup',
+    from: "crontab -l 2>/dev/null | { echo 'CRON_TZ=UTC';",
+    to: 'crontab -l 2>/dev/null | {',
+    pattern: '每日备份的安装片段带 CRON_TZ=UTC',
+    test: 'tests/unit/deploy-env-contract.test.mjs',
   },
   // 「空名单提前返回」那道保护**不占 pin 位**（2026-09-24 实测）：撤掉 `if (ids.length === 0) return []`
   // 之后 e2e 仍然全绿 —— drizzle 把空的 `inArray` 编成恒假条件而不是非法 SQL，那句没有可观测行为。

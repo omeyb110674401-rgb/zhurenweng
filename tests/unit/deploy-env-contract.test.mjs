@@ -454,4 +454,30 @@ describe('构建与部署卫生', () => {
     assert.equal(exampleValue, codeDefault, '.env.example 写的档位与代码缺省不一致');
     assert.equal(composeDefault, codeDefault, 'compose 的 :- 回退值与代码缺省不一致');
   });
+
+  it('每日备份的安装片段带 CRON_TZ=UTC（脚本头注 ↔ docs）（issue #68）', () => {
+    // 为什么钉这一行：宿主机时区是 Asia/Shanghai，而 cron 的时间字段按**宿主机时区**解释。
+    // 2026-09-24 装 cron 时片段里没有 CRON_TZ，注释却写着「19:30 UTC」，于是 `30 19` 实际是
+    // 19:30 北京时间 —— "每天自动备份"装了之后一整天一次都没触发，而 `systemctl is-active crond`
+    // 显示 active、crontab -l 看得到那一行，什么都"正常"。这一条不防运行期错误（cron 不报错就是
+    // 不报错），防的是**下一次照抄安装命令的人**把时区那行抄丢，那与本次事故是同一个动作。
+    const scriptText = read('deploy/daily-backup.sh');
+    const installLines = (text) =>
+      text
+        .split(/\r?\n/)
+        .filter((line) => /crontab\s+-\s*$|crontab\s+-l/.test(line) || /^\s*echo\s+'/.test(line))
+        .join('\n');
+    for (const [name, text] of [
+      ['deploy/daily-backup.sh', scriptText],
+      ['docs/deploy.md', deployDocText],
+    ]) {
+      const snippet = installLines(text);
+      assert.match(snippet, /CRON_TZ=UTC/, `${name} 的安装片段少了 CRON_TZ=UTC（会按宿主机时区解释）`);
+      assert.match(
+        snippet,
+        /30 19 \* \* \* \/bin\/bash \/opt\/zhurenweng\/deploy\/daily-backup\.sh/,
+        `${name} 的安装片段与脚本路径不匹配`,
+      );
+    }
+  });
 });

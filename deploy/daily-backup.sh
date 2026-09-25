@@ -10,9 +10,17 @@
 # **真的恢复进一个临时库**，比对关键计数，对不上就非零退出（cron 的输出进日志，
 # 失败会在第二天被看到）。只 `--list` 归档头是更弱的校验，这里要的是可恢复性。
 #
-# 安装（服务器上，一次性；cron 用的是容器宿主机的 UTC 时区）：
-#   crontab -l 2>/dev/null | { echo '30 19 * * * /bin/bash /opt/zhurenweng/deploy/daily-backup.sh >> /var/log/zhurenweng-backup.log 2>&1'; cat -; } | crontab -
-#   # 19:30 UTC = 北京时间次日 03:30，与抓取轮（约 14:5x UTC）错开十几个小时
+# 安装（服务器上，一次性）。**`CRON_TZ=UTC` 这一行不能省**：宿主机时区是 Asia/Shanghai，
+# 而 cron 的时间字段按宿主机时区解释 —— 只写 `30 19` 会在 19:30 **北京时间**跑（= 11:30 UTC），
+# 与下面注释里写的时刻差 8 小时。2026-09-24 装的时候正是犯了这个错，第一次自动备份整整推迟了
+# 一天多才被发现，过程与教训见 `docs/pending-issues/68-backup-cron-never-fired.md`。
+#   crontab -l 2>/dev/null | { echo 'CRON_TZ=UTC'; echo '30 19 * * * /bin/bash /opt/zhurenweng/deploy/daily-backup.sh >> /var/log/zhurenweng-backup.log 2>&1'; cat -; } | crontab -
+#   # 19:30 UTC = 北京时间次日 03:30，与抓取轮（约 13:45–14:5x UTC）错开十几个小时
+#
+# 装完怎么确认它真的会跑（别看 unit 状态，那只能证明调度器活着）：
+#   grep daily-backup /var/log/cron          # 有没有触发记录
+#   ls -l /var/backups/zhurenweng/*.dump     # 有没有产物
+#   tail -20 /var/log/zhurenweng-backup.log  # 6 项计数校验是否全过
 #
 # 手动跑一次：bash deploy/daily-backup.sh
 # 保留份数：KEEP（默认 7）—— 日备份 7 天足够覆盖「某天误操作 / 某天迁移跑坏」的回看窗口。

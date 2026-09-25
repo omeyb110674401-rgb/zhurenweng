@@ -65,6 +65,11 @@ if (!lastDbMigration || Number(lastDbMigration.created_at) < migration.folderMil
 - cron：`30 19 * * * …daily-backup.sh`，服务名在这台 Alibaba Cloud Linux 3 上是 **`crond`**
   （active + enabled，进程自 09-14 起在跑）。第一次查 `systemctl is-active cron` 显示
   inactive 是我查错了 unit，不是 cron 没装。
+  **事后（09-25）更正**：这一段只验到"调度器活着"，没验到"这一行按我以为的时刻触发"—— crontab
+  里缺 `CRON_TZ=UTC`，而宿主机是 `Asia/Shanghai`，所以那行 `30 19` 实际是 19:30 **北京时间**
+  （不是这里写的 19:30 UTC），"每天自动备份"在装好后一整天一次都没跑。修法、当场自证与
+  教训见 `68-backup-cron-never-fired.md`。留这一句是因为"验了相邻的、更容易验的东西"
+  正是这次漏网的方式。
 - 0011 要 DROP 的 `sources.schedule_config_json`：11 行**全部非空但全是 `{}`**，
   导出件仍留在 `/var/backups/zhurenweng/pre-0011-schedule_config_json.txt`。
 - 线上功能回查：首页 192 条；`/?sort=newest&open=1` → 73 条且口径写明「只看未截止」；

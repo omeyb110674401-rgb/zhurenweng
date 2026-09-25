@@ -201,15 +201,26 @@ docker compose run --rm -e WORKER_ONCE=1 worker npm run worker
 - **限流阈值**（issue #52）：`SUBSCRIBE_RATE_LIMIT_PER_HOUR`（缺省 10）、
   `ADMIN_LOGIN_RATE_LIMIT_PER_HOUR`（缺省 30），单位次/小时，按客户端 IP 的固定窗口；
   计数在**进程内存**里，只对单实例部署有效（多副本时实际阈值 = 设定值 × 副本数）
-- **备份（每天自动，2026-09-24 起）**：`deploy/daily-backup.sh` 由 root 的 crontab 每天
-  19:30 UTC（北京 03:30）跑一次，产物在 `/var/backups/zhurenweng/`，保留 7 份。
+- **备份（每天自动）**：`deploy/daily-backup.sh` 由 root 的 crontab 每天 19:30 UTC（北京 03:30）
+  跑一次，产物在 `/var/backups/zhurenweng/`，保留 7 份。
   它不只是导出：每天把那份归档**真的恢复进临时库** `zw_backup_verify`，比对 6 项关键计数
   （条目数 / 有摘要数 / 附件行数 / 已抽字数量 / 订阅数 / 源数），对不上就非零退出 ——
   **备份没验证过 = 没有备份**。日志在 `/var/log/zhurenweng-backup.log`。
-  - 安装（一次性）：`crontab -l 2>/dev/null | { echo '30 19 * * * /bin/bash /opt/zhurenweng/deploy/daily-backup.sh >> /var/log/zhurenweng-backup.log 2>&1'; cat -; } | crontab -`
+  - 安装（一次性，**`CRON_TZ=UTC` 不能省**）：
+    `crontab -l 2>/dev/null | { echo 'CRON_TZ=UTC'; echo '30 19 * * * /bin/bash /opt/zhurenweng/deploy/daily-backup.sh >> /var/log/zhurenweng-backup.log 2>&1'; cat -; } | crontab -`
+    宿主机时区是 `Asia/Shanghai`，而 cron 的时间字段**按宿主机时区解释**：只写 `30 19` 会在
+    19:30 北京时间跑（= 11:30 UTC）。2026-09-24 首次安装正是这么写的，于是"每天自动备份"
+    在装好之后一整天**一次都没触发**，09-25 才发现（`docs/pending-issues/68-*.md`）。
+  - 怎么确认它真的在跑（`systemctl is-active crond` **证明不了这件事**）：
+    `grep daily-backup /var/log/cron` 看触发记录、`ls -l /var/backups/zhurenweng/*.dump` 看产物、
+    `tail -20 /var/log/zhurenweng-backup.log` 看 6 项校验是否全过。09-25 的实测：临时加一行
+    `15 2 * * *` 走同一条代码路径，10:15:01 本地 = 02:15:01 UTC 触发，产物 1,234,520 字节、
+    6 项计数全过，随后删掉临时行。
   - 手动补跑：`bash /opt/zhurenweng/deploy/daily-backup.sh`
   - 为什么必须有：本文件先前只写了一条手工 `pg_dump`，实测结果就是**从没执行过** ——
     服务器上唯一一份备份停在 2026-09-20，比库旧 4 天且不含附件表（147 万字从未被备份）。
+    同一类错误我在 09-24 又犯了一次（把"cron 装上了"当成"备份在跑"），所以这条写在前面：
+    **写进文档的调度和写在 crontab 里的行，都要有一次真实触发的产物来证明。**
     卷 `db-data`、`meili-data`（含 `caddy-data` 的证书私钥）仍需整机快照，日备份不替代它
   - **仍是单点**：备份与库在同一块盘上。第二份副本要等托管/对象存储方案定了再加（异地一份
     拉不回本地：`workbench exec` 的输出通道不适合传 MB 级文件）
