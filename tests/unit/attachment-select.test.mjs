@@ -10,6 +10,7 @@ import {
   excerptForPrompt,
   hasDraftText,
   scoreAttachmentName,
+  attachmentRole,
   selectAttachmentCandidates,
   shouldSkipByExtension,
 } from '../../src/lib/attachment-select.ts';
@@ -188,5 +189,59 @@ describe('excerptForPrompt：结构感知截取', () => {
     const excerpt = excerptForPrompt(text, 2000);
     assert.ok(excerpt.length <= 2000);
     assert.ok(excerpt.length > 1500, '窗口互相吞并后退化成不截，预算应基本用满');
+  });
+});
+
+/**
+ * 附件角色与"给说明留一位"（issue #76 第 3 刀）。
+ *
+ * 生产底数：25 份说明类附件里 8 份压根没被下载，全部集中在"一条公示附件多于 3 个名额"
+ * 的 3 条上。所以这一位不是理论优化，是把那 8 份捞回来的具体动作 —— 但前提写死在
+ * 最后一条用例里：**不能为了说明把条文全挤掉**，说明是解释文本，规定本身在条文里。
+ */
+describe('附件角色（issue #76 第 3 刀）', () => {
+  it('名字里带编制说明/起草说明的是 explanation', () => {
+    assert.equal(attachmentRole('《某某标准》编制说明.docx'), 'explanation');
+    assert.equal(attachmentRole('关于《公路法（修正草案）》的起草说明.wps'), 'explanation');
+  });
+
+  it('不收「说明」这个单字：使用说明/填写说明不是对草案的解读', () => {
+    assert.notEqual(attachmentRole('系统使用说明.pdf'), 'explanation');
+    assert.notEqual(attachmentRole('申报表填写说明.pdf'), 'explanation');
+  });
+
+  it('条文类是 draft，空白表格类是 other', () => {
+    assert.equal(attachmentRole('某某法（修正草案征求意见稿）.docx'), 'draft');
+    assert.equal(attachmentRole('项目立项申报汇总表.xlsx'), 'other');
+  });
+});
+
+describe('给编制说明留一个下载名额（issue #76 第 3 刀）', () => {
+  const allDraftsPlusExplanation = [
+    { name: '甲标准（征求意见稿）.docx', url: 'https://a/1' },
+    { name: '乙标准（征求意见稿）.docx', url: 'https://a/2' },
+    { name: '丙标准（标准文本）.pdf', url: 'https://a/3' },
+    { name: '丙标准编制说明.docx', url: 'https://a/4' },
+  ];
+
+  it('说明排不进前 3 时，换掉分数最低的最后一个名额', () => {
+    const chosen = selectAttachmentCandidates(allDraftsPlusExplanation, 3).map((item) => item.name);
+    assert.ok(chosen.includes('丙标准编制说明.docx'), `说明该被捞进来，实际：${chosen.join(' / ')}`);
+    assert.equal(chosen.includes('丙标准（标准文本）.pdf'), false, '被换掉的应是并列分里排最后的那份');
+    assert.ok(chosen.includes('甲标准（征求意见稿）.docx'), '条文不能被换掉');
+  });
+
+  it('本来就在名额里时不做任何换动', () => {
+    const two = [
+      { name: '某某法（草案征求意见稿）.docx', url: 'https://a/1' },
+      { name: '某某法草案编制说明.docx', url: 'https://a/2' },
+    ];
+    const chosen = selectAttachmentCandidates(two, 3).map((item) => item.name);
+    assert.deepEqual(chosen, ['某某法（草案征求意见稿）.docx', '某某法草案编制说明.docx'], '同分保持清单原序（官方页面通常正文在前）');
+  });
+
+  it('只有一个名额时不换：宁可不看说明，也不能只看说明', () => {
+    const chosen = selectAttachmentCandidates(allDraftsPlusExplanation, 1).map((item) => item.name);
+    assert.deepEqual(chosen, ['甲标准（征求意见稿）.docx']);
   });
 });

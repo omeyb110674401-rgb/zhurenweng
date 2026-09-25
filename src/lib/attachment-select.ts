@@ -124,15 +124,50 @@ export interface AttachmentCandidate {
  *
  * 同分时保持清单原序（稳定排序）—— 官方页面上的排列顺序通常就是「正文在前、表格在后」。
  */
+/** 附件在这条公示里扮演的角色（issue #76 第 3 刀）。 */
+export type AttachmentRole = 'draft' | 'explanation' | 'other';
+
+/**
+ * 说明类文件的典型名字。
+ *
+ * 刻意不收「说明」这个单字 —— 它出现在"使用说明""填写说明""代号说明"里，
+ * 那些不是对草案的解读，把它们当说明喂进去会挤掉真正的条文。
+ */
+const EXPLANATION_NAMES = ['编制说明', '起草说明', '修订说明', '修改说明', '编制解释'];
+
+/** 角色由文件名判：抽取任务按正文内容重算体裁时也用这一份定义，别两处各写一套。 */
+export function attachmentRole(name: string): AttachmentRole {
+  const text = (name ?? '').trim();
+  if (EXPLANATION_NAMES.some((word) => text.includes(word))) return 'explanation';
+  if (scoreAttachmentName(text) >= 3) return 'draft';
+  return 'other';
+}
+
 export function selectAttachmentCandidates(
   items: { name: string; url: string }[],
   limit = MAX_FILES_PER_NOTICE,
 ): AttachmentCandidate[] {
-  return items
+  const ranked = items
     .filter((item) => !shouldSkipByExtension(item.name))
     .map((item) => ({ name: item.name, url: item.url, score: scoreAttachmentName(item.name) }))
-    .sort((a, b) => b.score - a.score)
-    .slice(0, limit);
+    .sort((a, b) => b.score - a.score);
+  const chosen = ranked.slice(0, limit);
+  // 给说明留一位（issue #76 第 3 刀）：生产实测有 8 份编制说明因为"一条公示附件
+  // 多过 3 个名额"而压根没被下载。这里换掉的是**分数最低的最后一个名额** ——
+  // 并列时清单原序在前（官方页面通常正文在前、表格在后），所以被挤掉的不会是条文。
+  if (limit >= 2 && !chosen.some((item) => attachmentRole(item.name) === 'explanation')) {
+    const missing = ranked.find((item) => attachmentRole(item.name) === 'explanation' && !chosen.includes(item));
+    // 换进来的前提：换完至少还留着一份条文。为了说明把条文全挤掉是本末倒置 ——
+    // 说明是解释文本，读者要判断的规定仍在条文里。
+    if (missing) {
+      const rest = chosen.slice(0, -1);
+      if (rest.some((item) => attachmentRole(item.name) === 'draft')) {
+        chosen.pop();
+        chosen.push(missing);
+      }
+    }
+  }
+  return chosen;
 }
 
 /** 汉字数（含中日韩统一表意文字与扩展区 A）。用来判「有没有条文正文」。 */
