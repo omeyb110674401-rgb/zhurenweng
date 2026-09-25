@@ -1,4 +1,5 @@
 import type { LlmPort, StructuredSummary, SummaryChannel, SummaryChannelKind } from './ports.ts';
+import type { ChangeKind, ChangeMarkerCount } from './amendment-coverage.ts';
 
 /**
  * AI 摘要的领域形状（issue #4 建立，issue #55 重构为「参与导引」口径）——
@@ -83,6 +84,25 @@ export interface QuotedDraftPoint extends SummarySection {
 }
 
 /**
+ * 一处修正案改动点（issue #76 第 2 刀）。
+ *
+ * `quote` 是**逐字原文**且必须能在本轮喂进去的条文里反查到 —— 反查不到就整条丢弃
+ * （见 `buildQuotedSummary`），所以页面上每行改动都对应本站真读到的一句话。
+ * `clause` / `kind` / `text` 是模型对着那句话写下的说明：它们本身不可逐字核对，
+ * 因此页面把三者与出处排在一起给读者对照，而不是让说明脱离原文单独成立。
+ */
+export interface QuotedAmendmentChange {
+  /** 被改条款标识（照抄原文写法） */
+  clause: string;
+  kind: ChangeKind;
+  /** 一句话说明（≤40 字） */
+  text: string;
+  quote: string;
+  source: string | null;
+  sourceUrl: string | null;
+}
+
+/**
  * ai_summary_json 的落库形状。
  */
 export interface QuotedSummary {
@@ -94,6 +114,10 @@ export interface QuotedSummary {
   afterDeadline: SummarySection;
   /** 历史字段（#56 停用）→ 现为**草案条文要点**：只有喂了附件条文才会产生（issue #57 第 5 步） */
   keyPoints: QuotedDraftPoint[];
+  /** 修正案改动点（issue #76）：只有体裁判为修正案且引用能逐字反查到才会有内容 */
+  changes: QuotedAmendmentChange[];
+/** 正文里检测到的改动表述计数：页面那行"共检测到 N 处、本页列出 M 处"的分母 */
+  changeMarkers: ChangeMarkerCount | null;
   /** deadline.text 为 ISO 日期（YYYY-MM-DD）或 null */
   deadline: SummaryDeadlineSection;
   howToComment: SummarySection;
@@ -214,6 +238,7 @@ export function buildQuotedSummary(
   summary: StructuredSummary,
   quotes?: SummaryQuotes,
   draftSources?: { name: string; url: string; text: string }[],
+  changeMarkers?: ChangeMarkerCount | null,
 ): QuotedSummary {
   const rawPoints = Array.isArray(summary.keyPoints) ? summary.keyPoints : [];
   const quotePoints = Array.isArray(quotes?.keyPoints) ? (quotes.keyPoints as (string | null)[]) : [];
@@ -238,6 +263,8 @@ export function buildQuotedSummary(
     whoCanSubmit: { text: text(summary.whoCanSubmit), quote: cleanQuote(quotes?.whoCanSubmit) },
     afterDeadline: { text: text(summary.afterDeadline), quote: cleanQuote(quotes?.afterDeadline) },
     keyPoints,
+    changes: buildChanges(summary, draftSources),
+    changeMarkers: changeMarkers ?? null,
     deadline: {
       text:
         summary.deadline === null || summary.deadline === undefined
@@ -250,6 +277,85 @@ export function buildQuotedSummary(
   };
 }
 
+/**
+ * 逐条反查出处，反查不到的丢弃（与 keyPoints 同一条不变量）。
+ * 单独抽出来是因为 `parseQuotedSummary` 也要能读这个字段，而它不需要反查。
+ */
+function buildChanges(
+  summary: StructuredSummary,
+  draftSources: { name: string; url: string; text: string }[] | undefined,
+): QuotedAmendmentChange[] {
+  const raw = Array.isArray(summary.changes) ? summary.changes : [];
+  const out: QuotedAmendmentChange[] = [];
+  for (const item of raw) {
+    if (typeof item !== 'object' || item === null) continue;
+    const change = item as unknown as Record<string, unknown>;
+    const quote = cleanQuote(typeof change.quote === 'string' ? change.quote : '');
+    const pointText = typeof change.text === 'string' ? change.text.trim() : '';
+    const clause = typeof change.clause === 'string' ? change.clause.trim() : '';
+    if (quote === null || pointText === '') continue;
+    const source = findDraftSourceForQuote(quote, draftSources);
+    if (source === null) continue;
+    const kind = typeof change.kind === 'string' ? change.kind : '';
+    out.push({
+      clause,
+      kind: (['modify', 'add', 'delete', 'renumber', 'other'] as string[]).includes(kind)
+        ? (kind as ChangeKind)
+        : 'other',
+      text: pointText,
+      quote,
+      source: source.name,
+      sourceUrl: source.url,
+    });
+  }
+  return out;
+}
+
+/** 落库的改动点数组 → 内存形状（缺字段/类型不对的条目丢掉，不让一行脏数据打断整页渲染） */
+function parseStoredChanges(value: unknown): QuotedAmendmentChange[] {
+  if (!Array.isArray(value)) return [];
+  const out: QuotedAmendmentChange[] = [];
+  for (const item of value) {
+    if (typeof item !== 'object' || item === null) continue;
+    const change = item as Record<string, unknown>;
+    const text = typeof change.text === 'string' ? change.text.trim() : '';
+    const quote = typeof change.quote === 'string' ? change.quote.trim() : '';
+    const clause = typeof change.clause === 'string' ? change.clause.trim() : '';
+    if (text === '' || quote === '') continue;
+    const kind = typeof change.kind === 'string' ? change.kind : 'other';
+    const source = typeof change.source === 'string' && change.source !== '' ? change.source : null;
+    const sourceUrl = typeof change.sourceUrl === 'string' && change.sourceUrl !== '' ? change.sourceUrl : null;
+    out.push({
+      clause,
+      kind: (['modify', 'add', 'delete', 'renumber', 'other'] as string[]).includes(kind)
+        ? (kind as ChangeKind)
+        : 'other',
+      text,
+      quote,
+      source,
+      sourceUrl,
+    });
+  }
+  return out;
+}
+
+/** 落库的改动表述计数（旧行为 null：页面那行覆盖度文字随之不出现） */
+function parseStoredMarkers(value: unknown): ChangeMarkerCount | null {
+  if (typeof value !== 'object' || value === null) return null;
+  const markers = value as Record<string, unknown>;
+  if (typeof markers.total !== 'number') return null;
+  const byKind = markers.byKind as Record<string, unknown> | undefined;
+  const num = (v: unknown): number => (typeof v === 'number' ? v : 0);
+  return {
+    total: markers.total,
+    byKind: {
+      modify: num(byKind?.modify),
+      add: num(byKind?.add),
+      delete: num(byKind?.delete),
+      renumber: num(byKind?.renumber),
+    },
+  };
+}
 /**
  * 安全校验 ai_summary_json（详情页渲染与检索索引前的防御性解析）：
  * 形状不符合 QuotedSummary 时返回 null，页面回退到占位文案，绝不让脏数据抛错打断渲染。
@@ -319,6 +425,10 @@ export function parseQuotedSummary(value: unknown): QuotedSummary | null {
     whoCanSubmit: optionalSection(record.whoCanSubmit),
     afterDeadline: optionalSection(record.afterDeadline),
     keyPoints,
+    // 改动点与覆盖度计数都是后加的字段：旧行没有 ⇒ 按"空 + 没数过"解析，
+    // 不算形状异常（否则摘要重刷那段时间，存量条目会从"有摘要"掉回占位）。
+    changes: parseStoredChanges(record.changes),
+    changeMarkers: parseStoredMarkers(record.changeMarkers),
     deadline,
     howToComment,
     channels: channels.slice(0, MAX_CHANNELS),

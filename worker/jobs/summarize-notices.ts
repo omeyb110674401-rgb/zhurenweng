@@ -13,6 +13,8 @@ import {
   countCjk,
   excerptForPrompt,
 } from '../../src/lib/attachment-select.ts';
+import { listNoticeAttachmentTexts } from '../../src/db/repo/attachments.ts';
+import { countChangeMarkers } from '../../src/lib/amendment-coverage.ts';
 import type { DraftSource } from '../../src/lib/ports.ts';
 import { llmReady, llmUnavailableReason } from '../../src/lib/llm-availability.ts';
 import { sendTaskFailureAlert } from '../../src/lib/alerts.ts';
@@ -162,10 +164,21 @@ export const summarizeNoticesJob: Job = {
       const draftSources = await draftSourcesForSummary(target);
       const draftChars = draftSources.reduce((sum, item) => sum + countCjk(item.text), 0);
       if (draftChars > 0) fedCount += 1;
+      // 修正案才算覆盖度分母：数的是**全部**附件正文里的修改表述，不是喂进去的那一截。
+      // 页面把"检测到 N 处 / 本页列出 M 处"摆在一起，读者才知道本站读了多少。
+      const changeMarkers =
+        target.genre === 'amendment'
+          ? countChangeMarkers((await listNoticeAttachmentTexts(target.id)).join(' '))
+          : null;
       try {
         const summary = await summarizeWithRetry(llm, target, ctx, draftSources);
         // draftSources 一并交给归一化：条文要点必须能反查到出处才落库（issue #57 第 6 步）
-        const quoted = buildQuotedSummary(summary, summary.quotes, draftSources);
+        // 体裁是真的门控产品形状，不只是打个标签：新案即使模型吐出"改动点"也一律丢弃 ——
+        // 没有对照基准的改动表等于把读者领进一个我们并不成立的承诺。
+        if (target.genre !== 'amendment' && Array.isArray(summary.changes)) {
+          summary.changes = [];
+        }
+        const quoted = buildQuotedSummary(summary, summary.quotes, draftSources, changeMarkers);
         await saveNoticeSummary({
           id: target.id,
           summaryJson: JSON.stringify(quoted),

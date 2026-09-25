@@ -1,4 +1,6 @@
 import type { ReactNode } from 'react';
+import { CHANGE_KIND_LABELS, changeCoverageVerdict } from '@/lib/amendment-coverage';
+
 import { safeParseJson, type NoticeRecord } from '@/db/types';
 import {
   parseQuotedSummary,
@@ -174,6 +176,62 @@ export function SummaryView({
                 </li>
               ))}
             </ul>
+          </div>
+        ) : null}
+
+        {/*
+         * 改动点表格（issue #76 第 2 刀）：读者对修正案要的是"改了哪几处"，不是把全文
+         * 重述一遍。最后一列是**逐字原文**，与左边的说明同屏 —— 说明本身不可核对（那是模型对着
+         * 原句写的一句话），所以绝不让它脱离原文单独成立。
+         *
+         * 上面那行覆盖度是这块的心脏：分母是本站在**全部**附件正文里数出来的修改表述数，
+         * 不是模型的自我申报。列得比分母少就照实说"其余的不在本站读到的那一截里" ——
+         * 这既是对读者诚实，也是将来决定"要不要为长文上多轮调用"的唯一依据。
+         */}
+        {summary.changes.length > 0 || summary.changeMarkers !== null ? (
+          <div className="summary-section" data-testid="summary-changes">
+            <h2 className="summary-section-title">改动点</h2>
+            {summary.changeMarkers ? (
+              <p className="summary-section-note" data-testid="summary-change-coverage">
+                {changeCoverageVerdict(summary.changes.length, summary.changeMarkers).detail}
+              </p>
+            ) : null}
+            {summary.changes.length === 0 ? null : (
+              <div
+                className="stat-table-wrap"
+                role="region"
+                tabIndex={0}
+                aria-label="改动点表（窄屏可横向滚动）"
+              >
+                <table className="stat-table" data-testid="summary-change-table">
+                  <thead>
+                    <tr>
+                      <th scope="col">条款</th>
+                      <th scope="col">类型</th>
+                      <th scope="col">改了什么</th>
+                      <th scope="col">原文（本站逐字摘录）</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {summary.changes.map((change, index) => (
+                      <tr key={index}>
+                        <th scope="row">{change.clause}</th>
+                        <td>{CHANGE_KIND_LABELS[change.kind]}</td>
+                        <td>{change.text}</td>
+                        <td>
+                          <p>{change.quote}</p>
+                          <p className="draft-point-source" data-testid="summary-change-source">
+                            {change.source
+                              ? `出处：附件《${change.source}》（本站从附件逐字提取，未做改写）`
+                              : '出处：未标注（这条的引用没能反查到本轮喂入的条文）'}
+                          </p>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
           </div>
         ) : null}
         <SectionBlock

@@ -1,4 +1,11 @@
-import type { DraftSource, LlmPort, LlmSummarizeInput, SummaryChannel, SummaryChannelKind } from '../ports.ts';
+import type {
+  AmendmentChangeDraft,
+  DraftSource,
+  LlmPort,
+  LlmSummarizeInput,
+  SummaryChannel,
+  SummaryChannelKind,
+} from '../ports.ts';
 import {
   SUMMARY_CHANNEL_KINDS,
   type QuotedStructuredSummary,
@@ -63,7 +70,7 @@ const SYSTEM_PROMPT = [
   '重要背景：网页正文通常只是公告本身；草案条文、标准文本、名单在**附件**里，只有给了「附件条文」段落时你才真的看得到它们。',
   '因此：没有「附件条文」段落时，不要编写、推测或概括任何「条款内容」，只回答公告里真实存在的参与信息。',
   '请只输出一个 JSON 对象（不要输出任何解释、markdown 代码围栏或其他文字），字段如下：',
-  '{"what":"这是什么：一句话概括这份公示在做什么，40 字以内","who":"影响谁：只有原文明确写出受这份文件影响的主体时才写（如运输机场运营人、医疗器械注册人、标准起草单位）；原文只写「社会公众」「有关单位和个人」这类泛称时**留空字符串** —— 那是「谁能提」，不是「影响谁」。这类页面的正文通常不含受影响主体（它在附件的草案里），宁可留空也不要推断","whoCanSubmit":"谁能提：原文写明的可提出意见的主体或范围；原文未提及则留空字符串","afterDeadline":"逾期会怎样：原文写明超过截止日期后如何处理（如逾期视为无意见、不再受理）；原文未提及则留空字符串","keyPoints":["草案条文要点：仅当给出「附件条文」时填写，2-4 条从条文中读到的实质规定，每条一句话、40 字以内；没有附件条文段落时必须为空数组"],"deadline":"截止日期：YYYY-MM-DD，原文未明确则为 null","howToComment":"如何提意见：一句话概述提交途径，40 字以内","channels":[{"kind":"email|phone|mail|online|other","value":"可直接使用的具体值"}],"quotes":{"what":"what 对应的原文引用片段（逐字摘录，不超过100字）","who":"who 对应的原文引用片段，留空时空字符串","whoCanSubmit":"谁能提对应的原文片段，没有则空字符串","afterDeadline":"逾期会怎样对应的原文片段，没有则空字符串","keyPoints":["与 keyPoints 一一对应的逐字条文原文，顺序严格一致，没有则为 null"],"deadline":"截止日期对应的原文引用片段","howToComment":"如何提意见对应的原文引用片段","channels":["每条渠道对应的原文片段，顺序与 channels 严格一致"]}}',
+  '{"what":"这是什么：一句话概括这份公示在做什么，40 字以内","who":"影响谁：只有原文明确写出受这份文件影响的主体时才写（如运输机场运营人、医疗器械注册人、标准起草单位）；原文只写「社会公众」「有关单位和个人」这类泛称时**留空字符串** —— 那是「谁能提」，不是「影响谁」。这类页面的正文通常不含受影响主体（它在附件的草案里），宁可留空也不要推断","whoCanSubmit":"谁能提：原文写明的可提出意见的主体或范围；原文未提及则留空字符串","afterDeadline":"逾期会怎样：原文写明超过截止日期后如何处理（如逾期视为无意见、不再受理）；原文未提及则留空字符串","keyPoints":["草案条文要点：仅当给出「附件条文」时填写，2-4 条从条文中读到的实质规定，每条一句话、40 字以内；没有附件条文段落时必须为空数组"],"changes":{"clause":"被改条款标识，照抄原文写法（如 第三条 / 附录A）","kind":"modify|add|delete|renumber|other","text":"这一处改了什么：一句话，40 字以内","quote":"描述这处改动的逐字原文，160 字以内"},"deadline":"截止日期：YYYY-MM-DD，原文未明确则为 null","howToComment":"如何提意见：一句话概述提交途径，40 字以内","channels":[{"kind":"email|phone|mail|online|other","value":"可直接使用的具体值"}],"quotes":{"what":"what 对应的原文引用片段（逐字摘录，不超过100字）","who":"who 对应的原文引用片段，留空时空字符串","whoCanSubmit":"谁能提对应的原文片段，没有则空字符串","afterDeadline":"逾期会怎样对应的原文片段，没有则空字符串","keyPoints":["与 keyPoints 一一对应的逐字条文原文，顺序严格一致，没有则为 null"],"deadline":"截止日期对应的原文引用片段","howToComment":"如何提意见对应的原文引用片段","channels":["每条渠道对应的原文片段，顺序与 channels 严格一致"]}}',
   '要求：',
   '1. 只依据给定原文，不编造、不猜测；原文没有的字段留空字符串或 null，宁可留空也不要凑。',
   '2. 引用必须是原文中的逐字连续片段。',
@@ -73,6 +80,11 @@ const SYSTEM_PROMPT = [
   '   - 每条要点都要在 quotes.keyPoints 给出对应的逐字条文原句（同一下标配对，错配比留空更糟）；',
   '   - 附件条文可能只是草案的一部分（本站按字数预算截取），因此只写你确实在文本里读到的规定，不要用「规定了」「明确了」去概括看不到的部分；',
   '   - 受影响主体（who）往往写在条文里（如「中华人民共和国境内的某某企业从事下列活动…」），给了条文时 who 可以据实填写，其引用取自条文。',
+  '6. changes 只在这份文件是「修改现行法律、法规、规章或标准」时填写，其余情况输出空数组：',
+  '    每项都要带 quote，且 quote 必须是「附件条文」里的**逐字连续片段**：本站拿它反查出处，反查不到的整条丢弃（错配比留空更糟）；',
+  '    官方通常把新旧写法写在同一句里（如「第三条修改为：……」「删去第七条」「增加一条，作为第X条」），照原句摘出来，不要重述成你自己的话；',
+  '    只列你真在文本里看到的改动。附件可能被本站按字数预算截断，看不到的部分就**不要列**，也不要写「等」「主要修改内容如下」来掩盖缺口 ——',
+  '     面会另给一行「正文里检测到 N 处修改表述，本页列出 M 处」，那个差值是本站读得不够，不是你漏写。',
 ].join('\n');
 
 /** 已解析并校验通过的模型配置（工厂与门控共用）。 */
@@ -270,6 +282,11 @@ export function normalizeModelSummary(raw: unknown): QuotedStructuredSummary {
     };
   });
 
+  // 改动点（issue #76 第 2 步）：引用与内容同在一条对象里，所以不会犯"按下标配错"
+  // 那种错（keyPoints 的平行数组吃过这个亏）；形状不对的条目这里就丢掉，
+  // 逐字反查不到出处由 buildQuotedSummary 负责丢弃。
+  const changes = normalizeChanges(record.changes);
+
   const rawQuotes = readQuotes(record.quotes);
   // keyPoints 与它的引用必须**先按原始下标配好、再过滤空项** —— 这是 normalizeChannels
   // 的同一条教训（issue #56）：先 filter 再取引用，第 3 条要点就会挂上第 2 条的原句，
@@ -296,11 +313,39 @@ export function normalizeModelSummary(raw: unknown): QuotedStructuredSummary {
     whoCanSubmit: optionalText('whoCanSubmit'),
     afterDeadline: optionalText('afterDeadline'),
     ...(keyPoints.length > 0 ? { keyPoints } : {}),
+    ...(changes.length > 0 ? { changes } : {}),
     deadline,
     howToComment,
     channels,
     ...(quotes ? { quotes } : {}),
   };
+}
+
+/** 一次摘要最多列多少处改动（再多就不是"给人看的表格"，是把正文重排一遍了） */
+const MAX_CHANGES = 40;
+
+/** 模型给的改动点 → 端口形状：缺 quote 或缺说明的条目丢掉，类型不认识归 other。 */
+function normalizeChanges(value: unknown): AmendmentChangeDraft[] {
+  if (!Array.isArray(value)) return [];
+  const out: AmendmentChangeDraft[] = [];
+  const kinds: readonly string[] = ['modify', 'add', 'delete', 'renumber', 'other'];
+  for (const item of value) {
+    if (out.length >= MAX_CHANGES) break;
+    if (typeof item !== 'object' || item === null) continue;
+    const record = item as Record<string, unknown>;
+    const quote = typeof record.quote === 'string' ? record.quote.trim() : '';
+    const text = typeof record.text === 'string' ? record.text.trim() : '';
+    const clause = typeof record.clause === 'string' ? record.clause.trim() : '';
+    if (quote === '' || text === '') continue;
+    const kind = typeof record.kind === 'string' ? record.kind.trim() : 'other';
+    out.push({
+      clause,
+      kind: (kinds.includes(kind) ? kind : 'other') as AmendmentChangeDraft['kind'],
+      text,
+      quote,
+    });
+  }
+  return out;
 }
 
 /** 读取模型输出的 quotes 扩展；不是对象则返回 undefined（该适配器不提供引用时同样成立） */

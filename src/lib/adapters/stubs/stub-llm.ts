@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import type { LlmPort, LlmSummarizeInput, StructuredSummary } from '../../ports.ts';
+import type { AmendmentChangeDraft, LlmPort, LlmSummarizeInput, StructuredSummary } from '../../ports.ts';
+import { AMENDMENT_TEXT_MARKERS } from '../../notice-genre.ts';
 import type { QuotedStructuredSummary, SummaryQuotes } from '../../summary-content.ts';
 
 /**
@@ -116,6 +117,30 @@ export class StubLlm implements LlmPort {
         (source, index) => `【stub】条文要点 ${index + 1}：${quotes[index]}`,
       );
       summary.quotes = { ...summary.quotes, keyPoints: quotes };
+    }
+    // 改动点（issue #76 第 2 刀）：只有条文里真的出现"修改为 / 删去 / 增加一条"这类句子时才回响，
+    // 且 quote 逐字取那一整行 —— 于是"表格里每一行都能反查到原文"在测试里走的是真路径，
+    // 而普通新案夹具不会因 stub 硬造改动点多出一张表。
+    const changeLines = draft
+      .flatMap((source) => source.text.split(/\r?\n/).map((line) => ({ name: source.name, line: line.trim() })))
+      .filter(
+        (item) =>
+          item.line.length > 8 &&
+          AMENDMENT_TEXT_MARKERS.some((word) => item.line.includes(word)),
+      )
+      .slice(0, 3);
+    if (changeLines.length > 0) {
+      const changes: AmendmentChangeDraft[] = changeLines.map((item, index) => ({
+        clause: `【stub】附件${item.name.slice(0, 6)} 第${index + 1}处`,
+        kind: item.line.includes('删去')
+          ? 'delete'
+          : item.line.includes('增加一条')
+            ? 'add'
+            : 'modify',
+        text: `【stub】改动点 ${index + 1}：${item.line.slice(0, 18)}…`,
+        quote: item.line,
+      }));
+      summary.changes = changes;
     }
     return summary;
   }

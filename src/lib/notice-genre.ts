@@ -52,7 +52,12 @@ export const NOTICE_GENRES = Object.keys(GENRE_LABELS) as NoticeGenre[];
  * 刻意收得很窄：这五个说法都是"改现行文本"的写法，普通新案草案不会出现
  * （新案只写"第一条 …… 第二条"，不会说"某某条修改为"或"删去第几条"）。
  */
-const AMENDMENT_TEXT_MARKERS = ['修改为', '删去', '增加一条', '原条款', '现行'];
+/**
+ * 附件正文里的"对照"措辞（强信号），也是改动点覆盖度的计数依据（issue #76 第 2 刀）。
+ * 导出给 `amendment-coverage.ts` 用同一份词表 —— 判体裁和算覆盖度必须认同一批词，
+ * 否则会出现"判成修正案但覆盖度算出 0 处改动"这种自相矛盾的页面。
+ */
+export const AMENDMENT_TEXT_MARKERS = ['修改为', '删去', '增加一条', '原条款', '现行'];
 
 /** 标题里的修正案措辞（中标据：可能是"修订工作的意见"这类，故弱于正文措辞）。 */
 const AMENDMENT_TITLE = /修正|修订/;

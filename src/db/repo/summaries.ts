@@ -19,6 +19,8 @@ export interface PendingSummaryTarget {
   bodyText: string | null;
   /** 所属源 ID（issue #12 告警去重键的一部分） */
   sourceId: string;
+  /** 体裁（issue #76）：修正案要走"改动点"那一套，其余按参与导引摘要 */
+  genre: string | null;
 }
 
 /**
@@ -39,6 +41,7 @@ export async function listNoticesForSummary(limit = 50): Promise<PendingSummaryT
       url: notices.url,
       bodyText: notices.bodyText,
       sourceId: notices.sourceId,
+      genre: notices.genre,
     })
     .from(notices)
     .where(
