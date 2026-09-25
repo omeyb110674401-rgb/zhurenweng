@@ -92,7 +92,38 @@ select count(*)                                              as points_with_sour
                                              like '%' || regexp_replace(p.quote, '[[:space:]]', '', 'g') || '%')) as NOT_found
   from p;
 
-\echo '=== 7) 对不上的那些长什么样（正常应为 0 行；有行就是缺陷，别放过）'
+\echo '=== 7) 重跑了却一条可核对要点都没有的条目：是真没条文可喂，还是喂了没被逐字对上'
+-- #67 放量的 49 条里有 6 条属于这种。区分这两种情况决定了下一步该动哪里：
+-- `fed_files > 0` 而要点全不带出处 ⇒ 模型没从给定条文里挑可引用的句子（提示词侧 / 模型侧）；
+-- `fed_files = 0` ⇒ 抽取或选取层没把条文送进去（`draftSourcesForSummary` 的门槛/预算侧），
+-- 那才是代码能修的地方。
+with p as (
+  select n.id,
+         left(n.title, 22) as title,
+         n.status,
+         n.ai_summary_json::jsonb as doc
+    from notices n
+   where n.ai_summary_json like '{%'
+     and not exists (select 1
+                       from jsonb_array_elements(n.ai_summary_json::jsonb -> 'keyPoints') as e(item)
+                      where coalesce(e.item ->> 'source', '') <> '')
+)
+select p.id,
+       p.title,
+       p.status,
+       jsonb_array_length(coalesce(p.doc -> 'keyPoints', '[]'::jsonb))     as points_without_source,
+       (select count(*) from notice_attachments a
+         where a.notice_id = p.id and a.status = 'ok')                      as ok_files,
+       (select count(*) from notice_attachments a
+         where a.notice_id = p.id and a.fed_to_summary = 1)                 as fed_files,
+       (select coalesce(sum(length(coalesce(a.extracted_text, ''))), 0)
+          from notice_attachments a
+         where a.notice_id = p.id and a.fed_to_summary = 1)                 as fed_chars
+  from p
+ order by fed_files desc, fed_chars desc
+ limit 15;
+
+\echo '=== 8) 出处对不上的那些长什么样（正常应为 0 行；有行就是缺陷，别放过）'
 with p as (
   select n.id, left(n.title, 22) as title, e.item ->> 'quote' as quote, e.item ->> 'source' as source
     from notices n,
@@ -109,3 +140,33 @@ select id, title, source, left(regexp_replace(quote, '[[:space:]]', ' ', 'g'), 7
                       and regexp_replace(coalesce(a.extracted_text, ''), '[[:space:]]', '', 'g')
                            like '%' || regexp_replace(p.quote, '[[:space:]]', '', 'g') || '%')
  limit 10;
+
+\echo '=== 9) 列联表：附件里有没有条文锚点 × 页面上有没有可核对要点（覆盖率上不去先看这张）'
+-- 「要点带不出出处」有两种完全不同的原因：附件里确实没有编号条文（数据实况，不该修），
+-- 或有条文但没被逐字对上（提示词 / 截取窗口 / 模型，才是能修的）。锚点判据与
+-- `excerptForPrompt` 用的是同一个形状：`第X条`（汉字或数字皆可）。
+-- 2026-09-25 实测（#67 放量 49 条之后）的三个格子：无锚点+有要点 29、无锚点+没要点 38、
+-- 有锚点+有要点 17，而**"有条文锚点却没对上要点"那一格是 0 行** —— 有锚点却产出不了要点，
+-- 才是指向截取窗口/提示词的那种缺陷，本次没有。
+-- 反过来别把这张表读成"无锚点 ⇒ 不该有要点"：那 29 条正是无锚点却有可核对要点，
+-- 引用形如「本标准规定了…」（`excerptForPrompt` 的锚点窗口之外照样有规范句）。
+-- 锚点只能当正向证据，不能当"该不该有要点"的判据。
+with per_notice as (
+  select n.id,
+         (select coalesce(sum((select count(*)
+                                 from regexp_matches(f.extracted_text,
+                                                     '第[一二三四五六七八九十百0-9]{1,4}条', 'g'))), 0)
+            from notice_attachments f
+           where f.notice_id = n.id and f.fed_to_summary = 1)          as anchors,
+         (select count(*)
+            from jsonb_array_elements(n.ai_summary_json::jsonb -> 'keyPoints') as e(item)
+           where coalesce(e.item ->> 'source', '') <> '')              as source_points
+    from notices n
+   where n.ai_summary_json like '{%'
+)
+select case when anchors > 0 then '附件有条文锚点' else '附件无条文锚点' end as 送进去的附件里,
+       case when source_points > 0 then '页面有可核对要点' else '页面没有要点' end as 页面上,
+       count(*)                                                    as 条数
+  from per_notice
+ group by 1, 2
+ order by 1, 2;
