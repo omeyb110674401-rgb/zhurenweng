@@ -1,6 +1,12 @@
 import { and, eq, inArray, ne, sql } from 'drizzle-orm';
 import { getDb } from '../client.ts';
 import { noticeAttachments, notices } from '../schema/sqlite.ts';
+import {
+  deriveNoticeGenre,
+  genreDecisionWins,
+  type GenreDecision,
+  type GenreEvidenceKind,
+} from '../../lib/notice-genre.ts';
 import type {
   AttachmentExtractStatus,
   AttachmentKind,
@@ -17,6 +23,49 @@ import type {
  * 幂等对齐，而不是由抓取侧直接写状态。
  */
 
+
+/**
+ * 用附件正文重算一次体裁（issue #76），只有正文级证据能把它升级成"修正案"。
+ *
+ * 为什么必须由抽取任务来做、不能在抓取入库时一次判完：最强的那条证据是正文里的对照措辞
+ * （"某条修改为…""删去第几条""增加一条"），而正文要到本任务解析完才存在。生产实测：
+ * 标题含"修正/修订"的 22 条里 19 条撞得到这条措辞；另有标题不写"修正"、正文却是修订文本的。
+ *
+ * 返回 null = 没写库（条目不存在，或新证据不比已存的强）。后者是刻意的：
+ * 弱证据覆盖强证据会让下一轮抓取把刚升级的判定降回去，两个 job 来回拉扯，
+ * 读者看到的摘要形态跟着抖。
+ */
+export async function refreshNoticeGenreFromAttachments(
+  noticeId: string,
+): Promise<GenreDecision | null> {
+  const db = await getDb();
+  const heads = await db
+    .select({
+      title: notices.title,
+      genreEvidence: notices.genreEvidence,
+    })
+    .from(notices)
+    .where(eq(notices.id, noticeId))
+    .limit(1);
+  if (heads.length === 0) return null;
+  const files = await db
+    .select({ name: noticeAttachments.name, extractedText: noticeAttachments.extractedText })
+    .from(noticeAttachments)
+    .where(eq(noticeAttachments.noticeId, noticeId));
+  const decision = deriveNoticeGenre({
+    title: heads[0].title,
+    attachmentNames: files.map((file) => file.name ?? ''),
+    attachmentText: files.map((file) => file.extractedText ?? '').join(' '),
+  });
+  if (!genreDecisionWins(decision.evidence, heads[0].genreEvidence as GenreEvidenceKind | null)) {
+    return null;
+  }
+  await db
+    .update(notices)
+    .set({ genre: decision.genre, genreBasis: decision.basis, genreEvidence: decision.evidence })
+    .where(eq(notices.id, noticeId));
+  return decision;
+}
 /** 一行抽取结果的写入载荷（`markAttachmentResult` 的入参）。 */
 export interface AttachmentResultPatch {
   status: AttachmentExtractStatus;

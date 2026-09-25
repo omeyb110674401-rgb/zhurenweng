@@ -31,6 +31,9 @@ function toNoticeRecord(row: typeof notices.$inferSelect): NoticeRecord {
     outboundClicks: row.outboundClicks,
     versionOf: row.versionOf,
     versionSeq: row.versionSeq,
+    genre: row.genre as NoticeRecord['genre'],
+    genreBasis: row.genreBasis,
+    genreEvidence: row.genreEvidence as NoticeRecord['genreEvidence'],
   };
 }
 

@@ -66,6 +66,7 @@ const TARGETS = {
   dailyBackup: 'deploy/daily-backup.sh',
   alertBackup: 'scripts/alert-backup-failure.mjs',
   pipelineHealth: 'src/lib/pipeline-health.ts',
+  noticeGenre: 'src/lib/notice-genre.ts',
   journalPg: 'drizzle/postgres/meta/_journal.json',
   journalSqlite: 'drizzle/sqlite/meta/_journal.json',
   // 本脚本自己：它改写工作区源码，所以"崩了能不能自愈"和任何一处实现同样需要钉住
@@ -882,6 +883,38 @@ const CASES = [
     to: '',
     pattern: 'issue #67：撤实现脚本的崩溃自愈',
     test: 'tests/unit/pins-self-heal.test.mjs',
+  },
+  {
+    label: '名单类不再最先判（名单条目被当草案处理，或打包项被名单词吞掉）',
+    file: 'noticeGenre',
+    from: '  const listHit = LIST_TITLE.exec(title);',
+    to: '  const listHit = null as RegExpExecArray | null;',
+    pattern: 'issue #76：体裁判定',
+    test: 'tests/unit/notice-genre.test.mjs',
+  },
+  {
+    label: '打包清单不抢先判（"等11项标准"会被当成单一修正案逐条摘要）',
+    file: 'noticeGenre',
+    from: '  const packageHit = PACKAGE_TITLE.exec(title);',
+    to: '  const packageHit = null as RegExpExecArray | null;',
+    pattern: 'issue #76：体裁判定',
+    test: 'tests/unit/notice-genre.test.mjs',
+  },
+  {
+    label: '判不出来就兜底成新案（修正案会静默用错模板，表现只是摘要短了一点）',
+    file: 'noticeGenre',
+    from: "  return { genre: 'unknown', basis: '标题与附件名都没有体裁线索，不兜底成任何一类', evidence: 'none' };",
+    to: "  return { genre: 'new_draft', basis: '兜底', evidence: 'title' };",
+    pattern: 'issue #76：体裁判定',
+    test: 'tests/unit/notice-genre.test.mjs',
+  },
+  {
+    label: '弱证据也能覆盖强证据（抓取每轮把正文级判定降回标题级，摘要形态天天抖）',
+    file: 'noticeGenre',
+    from: '  return GENRE_EVIDENCE_RANK[next] >= GENRE_EVIDENCE_RANK[stored];',
+    to: '  return true;',
+    pattern: 'issue #76：证据强度覆盖规矩',
+    test: 'tests/unit/notice-genre.test.mjs',
   },
 ];
 

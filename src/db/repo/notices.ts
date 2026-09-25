@@ -1,6 +1,6 @@
 import { and, asc, desc, eq, gte, inArray, isNull, or, sql, type SQL, type SQLWrapper } from 'drizzle-orm';
 import { currentDriver, getDb } from '../client.ts';
-import { notices, outboundClickDaily, sources } from '../schema/sqlite.ts';
+import { noticeAttachments, notices, outboundClickDaily, sources } from '../schema/sqlite.ts';
 import { syncNoticeVersionLinks } from './versions.ts';
 import { siteDateIso } from '../../lib/dates.ts';
 import { splitSearchTerms } from '../../lib/search/search-text.ts';
@@ -8,6 +8,7 @@ import { PERIOD_BUCKETS, type PeriodBucketKey } from '../../lib/notice-period.ts
 import { recencyCutoffIso } from '../../lib/notice-recency.ts';
 import type { NoticeSortKey } from '../../lib/notice-sort.ts';
 import { deriveCategoryTags } from '../../lib/categories.ts';
+import { deriveNoticeGenre, genreDecisionWins, type GenreEvidenceKind } from '../../lib/notice-genre.ts';
 import { agencyKeysOf, canonicalAgency, splitAgencies } from '../../lib/agencies.ts';
 import {
   safeParseJson,
@@ -512,8 +513,21 @@ export async function listAllNoticesForReindex(): Promise<NoticeRecord[]> {
 export async function upsertNotice(input: UpsertNoticeInput): Promise<'inserted' | 'updated'> {
   const db = await getDb();
   const categoryTags = input.categoryTags ?? deriveCategoryTags(input.title, input.bodyText);
+  // 体裁（issue #76）：入库时先按标题 + 附件名判一次，摘要管线据此选模板。
+  // 附件正文那一路更强的证据要等抽取任务，由 markNoticeGenreFromAttachments 补上来。
+  const genre = deriveNoticeGenre({
+    title: input.title,
+    attachmentNames: input.attachments.map((attachment) => attachment.name),
+  });
   const existing = await db
-    .select({ id: notices.id, title: notices.title, agency: notices.agency })
+    .select({
+      id: notices.id,
+      title: notices.title,
+      agency: notices.agency,
+      genre: notices.genre,
+      genreBasis: notices.genreBasis,
+      genreEvidence: notices.genreEvidence,
+    })
     .from(notices)
     .where(eq(notices.url, input.url))
     .limit(1);
@@ -532,6 +546,14 @@ export async function upsertNotice(input: UpsertNoticeInput): Promise<'inserted'
         bodyText: input.bodyText,
         attachmentsJson: JSON.stringify(input.attachments),
         fetchedAt: input.fetchedAt,
+        // 弱证据不许覆盖强证据：抽取任务可能已把这条升级成正文级的修正案判定，
+        // 无条件重写会让两个 job 来回拉扯，读者看到的摘要形态跟着抖。
+        ...(genreDecisionWins(
+          genre.evidence,
+          existing[0].genreEvidence as GenreEvidenceKind | null | undefined,
+        )
+          ? { genre: genre.genre, genreBasis: genre.basis, genreEvidence: genre.evidence }
+          : {}),
         // first_seen_at 刻意不在更新分支里写：它是"这条什么时候第一次进库"，
         // 更新时改写它就等于把老条目重新变成"新公示"，通知会天天重发。
       })
@@ -560,6 +582,9 @@ export async function upsertNotice(input: UpsertNoticeInput): Promise<'inserted'
     bodyText: input.bodyText,
     attachmentsJson: JSON.stringify(input.attachments),
     fetchedAt: input.fetchedAt,
+    genre: genre.genre,
+    genreBasis: genre.basis,
+    genreEvidence: genre.evidence,
     // 首次收录时间：只在这一行被创建时写入（issue #60 第 3 刀）
     firstSeenAt: input.fetchedAt,
   });
@@ -615,6 +640,9 @@ function toNoticeRecord(row: typeof notices.$inferSelect): NoticeRecord {
     summaryModel: row.summaryModel,
     fetchedAt: row.fetchedAt,
     firstSeenAt: row.firstSeenAt,
+    genre: row.genre as NoticeRecord['genre'],
+    genreBasis: row.genreBasis,
+    genreEvidence: row.genreEvidence as NoticeRecord['genreEvidence'],
     outboundClicks: row.outboundClicks,
     versionOf: row.versionOf,
     versionSeq: row.versionSeq,
@@ -632,4 +660,83 @@ function parseAttachments(text: string): NoticeAttachment[] {
       return { name: record.name, url: record.url };
     })
     .filter((item): item is NoticeAttachment => item !== null);
+}
+
+/**
+ * 存量体裁回填（issue #76）。判据与生产路径完全同一份（`deriveNoticeGenre` +
+ * `genreDecisionWins`），这里只负责"取数 + 是否写库"。
+ *
+ * 一条刻意的不对称：**已判定过的条目只有在新证据更强时才改写**。否则回填脚本每跑一次
+ * 就会把按附件正文升级成"修正案"的条目降回按标题判的结果，摘要模板天天抖。
+ */
+export async function backfillNoticeGenres(options: { apply: boolean }): Promise<{
+  total: number;
+  changed: number;
+  skipped: number;
+  unknown: number;
+  byGenre: Record<string, number>;
+  samples: { id: string; from: string | null; to: string; basis: string; title: string }[];
+}> {
+  const db = await getDb();
+  const rows = await db
+    .select({
+      id: notices.id,
+      title: notices.title,
+      attachmentsJson: notices.attachmentsJson,
+      genre: notices.genre,
+      genreBasis: notices.genreBasis,
+      genreEvidence: notices.genreEvidence,
+    })
+    .from(notices);
+  const files = await db
+    .select({
+      noticeId: noticeAttachments.noticeId,
+      name: noticeAttachments.name,
+      extractedText: noticeAttachments.extractedText,
+    })
+    .from(noticeAttachments);
+  const byNotice = new Map<string, { names: string[]; texts: string[] }>();
+  for (const file of files) {
+    const bucket = byNotice.get(file.noticeId) ?? { names: [], texts: [] };
+    bucket.names.push(file.name ?? '');
+    bucket.texts.push(file.extractedText ?? '');
+    byNotice.set(file.noticeId, bucket);
+  }
+  const byGenre: Record<string, number> = {};
+  const samples: { id: string; from: string | null; to: string; basis: string; title: string }[] = [];
+  let changed = 0;
+  let skipped = 0;
+  for (const row of rows) {
+    const bucket = byNotice.get(row.id) ?? { names: [], texts: [] };
+    const decision = deriveNoticeGenre({
+      title: row.title,
+      attachmentNames: bucket.names,
+      attachmentText: bucket.texts.join(' '),
+    });
+    byGenre[decision.genre] = (byGenre[decision.genre] ?? 0) + 1;
+    const storedEvidence = row.genreEvidence as GenreEvidenceKind | null;
+    if (row.genre !== null && !genreDecisionWins(decision.evidence, storedEvidence)) {
+      skipped += 1;
+      continue;
+    }
+    if (row.genre === decision.genre && row.genreBasis === decision.basis) continue;
+    changed += 1;
+    if (samples.length < 400) {
+      samples.push({ id: row.id, from: row.genre, to: decision.genre, basis: decision.basis, title: row.title });
+    }
+    if (options.apply) {
+      await db
+        .update(notices)
+        .set({ genre: decision.genre, genreBasis: decision.basis, genreEvidence: decision.evidence })
+        .where(eq(notices.id, row.id));
+    }
+  }
+  return {
+    total: rows.length,
+    changed,
+    skipped,
+    unknown: byGenre.unknown ?? 0,
+    byGenre,
+    samples,
+  };
 }

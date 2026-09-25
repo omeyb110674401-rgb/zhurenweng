@@ -3,6 +3,7 @@ import {
   listEligibleAttachments,
   listNoticesForAttachmentExtraction,
   markAttachmentResult,
+  refreshNoticeGenreFromAttachments,
   syncAttachmentManifest,
 } from '../../src/db/repo/attachments.ts';
 import type {
@@ -541,6 +542,13 @@ export const extractAttachmentsJob: Job = {
           tally.byStatus.set('error', (tally.byStatus.get('error') ?? 0) + 1);
           ctx.logger(`  附件处理异常（跳过该文件）：${candidate.url.slice(0, 90)} —— ${errorMessage(error)}`);
         }
+      }
+      // 本轮抽过正文的条目顺带重算体裁（issue #76）：修正案与新案要走不同的摘要模板，
+      // 而"改了哪几处"这条判据只在正文里。失败不带走整轮 —— 判定晚了下一轮还会再来。
+      try {
+        await refreshNoticeGenreFromAttachments(manifest.id);
+      } catch (error) {
+        ctx.logger(`  体裁重算失败（留到下轮）：${manifest.id} —— ${errorMessage(error)}`);
       }
     }
 

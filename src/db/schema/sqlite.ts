@@ -86,6 +86,19 @@ export const notices = sqliteTable('notices', {
    * 这样任何订阅者都不可能被历史条目轰炸（尤其是一个老邮箱刚确认订阅就收到 187 封的场景）。
    */
   firstSeenAt: text('first_seen_at'),
+  /**
+   * 体裁（issue #76）：amendment 修正案 / new_draft 新案草案 / package_plan 打包清单 /
+   * list_or_result 名单结果 / unknown 未判定。摘要管线按它选模板 —— 读者对修正案要的是
+   * "改了哪几处、为什么、影响谁"，对新案要的才是"每章每条规定了什么"，一套提示词服务两种
+   * 需求只会两边都不到位。判据与优先级见 src/lib/notice-genre.ts。
+   * NULL = 本列上线前的存量（没判定过），不等于 unknown。
+   */
+  genre: text('genre'),
+  /** 凭什么这么判（一句人话，后台展示用）：不许留一个看不出依据的字段，见 #58 删「调度配置」 */
+  genreBasis: text('genre_basis'),
+  /** 判定用的证据种类（none/title/attachment_names/attachment_text）：弱证据不许覆盖强证据，
+   *  否则抓取每轮重写标题会把抽取任务刚升级的判定降回去（详见 src/lib/notice-genre.ts） */
+  genreEvidence: text('genre_evidence'),
   /** 出站提意点击数（北极星指标） */
   outboundClicks: integer('outbound_clicks').notNull().default(0),
   /**

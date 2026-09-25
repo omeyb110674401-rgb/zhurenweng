@@ -15,6 +15,7 @@ import { parseQuotedSummary } from '@/lib/summary-content';
 import { summaryDisplayState } from '@/lib/summary-display';
 import { buildNoticeJsonLd, serializeJsonLd } from '@/lib/notice-jsonld';
 import { effectiveStatus } from '@/lib/notice-status';
+import { GENRE_LABELS } from '@/lib/notice-genre';
 import { llmReady } from '@/lib/llm-availability';
 import { mailerReady } from '@/lib/mailer-availability';
 import { OG_IMAGE } from '@/lib/page-metadata';
@@ -169,6 +170,16 @@ export default async function NoticeDetailPage({ params }: NoticeDetailPageProps
           <div className="detail-badges">
             <StatusBadge status={status} />
             <Countdown notice={notice} now={new Date()} />
+            {/*
+             * 体裁角标（issue #76）。放在详情页而不是只存库里：读者得知道自己正在读的是
+             * "一份改现行的修正案"还是"一部新起草的规定"——这两种公告该看的重点不一样，
+             * 而摘要的形态也正因为如此才不同。未判定不显示（没有信息量的角标只会占位置）。
+             */}
+            {notice.genre !== null && notice.genre !== 'unknown' ? (
+              <span className="genre-badge" data-testid="notice-genre-badge">
+                {GENRE_LABELS[notice.genre]}
+              </span>
+            ) : null}
           </div>
           <h1 className="detail-title">{notice.title}</h1>
           <dl className="detail-fields" data-testid="notice-fields">

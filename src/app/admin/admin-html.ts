@@ -1,4 +1,5 @@
-import type { SourceRecord } from '@/db/types';
+import type { SourceRecord } from '@/db/types';import { GENRE_LABELS, type NoticeGenre } from '../../lib/notice-genre.ts';
+
 import type { ReviewQueueItem } from '@/db/repo/summaries';
 import { SOURCE_UNHEALTHY_AFTER_CONSECUTIVE_FAILURES } from '@/lib/source-health';
 
@@ -228,6 +229,7 @@ function reviewItem(item: ReviewQueueItem): string {
     `<p><a data-testid="review-item-link" href="/notices/${escapeHtml(item.id)}">${escapeHtml(item.title)}</a></p>`,
     `<p class="muted">发布机关：${escapeHtml(item.agency)} · 源：${escapeHtml(item.sourceId)} · 状态：${escapeHtml(item.status)} · 截止：${item.deadlineAt ? escapeHtml(item.deadlineAt) : DASH}</p>`,
     `<p class="muted">原文：<a href="${escapeHtml(item.url)}">${escapeHtml(item.url)}</a></p>`,
+    `<p class="muted">体裁：${item.genre ? escapeHtml(GENRE_LABELS[item.genre as NoticeGenre] ?? item.genre) : DASH}${item.genreBasis ? ` ｜ 依据：${escapeHtml(item.genreBasis)}` : ''}</p>`,
     `<form method="post" action="/admin/review" class="inline">`,
     `<input type="hidden" name="noticeId" value="${escapeHtml(item.id)}">`,
     `<input type="hidden" name="action" value="reset">`,

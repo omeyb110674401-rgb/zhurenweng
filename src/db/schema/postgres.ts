@@ -75,6 +75,17 @@ export const notices = pgTable('notices', {
    * NULL = 本次上线之前就收录 ⇒ 新公示通知一律不覆盖它（否则刚确认的老邮箱会被历史条目轰炸）。
    */
   firstSeenAt: text('first_seen_at'),
+  /**
+   * 体裁（issue #76）：amendment / new_draft / package_plan / list_or_result / unknown。
+   * 摘要管线按它选模板（修正案要"改了哪几处 + 影响"，新案才逐条概括），
+   * 判据与优先级见 src/lib/notice-genre.ts。NULL = 本列上线前的存量，没判定过。
+   */
+  genre: text('genre'),
+  /** 凭什么这么判（一句人话，后台展示用）：不许留一个看不出依据的字段，见 #58 删「调度配置」 */
+  genreBasis: text('genre_basis'),
+  /** 判定用的证据种类（none/title/attachment_names/attachment_text）：弱证据不许覆盖强证据，
+   *  否则抓取每轮重写标题会把抽取任务刚升级的判定降回去（详见 src/lib/notice-genre.ts） */
+  genreEvidence: text('genre_evidence'),
   /** 出站提意点击数（北极星指标） */
   outboundClicks: integer('outbound_clicks').notNull().default(0),
   /**
