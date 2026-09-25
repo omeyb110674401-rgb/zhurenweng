@@ -105,7 +105,11 @@ npm test               # 等价命令：依次跑上面两层
 `signal: AbortSignal.timeout(...)` 被撤掉了）。现在这个状态会在门的入口被报出来并给出
 还原命令：`node scripts/check-test-pins.mjs --recover-only`。
 **跑 `check-test-pins.mjs` 本身要留足超时** —— 它要为上百条用例逐个撤实现再跑测试，
-远超两分钟。验证**单条** pin 用 `--only <label 里的子串>`：它只跑匹配的几条，
+**实测约 120 秒**（三次量测都在这个量级）。⚠ 这个数比看起来要命：第一次跑到一半被杀掉的
+超时**正好也是 120s** —— 卡在边界上等于抛硬币，跑得完就没事，差一秒就把假代码留在工作区。
+**别把超时设在这个值附近。** 以上是在 `.next` 已建好的前提下量的，冷树下指向 e2e 的
+那几条没测过。
+验证**单条** pin 用 `--only <label 里的子串>`：它只跑匹配的几条，
 结论行会写明"**不是**全套的 N 条"（所以不能拿它声称"N/N 全绿"）。
 被强杀留下留痕时先 `--recover-only` 还原。详情见 `docs/pending-issues/FOLLOWUPS.md`
 与 `scripts/check-test-pins.mjs` 的头部注释。
