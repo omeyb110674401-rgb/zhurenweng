@@ -1,5 +1,9 @@
 import type { ReactNode } from 'react';
-import { CHANGE_KIND_LABELS, changeCoverageVerdict } from '@/lib/amendment-coverage';
+import {
+  CHANGE_KIND_LABELS,
+  changeCoverageVerdict,
+  explanationCoverageVerdict,
+} from '@/lib/amendment-coverage';
 
 import { safeParseJson, type NoticeRecord } from '@/db/types';
 import {
@@ -234,6 +238,47 @@ export function SummaryView({
             )}
           </div>
         ) : null}
+        {(() => {
+          /*
+           * 编制说明要点（issue #76 第 3 刀）。
+           *
+           * 为什么单独一块而不是并进"条文要点"：说明是解释性文件，讲的是为什么制定、
+           * 依据什么、主要改了什么、向谁征求意见；把它的句子标成"摘自官方原文的条文"
+           * 就是让读者拿解释当规定读。所以这里按说明自己的小节列出，每条带出处，
+           * 且引用反查只在说明类附件里做（见 buildQuotedSummary 的段落隔离）。
+           */
+          const points = summary.explanationPoints;
+          if (points.length === 0) return null;
+          return (
+            <div className="summary-section" data-testid="summary-explanations">
+              <h2 className="summary-section-title">编制说明要点</h2>
+              {summary.explanationSections !== null ? (
+                <p className="summary-section-note" data-testid="summary-explanation-coverage">
+                  {explanationCoverageVerdict(points.length, summary.explanationSections).detail}
+                </p>
+              ) : null}
+              <ul className="summary-points">
+                {points.map((point, index) => (
+                  <li key={index}>
+                    {point.heading ? (
+                      <p className="explanation-heading" data-testid="summary-explanation-heading">
+                        {point.heading}
+                      </p>
+                    ) : null}
+                    <p className="summary-section-text">{point.text}</p>
+                    <SectionQuote notice={notice} quote={point.quote} href={point.sourceUrl ?? undefined} />
+                    <p className="draft-point-source" data-testid="summary-explanation-source">
+                      {point.source
+                        ? `出处：说明附件《${point.source}》（本站从附件逐字提取，未做改写）`
+                        : '出处：未标注（这条的引用没能反查到本轮喂入的说明）'}
+                    </p>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          );
+        })()}
+
         <SectionBlock
           notice={notice}
           label="截止日期"

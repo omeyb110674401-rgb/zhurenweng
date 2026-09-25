@@ -1,7 +1,14 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import type { AmendmentChangeDraft, LlmPort, LlmSummarizeInput, StructuredSummary } from '../../ports.ts';
+import type {
+  AmendmentChangeDraft,
+  AmendmentExplanationDraft,
+  LlmPort,
+  LlmSummarizeInput,
+  StructuredSummary,
+} from '../../ports.ts';
 import { AMENDMENT_TEXT_MARKERS } from '../../notice-genre.ts';
+import { explanationSectionLines } from '../../amendment-coverage.ts';
 import type { QuotedStructuredSummary, SummaryQuotes } from '../../summary-content.ts';
 
 /**
@@ -141,6 +148,22 @@ export class StubLlm implements LlmPort {
         quote: item.line,
       }));
       summary.changes = changes;
+    }
+    // 说明小节（issue #76 第 3 刀）：只从 role=explanation 的附件里取，quote 直接用该小节
+    // 标题那一行（逐字）—— 于是"说明要点必须能在说明里反查到"这条不变量在测试里走真路径。
+    const explained = draft.filter((source) => source.role === 'explanation');
+    if (explained.length > 0) {
+      const points: AmendmentExplanationDraft[] = [];
+      for (const source of explained) {
+        for (const heading of explanationSectionLines(source.text).slice(0, 6)) {
+          points.push({
+            heading,
+            text: `【stub】小节「${heading}」的主要内容（固定测试文案）。`,
+            quote: heading,
+          });
+        }
+      }
+      if (points.length > 0) summary.explanationPoints = points;
     }
     return summary;
   }

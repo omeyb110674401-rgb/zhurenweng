@@ -1,5 +1,6 @@
-import type { LlmPort, StructuredSummary, SummaryChannel, SummaryChannelKind } from './ports.ts';
+
 import type { ChangeKind, ChangeMarkerCount } from './amendment-coverage.ts';
+import type { LlmPort, StructuredSummary, SummaryChannel, SummaryChannelKind } from './ports.ts';
 
 /**
  * AI 摘要的领域形状（issue #4 建立，issue #55 重构为「参与导引」口径）——
@@ -91,6 +92,22 @@ export interface QuotedDraftPoint extends SummarySection {
  * `clause` / `kind` / `text` 是模型对着那句话写下的说明：它们本身不可逐字核对，
  * 因此页面把三者与出处排在一起给读者对照，而不是让说明脱离原文单独成立。
  */
+/**
+ * 一条编制说明要点（issue #76 第 3 刀）。
+ *
+ * 与条文要点的关键区别：它的出处**只能是说明类附件**。条文里的话不能用来
+ * "概括说明"，说明里的话也不能当作"规定本身"落进 keyPoints / changes ——
+ * 段落隔离由 `buildQuotedSummary` 按 role 分别反查来保证，不依赖模型听话。
+ */
+export interface QuotedExplanationPoint {
+  /** 该小节自己的标题，照抄原文 */
+  heading: string;
+  text: string;
+  quote: string;
+  source: string | null;
+  sourceUrl: string | null;
+}
+
 export interface QuotedAmendmentChange {
   /** 被改条款标识（照抄原文写法） */
   clause: string;
@@ -116,6 +133,10 @@ export interface QuotedSummary {
   keyPoints: QuotedDraftPoint[];
   /** 修正案改动点（issue #76）：只有体裁判为修正案且引用能逐字反查到才会有内容 */
   changes: QuotedAmendmentChange[];
+  /** 编制说明要点（issue #76 第 3 刀）：引用只能来自说明类附件 */
+  explanationPoints: QuotedExplanationPoint[];
+  /** 说明全文里检测到的小节数（覆盖度那行的分母，带"约"）；null = 没喂说明 */
+  explanationSections: number | null;
 /** 正文里检测到的改动表述计数：页面那行"共检测到 N 处、本页列出 M 处"的分母 */
   changeMarkers: ChangeMarkerCount | null;
   /** deadline.text 为 ISO 日期（YYYY-MM-DD）或 null */
@@ -237,9 +258,15 @@ export function findDraftSourceForQuote<T extends { name: string; url: string; t
 export function buildQuotedSummary(
   summary: StructuredSummary,
   quotes?: SummaryQuotes,
-  draftSources?: { name: string; url: string; text: string }[],
-  changeMarkers?: ChangeMarkerCount | null,
+  draftSources?: { name: string; url: string; text: string; role?: 'draft' | 'explanation' | 'other' }[],
+changeMarkers?: ChangeMarkerCount | null,
+explanationSections?: number | null,
 ): QuotedSummary {
+  // 段落隔离（issue #76 第 3 刀）：条文侧的引用只在条文里反查，说明侧只在说明里。
+  // 不这么做，"摘自官方原文"这句话就会被一句其实来自编制说明的话撑起 ——
+  // 那是对规定的解释，不是规定本身，读者按"条文"去读会读错。
+  const draftSide = (draftSources ?? []).filter((source) => source.role !== 'explanation');
+  const explanationSide = (draftSources ?? []).filter((source) => source.role === 'explanation');
   const rawPoints = Array.isArray(summary.keyPoints) ? summary.keyPoints : [];
   const quotePoints = Array.isArray(quotes?.keyPoints) ? (quotes.keyPoints as (string | null)[]) : [];
   const text = (value: unknown): string =>
@@ -250,7 +277,7 @@ export function buildQuotedSummary(
     const pointText = text(point);
     if (pointText === '') return;
     const quote = cleanQuote(quotePoints[index]);
-    const source = findDraftSourceForQuote(quote, draftSources);
+    const source = findDraftSourceForQuote(quote, draftSide);
     // 反查不到 ⇒ 这条要点没有可核对的出处（模型改写了原文，或从公告壳里"提炼"出条文）。
     // 丢弃而不是照登：详情页那句「摘自官方原文」不该为一条核对不上的话背书。
     if (source === null) return;
@@ -263,7 +290,9 @@ export function buildQuotedSummary(
     whoCanSubmit: { text: text(summary.whoCanSubmit), quote: cleanQuote(quotes?.whoCanSubmit) },
     afterDeadline: { text: text(summary.afterDeadline), quote: cleanQuote(quotes?.afterDeadline) },
     keyPoints,
-    changes: buildChanges(summary, draftSources),
+changes: buildChanges(summary, draftSide),
+explanationPoints: buildExplanationPoints(summary, explanationSide),
+explanationSections: explanationSections ?? null,
     changeMarkers: changeMarkers ?? null,
     deadline: {
       text:
@@ -283,7 +312,7 @@ export function buildQuotedSummary(
  */
 function buildChanges(
   summary: StructuredSummary,
-  draftSources: { name: string; url: string; text: string }[] | undefined,
+  draftSide: { name: string; url: string; text: string }[] | undefined,
 ): QuotedAmendmentChange[] {
   const raw = Array.isArray(summary.changes) ? summary.changes : [];
   const out: QuotedAmendmentChange[] = [];
@@ -294,7 +323,7 @@ function buildChanges(
     const pointText = typeof change.text === 'string' ? change.text.trim() : '';
     const clause = typeof change.clause === 'string' ? change.clause.trim() : '';
     if (quote === null || pointText === '') continue;
-    const source = findDraftSourceForQuote(quote, draftSources);
+    const source = findDraftSourceForQuote(quote, draftSide);
     if (source === null) continue;
     const kind = typeof change.kind === 'string' ? change.kind : '';
     out.push({
@@ -310,6 +339,45 @@ function buildChanges(
   }
   return out;
 }
+
+/** 说明要点：引用必须落在说明类附件里；小节标题没抄对也保留（不影响可核对性）。 */
+function buildExplanationPoints(
+  summary: StructuredSummary,
+  explanationSources: { name: string; url: string; text: string; role?: 'draft' | 'explanation' | 'other' }[],
+): QuotedExplanationPoint[] {
+  const raw = Array.isArray(summary.explanationPoints) ? summary.explanationPoints : [];
+  const out: QuotedExplanationPoint[] = [];
+  for (const item of raw) {
+    if (typeof item !== 'object' || item === null) continue;
+    const point = item as unknown as Record<string, unknown>;
+    const quote = cleanQuote(typeof point.quote === 'string' ? point.quote : '');
+    const text = typeof point.text === 'string' ? point.text.trim() : '';
+    const heading = typeof point.heading === 'string' ? point.heading.trim() : '';
+    if (quote === null || text === '') continue;
+    const source = findDraftSourceForQuote(quote, explanationSources);
+    if (source === null) continue;
+    out.push({ heading, text, quote, source: source.name, sourceUrl: source.url });
+  }
+  return out;
+}
+
+/** 落库的说明要点数组 → 内存形状（旧行没这个字段 ⇒ 空数组，不算形状异常） */
+function parseStoredExplanationPoints(value: unknown): QuotedExplanationPoint[] {
+  if (!Array.isArray(value)) return [];
+  const out: QuotedExplanationPoint[] = [];
+  for (const item of value) {
+    if (typeof item !== 'object' || item === null) continue;
+    const point = item as Record<string, unknown>;
+    const text = typeof point.text === 'string' ? point.text.trim() : '';
+    const quote = typeof point.quote === 'string' ? point.quote.trim() : '';
+    const heading = typeof point.heading === 'string' ? point.heading.trim() : '';
+    if (text === '' || quote === '') continue;
+    const source = typeof point.source === 'string' && point.source !== '' ? point.source : null;
+    const sourceUrl = typeof point.sourceUrl === 'string' && point.sourceUrl !== '' ? point.sourceUrl : null;
+    out.push({ heading, text, quote, source, sourceUrl });
+  }
+  return out;
+}
 
 /** 落库的改动点数组 → 内存形状（缺字段/类型不对的条目丢掉，不让一行脏数据打断整页渲染） */
 function parseStoredChanges(value: unknown): QuotedAmendmentChange[] {
@@ -427,7 +495,9 @@ export function parseQuotedSummary(value: unknown): QuotedSummary | null {
     keyPoints,
     // 改动点与覆盖度计数都是后加的字段：旧行没有 ⇒ 按"空 + 没数过"解析，
     // 不算形状异常（否则摘要重刷那段时间，存量条目会从"有摘要"掉回占位）。
-    changes: parseStoredChanges(record.changes),
+changes: parseStoredChanges(record.changes),
+explanationPoints: parseStoredExplanationPoints(record.explanationPoints),
+explanationSections: typeof record.explanationSections === 'number' ? record.explanationSections : null,
     changeMarkers: parseStoredMarkers(record.changeMarkers),
     deadline,
     howToComment,

@@ -1,5 +1,6 @@
 import type {
   AmendmentChangeDraft,
+  AmendmentExplanationDraft,
   DraftSource,
   LlmPort,
   LlmSummarizeInput,
@@ -70,7 +71,7 @@ const SYSTEM_PROMPT = [
   '重要背景：网页正文通常只是公告本身；草案条文、标准文本、名单在**附件**里，只有给了「附件条文」段落时你才真的看得到它们。',
   '因此：没有「附件条文」段落时，不要编写、推测或概括任何「条款内容」，只回答公告里真实存在的参与信息。',
   '请只输出一个 JSON 对象（不要输出任何解释、markdown 代码围栏或其他文字），字段如下：',
-  '{"what":"这是什么：一句话概括这份公示在做什么，40 字以内","who":"影响谁：只有原文明确写出受这份文件影响的主体时才写（如运输机场运营人、医疗器械注册人、标准起草单位）；原文只写「社会公众」「有关单位和个人」这类泛称时**留空字符串** —— 那是「谁能提」，不是「影响谁」。这类页面的正文通常不含受影响主体（它在附件的草案里），宁可留空也不要推断","whoCanSubmit":"谁能提：原文写明的可提出意见的主体或范围；原文未提及则留空字符串","afterDeadline":"逾期会怎样：原文写明超过截止日期后如何处理（如逾期视为无意见、不再受理）；原文未提及则留空字符串","keyPoints":["草案条文要点：仅当给出「附件条文」时填写，2-4 条从条文中读到的实质规定，每条一句话、40 字以内；没有附件条文段落时必须为空数组"],"changes":{"clause":"被改条款标识，照抄原文写法（如 第三条 / 附录A）","kind":"modify|add|delete|renumber|other","text":"这一处改了什么：一句话，40 字以内","quote":"描述这处改动的逐字原文，160 字以内"},"deadline":"截止日期：YYYY-MM-DD，原文未明确则为 null","howToComment":"如何提意见：一句话概述提交途径，40 字以内","channels":[{"kind":"email|phone|mail|online|other","value":"可直接使用的具体值"}],"quotes":{"what":"what 对应的原文引用片段（逐字摘录，不超过100字）","who":"who 对应的原文引用片段，留空时空字符串","whoCanSubmit":"谁能提对应的原文片段，没有则空字符串","afterDeadline":"逾期会怎样对应的原文片段，没有则空字符串","keyPoints":["与 keyPoints 一一对应的逐字条文原文，顺序严格一致，没有则为 null"],"deadline":"截止日期对应的原文引用片段","howToComment":"如何提意见对应的原文引用片段","channels":["每条渠道对应的原文片段，顺序与 channels 严格一致"]}}',
+  '{"what":"这是什么：一句话概括这份公示在做什么，40 字以内","who":"影响谁：只有原文明确写出受这份文件影响的主体时才写（如运输机场运营人、医疗器械注册人、标准起草单位）；原文只写「社会公众」「有关单位和个人」这类泛称时**留空字符串** —— 那是「谁能提」，不是「影响谁」。这类页面的正文通常不含受影响主体（它在附件的草案里），宁可留空也不要推断","whoCanSubmit":"谁能提：原文写明的可提出意见的主体或范围；原文未提及则留空字符串","afterDeadline":"逾期会怎样：原文写明超过截止日期后如何处理（如逾期视为无意见、不再受理）；原文未提及则留空字符串","keyPoints":["草案条文要点：仅当给出「附件条文」时填写，2-4 条从条文中读到的实质规定，每条一句话、40 字以内；没有附件条文段落时必须为空数组"],"explanationPoints":[{"heading":"照抄说明里的小节标题（如 一、项目概况）","text":"这一节说了什么：一句话，60 字以内","quote":"这一节的逐字原文，200 字以内"}],"changes":[{"clause":"被改条款标识，照抄原文写法（如 第三条 / 附录A）","kind":"modify|add|delete|renumber|other","text":"这一处改了什么：一句话，40 字以内","quote":"描述这处改动的逐字原文，160 字以内"}],"deadline":"截止日期：YYYY-MM-DD，原文未明确则为 null","howToComment":"如何提意见：一句话概述提交途径，40 字以内","channels":[{"kind":"email|phone|mail|online|other","value":"可直接使用的具体值"}],"quotes":{"what":"what 对应的原文引用片段（逐字摘录，不超过100字）","who":"who 对应的原文引用片段，留空时空字符串","whoCanSubmit":"谁能提对应的原文片段，没有则空字符串","afterDeadline":"逾期会怎样对应的原文片段，没有则空字符串","keyPoints":["与 keyPoints 一一对应的逐字条文原文，顺序严格一致，没有则为 null"],"deadline":"截止日期对应的原文引用片段","howToComment":"如何提意见对应的原文引用片段","channels":["每条渠道对应的原文片段，顺序与 channels 严格一致"]}}',
   '要求：',
   '1. 只依据给定原文，不编造、不猜测；原文没有的字段留空字符串或 null，宁可留空也不要凑。',
   '2. 引用必须是原文中的逐字连续片段。',
@@ -85,6 +86,7 @@ const SYSTEM_PROMPT = [
   '    官方通常把新旧写法写在同一句里（如「第三条修改为：……」「删去第七条」「增加一条，作为第X条」），照原句摘出来，不要重述成你自己的话；',
   '    只列你真在文本里看到的改动。附件可能被本站按字数预算截断，看不到的部分就**不要列**，也不要写「等」「主要修改内容如下」来掩盖缺口 ——',
   '     面会另给一行「正文里检测到 N 处修改表述，本页列出 M 处」，那个差值是本站读得不够，不是你漏写。',
+  '7. explanationPoints 只依据「编制说明」段落（说明讲为什么制定、依据什么、主要改了什么、向谁征求意见，不是规定本身）：heading 照抄该小节自己的标题，引用只能取自说明段落；keyPoints / changes 的引用只能取自条文段落 —— 本站按段落分别反查，串了整条丢弃。说明里没有分层小标题时输出空数组，不要自己造小节名。',
 ].join('\n');
 
 /** 已解析并校验通过的模型配置（工厂与门控共用）。 */
@@ -286,6 +288,7 @@ export function normalizeModelSummary(raw: unknown): QuotedStructuredSummary {
   // 那种错（keyPoints 的平行数组吃过这个亏）；形状不对的条目这里就丢掉，
   // 逐字反查不到出处由 buildQuotedSummary 负责丢弃。
   const changes = normalizeChanges(record.changes);
+  const explanationPoints = normalizeExplanationPoints(record.explanationPoints);
 
   const rawQuotes = readQuotes(record.quotes);
   // keyPoints 与它的引用必须**先按原始下标配好、再过滤空项** —— 这是 normalizeChannels
@@ -314,6 +317,7 @@ export function normalizeModelSummary(raw: unknown): QuotedStructuredSummary {
     afterDeadline: optionalText('afterDeadline'),
     ...(keyPoints.length > 0 ? { keyPoints } : {}),
     ...(changes.length > 0 ? { changes } : {}),
+    ...(explanationPoints.length > 0 ? { explanationPoints } : {}),
     deadline,
     howToComment,
     channels,
@@ -344,6 +348,26 @@ function normalizeChanges(value: unknown): AmendmentChangeDraft[] {
       text,
       quote,
     });
+  }
+  return out;
+}
+
+/** 一次摘要最多列几个说明小节（与改动点同理：超了就不是给人看的清单） */
+const MAX_EXPLANATION_POINTS = 24;
+
+/** 模型的说明小节 → 端口形状。缺 quote 或缺说明的一律不要（后面还要按说明段落反查）。 */
+function normalizeExplanationPoints(value: unknown): AmendmentExplanationDraft[] {
+  if (!Array.isArray(value)) return [];
+  const out: AmendmentExplanationDraft[] = [];
+  for (const item of value) {
+    if (out.length >= MAX_EXPLANATION_POINTS) break;
+    if (typeof item !== 'object' || item === null) continue;
+    const point = item as Record<string, unknown>;
+    const quote = typeof point.quote === 'string' ? point.quote.trim() : '';
+    const text = typeof point.text === 'string' ? point.text.trim() : '';
+    const heading = typeof point.heading === 'string' ? point.heading.trim() : '';
+    if (quote === '' || text === '') continue;
+    out.push({ heading, text, quote });
   }
   return out;
 }
@@ -391,9 +415,45 @@ function userPrompt(input: LlmSummarizeInput): string {
     '正文纯文本：',
     body.length > 0 ? body : '（未抓取到正文，仅能基于标题判断）',
     draftBlock(input.draftSources),
+    explanationBlock(input.draftSources),
   ]
     .filter((part) => part.length > 0)
     .join('\n');
+}
+
+/**
+ * 说明段落单独的字数预算（issue #76 第 3 刀）。
+ *
+ * 刻意不与条文共用一条预算：生产实测编制说明**中位 19,207 字**，而条文动辄上万，
+ * 共用时先被喂满的一定是排在前面的条文，说明永远只剩个开头 —— 那还不如不给它段落。
+ */
+const MAX_EXPLANATION_TOTAL_CHARS = 10_000;
+
+/**
+ * 「编制说明」段落（issue #76 第 3 刀）。
+ *
+ * 与「附件条文」分开成两段，是为了让**引用反查按段落隔离**：说明里的话不能当作规定
+ * 落进 keyPoints / changes，条文也不能冒充"说明里的解释"。角色由调用方按文件名判好
+ * 带在 DraftSource.role 上（见 src/lib/attachment-select.ts 的 attachmentRole）。
+ */
+export function explanationBlock(sources: DraftSource[] | undefined): string {
+  const usable = (sources ?? []).filter((item) => item.role === 'explanation' && item.text.trim().length > 0);
+  if (usable.length === 0) return '';
+  const parts: string[] = [
+    `编制说明（本站从该公示的官方附件中逐字提取，共 ${usable.length} 份。这是解释性文件，不是规定本身：讲为什么制定、依据什么、主要改了什么、向谁征求意见）：`,
+  ];
+  let left = MAX_EXPLANATION_TOTAL_CHARS;
+  usable.forEach((item, index) => {
+    const label = `【说明 ${index + 1}：${item.name}】`;
+    if (left <= 0) {
+      parts.push(`…（另有 ${usable.length - index} 份说明超出字数预算，未提供）`);
+      return;
+    }
+    const text = item.text.trim().slice(0, left);
+    left -= text.length;
+    parts.push(label, text);
+  });
+  return parts.join('\n');
 }
 
 /** 附件条文的总字符上限（最后一道防线：调用方已按字数预算截取，这里挡住把整份文档直接塞进来的调用）。 */
@@ -407,7 +467,7 @@ const MAX_DRAFT_TOTAL_CHARS = 24_000;
  * 占位文字会让「没给条文」和「给了空条文」看起来一样。
  */
 export function draftBlock(sources: DraftSource[] | undefined): string {
-  const usable = (sources ?? []).filter((item) => item.text.trim().length > 0);
+  const usable = (sources ?? []).filter((item) => item.text.trim().length > 0 && item.role !== 'explanation');
   if (usable.length === 0) return '';
   const parts: string[] = [
     `附件条文（本站从该公示的官方附件中逐字提取，共 ${usable.length} 份。这是草案正文本身，不是公告；只写你在这里确实读到的规定）：`,

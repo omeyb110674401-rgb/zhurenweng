@@ -399,13 +399,15 @@ export async function getNoticeAttachmentExtractReport(
  * 而喂给模型的那一截是按字数预算截过的（单份 8,000 字）。拿截过的窗口去数分母，
  * 漏在窗口外的部分永远不会出现在"还差多少"那句话里 —— 那个数字就成了自证。
  */
-export async function listNoticeAttachmentTexts(noticeId: string): Promise<string[]> {
+export async function listNoticeAttachmentTexts(
+  noticeId: string,
+): Promise<{ name: string; text: string }[]> {
   const db = await getDb();
   const rows = await db
-    .select({ extractedText: noticeAttachments.extractedText })
+    .select({ name: noticeAttachments.name, extractedText: noticeAttachments.extractedText })
     .from(noticeAttachments)
     .where(eq(noticeAttachments.noticeId, noticeId));
   return rows
-    .map((row) => row.extractedText)
-    .filter((text): text is string => typeof text === 'string' && text !== '');
+    .filter((row) => typeof row.extractedText === 'string' && row.extractedText !== '')
+    .map((row) => ({ name: row.name ?? '', text: row.extractedText as string }));
 }

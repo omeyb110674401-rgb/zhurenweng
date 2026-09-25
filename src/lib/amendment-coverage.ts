@@ -81,5 +81,51 @@ export function changeCoverageVerdict(listed: number, markers: ChangeMarkerCount
   };
 }
 
+/**
+ * 编制说明的"小节数"（issue #76 第 3 刀）：说明类文件自带分层标题
+ * （一、项目概况 / 1 编制背景 / （二）任务来源 / 第二章 …），数它们就是分母。
+ *
+ * 这是**启发式**，不是解析器：官方文件的层级写法不统一，数多了或少了都可能。
+ * 所以页面那句话要写成"检测到约 N 个小节标题"，不能写成"共 N 节"——
+ * 一个假装精确的数字比一个带"约"字的数字更坏。
+ */
+/**
+ * 说明类文件的分层小标题形状（issue #76 第 3 刀）。
+ *
+ * 只用字符类写，不用 \d \s 这类转义：这段正则要为"一、项目概况 / 1.2 任务来源 /
+ * （二）编制过程 / 第二章 必要性"四种官方写法各认一次，转义一多就容易在改的时候写错。
+ */
+const SECTION_HEAD_RE = /^ *(?:[一二三四五六七八九十]{1,3}[、.．]|[0-9]{1,2}([.][0-9]{1,2}){0,2}[、.． ]|[（(][一二三四五六七八九十]{1,3}[）)] *|第[一二三四五六七八九十]{1,3}[章节部分篇] *)[^ ].{0,40}$/;
+
+/** 说明里被认作小节标题的那些行（逐字）。计数与测试共用这一份判据。 */
+export function explanationSectionLines(text: string): string[] {
+  if (!text) return [];
+  return text
+    .split('\n')
+    .map((line) => line.trim())
+    .filter((line) => line.length > 1 && line.length <= 46 && SECTION_HEAD_RE.test(line));
+}
+
+export function countExplanationSections(text: string): number {
+  return explanationSectionLines(text).length;
+}
+
+/** 说明要点的覆盖度那句话（与改动点那条同构，但措辞带"约"，理由见上面的启发式说明）。 */
+export function explanationCoverageVerdict(
+  listed: number,
+  sections: number,
+): CoverageVerdict {
+  if (sections === 0) {
+    return { state: 'no_markers', detail: '未在这份说明里检测到分层小标题' };
+  }
+  if (listed >= sections) {
+    return { state: 'complete', detail: `已列出检测到的约 ${sections} 个小节` };
+  }
+  return {
+    state: 'partial',
+    detail: `这份说明检测到约 ${sections} 个小节，本页列出 ${listed} 个 —— 其余的不在本站读到的那一截里`,
+  };
+}
+
 /** 反查用得到的词表导出位（避免调用方各自抄一遍常量）。 */
 export { AMENDMENT_TEXT_MARKERS };

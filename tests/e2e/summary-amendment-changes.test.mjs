@@ -20,6 +20,25 @@ import Database from 'better-sqlite3';
  * 零外部依赖（ADR-0001）：临时 SQLite + stub LLM，不起 web、不出网。
  */
 
+const EXPLANATION_NAME = '某某法（修正草案征求意见稿）编制说明.docx';
+const EXPLANATION_URL = 'https://attachments.test/explain.docx';
+
+/** 说明正文：六个小节（分母就数它们），且含一句条文正文里没有的「现行许可制度…」。 */
+const EXPLANATION_TEXT = [
+  '一、修订的必要性',
+  '现行许可制度实施以来，申请材料重复提交的问题一直存在，基层反映办理周期偏长、跨地区互认困难，需要简化办理流程并明确各环节的时限要求与公开义务。',
+  '二、编制过程与依据',
+  '编制组系统梳理了有关现行法律与行政法规的规定，赴若干省份开展实地调研与座谈，书面征求主管部门、行业协会与专家的意见，在此基础上形成征求意见稿。',
+  '三、主要修改内容',
+  '增设一次性告知与限时办结要求，明确主管部门的公开义务，把监督检查结果纳入信用记录管理，并删除了实践中已无法执行的两项前置条件。',
+  '四、征求意见的范围与处理方式',
+  '本次公开征求意见面向各类经营主体与社会公众，收到的意见由编制组逐条研究，采纳情况在下次审议稿的说明中一并交代，未采纳的说明理由。',
+  '五、预期效果与实施安排',
+  '施行后预计办理材料可减少约三分之一，主管部门将同步公布配套的实施指南与问答，并对过渡期内已受理的申请按原规定继续办理完毕。',
+  '六、其他需要说明的问题',
+  '本标准与相关强制性标准的关系、涉及个人信息处理部分的衔接安排，已在附表中逐项列明，此处不再展开，相关条文以正文为准。',
+].join('\n');
+
 const AMENDED_ID = 'b'.repeat(32);
 const FRESH_ID = 'c'.repeat(32);
 const ATTACHMENT_NAME = '某某法（修正草案征求意见稿）.docx';
@@ -130,7 +149,10 @@ before(async () => {
     deadlineAt: '2026-11-30',
     status: 'open',
     bodyText: '现就该法修正草案公开征求意见，请于截止日期前反馈。',
-    attachments: [{ name: ATTACHMENT_NAME, url: ATTACHMENT_URL }],
+    attachments: [
+      { name: ATTACHMENT_NAME, url: ATTACHMENT_URL },
+      { name: EXPLANATION_NAME, url: EXPLANATION_URL },
+    ],
     fetchedAt: new Date().toISOString(),
   });
   await noticesRepo.upsertNotice({
@@ -147,24 +169,31 @@ before(async () => {
     fetchedAt: new Date().toISOString(),
   });
 
-  for (const [noticeId, url, text] of [
-    [AMENDED_ID, ATTACHMENT_URL, AMENDED_TEXT],
-    [FRESH_ID, FRESH_ATTACHMENT_URL, FRESH_TEXT],
-  ]) {
+  const FIXTURE_FILES = [
+    { noticeId: AMENDED_ID, name: ATTACHMENT_NAME, url: ATTACHMENT_URL, text: AMENDED_TEXT },
+    { noticeId: AMENDED_ID, name: EXPLANATION_NAME, url: EXPLANATION_URL, text: EXPLANATION_TEXT },
+    { noticeId: FRESH_ID, name: ATTACHMENT_NAME, url: FRESH_ATTACHMENT_URL, text: FRESH_TEXT },
+  ];
+  // 清单必须**按公示一次给全**：syncAttachmentManifest 会把本轮清单里没有的行撤下，
+  // 一个附件调一次就会把先写进去的那份正文删掉（我第一版踩在这里，表现为整条没喂进摘要）。
+  for (const noticeId of new Set(FIXTURE_FILES.map((file) => file.noticeId))) {
+    const files = FIXTURE_FILES.filter((file) => file.noticeId === noticeId);
     await attachmentsRepo.syncAttachmentManifest({
       noticeId,
-      attachments: [{ name: ATTACHMENT_NAME, url }],
+      attachments: files.map((file) => ({ name: file.name, url: file.url })),
       now: new Date(),
     });
-    await attachmentsRepo.markAttachmentResult(noticeId, url, {
-      status: 'ok',
-      kind: 'docx',
-      bytes: 4096,
-      contentHash: `e2e-${noticeId}`,
-      charCount: text.replace(/\s+/g, '').length,
-      extractedText: text,
-      fetchedAt: new Date(),
-    });
+    for (const file of files) {
+      await attachmentsRepo.markAttachmentResult(noticeId, file.url, {
+        status: 'ok',
+        kind: 'docx',
+        bytes: 4096,
+        contentHash: `e2e-${file.url}`,
+        charCount: file.text.replace(/\s+/g, '').length,
+        extractedText: file.text,
+        fetchedAt: new Date(),
+      });
+    }
   }
 
   logs = [];
@@ -186,6 +215,7 @@ describe('issue #76 第 2 刀：修正案改动点', () => {
   it('摘要里出现了改动点，每一行的原文都逐字来自附件正文', () => {
     const { json } = readSummary(AMENDED_ID);
     assert.ok(json, `摘要应落库，日志：${logs.join('\n').slice(-800)}`);
+    if (process.env.E2E_DEBUG) console.log('DEBUG json keys:', JSON.stringify(Object.keys(json)), 'keyPoints:', json.keyPoints.length, 'changes:', JSON.stringify(json.changes), 'expl:', JSON.stringify(json.explanationPoints), 'sections:', json.explanationSections);
     assert.ok(Array.isArray(json.changes) && json.changes.length > 0, '修正案应产出改动点');
     for (const change of json.changes) {
       assert.ok(change.quote.length > 0, '每行都要有逐字原文');
@@ -201,7 +231,8 @@ describe('issue #76 第 2 刀：修正案改动点', () => {
   it('覆盖度分母数的是全文，不是喂进去的那一截', async () => {
     const { countChangeMarkers } = await import('../../src/lib/amendment-coverage.ts');
     const { json } = readSummary(AMENDED_ID);
-    const expected = countChangeMarkers(AMENDED_TEXT);
+    // 分母数的是**这份公示全部附件正文**（草案 + 说明），不是只看草案那一份
+    const expected = countChangeMarkers(AMENDED_TEXT + ' ' + EXPLANATION_TEXT);
     assert.equal(json.changeMarkers.total, expected.total, '分母必须等于全文里数到的数量');
     assert.ok(
       json.changes.length <= expected.total,
@@ -221,6 +252,29 @@ describe('issue #76 第 2 刀：修正案改动点', () => {
     );
     assert.equal(json.changeMarkers, null, '没判成修正案就不该有覆盖度');
     assert.deepEqual(json.changes, []);
+  });
+
+  it('编制说明按自己的小节逐条落库，且引用只出自说明（段落隔离走真路径）', () => {
+    const { json } = readSummary(AMENDED_ID);
+    assert.ok(json.explanationPoints.length >= 2, `说明该有要点，实际 ${json.explanationPoints.length} 条`);
+    for (const point of json.explanationPoints) {
+      assert.equal(
+        containsVerbatim(EXPLANATION_TEXT, point.quote),
+        true,
+        `说明要点的引用必须出自说明，实际：${point.quote}`,
+      );
+      assert.equal(point.source, EXPLANATION_NAME, '出处要指向说明那份附件');
+      assert.ok(point.heading.length > 0, '小节标题要照抄说明自己的写法');
+    }
+    // 反方向也要成立：条文要点不能借说明里的句子（那句"现行许可制度…"只在说明里）
+    for (const point of json.keyPoints) {
+      assert.equal(
+        containsVerbatim(AMENDED_TEXT, point.quote),
+        true,
+        `条文要点必须出自条文正文，实际：${point.quote}`,
+      );
+    }
+    assert.equal(json.explanationSections, 6, '分母按说明全文数出的小节数');
   });
 
   it('抽取任务按正文把弱证据判定升级（标题没说修正、正文说了）', async () => {

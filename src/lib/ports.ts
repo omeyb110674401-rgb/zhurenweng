@@ -71,8 +71,27 @@ export interface StructuredSummary {
    * 与 keyPoints 同一条不变量：页面上出现的每一处改动，都得是本站真的读到的原话。
    */
   changes?: AmendmentChangeDraft[];
+  /**
+   * 编制说明要点（issue #76 第 3 刀）：按说明**自己的小节**逐节概括，
+   * 引用只能来自「编制说明」段落。
+   */
+  explanationPoints?: AmendmentExplanationDraft[];
 }
 
+/**
+ * 模型给出的一条编制说明要点：小节标题照抄原文，`quote` 是该节的逐字原文。
+ *
+ * 刻意**不套"为什么制定 / 依据 / 主要内容 / 征求范围"四个固定框** —— 官方说明的层级
+ * 写法各不相同，固定框会逼模型往空框里填话，那正是 #55/#56 删掉的那类编造。
+ */
+export interface AmendmentExplanationDraft {
+  /** 该小节自己的标题，照抄（如「一、项目概况」「1.2 编制过程」） */
+  heading: string;
+  /** 这一节说了什么：一句话，60 字以内 */
+  text: string;
+  /** 该节的逐字原文（不超过 200 字） */
+  quote: string;
+}
 /**
  * 模型给出的一处改动。
  *
@@ -101,6 +120,12 @@ export interface DraftSource {
   name: string;
   url: string;
   text: string;
+  /**
+   * 这份附件扮演的角色（issue #76 第 3 刀）：条文本身，还是对条文的解释性文件。
+   * 缺省按 draft 处理（旧调用方与影子档不必改），但它**决定内容能落到哪个字段**：
+   * 条文的引用只能进 keyPoints / changes，说明的引用只能进 explanationPoints。
+   */
+  role?: 'draft' | 'explanation' | 'other';
 }
 
 export interface LlmSummarizeInput {

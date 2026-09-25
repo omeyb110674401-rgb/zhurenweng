@@ -197,6 +197,13 @@ body {
   color: var(--muted);
 }
 
+/* 说明的小节标题（issue #76 第 3 刀）：它是原文照抄的层级名，要比正文重一点，
+   但不能抢"要点说明"那句话的注意力，所以只加粗不放大。 */
+.explanation-heading {
+  margin: 8px 0 2px;
+  font-weight: 600;
+}
+
 .status-open {
   color: #166534;
   background: #dcfce7;

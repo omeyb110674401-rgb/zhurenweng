@@ -949,6 +949,30 @@ const CASES = [
     pattern: 'issue #76 第 2 刀：修正案改动点',
     test: 'tests/e2e/summary-amendment-changes.test.mjs',
   },
+  {
+    label: '条文与说明共用一个反查池（说明里的话会被标成"摘自条文的原文"）',
+    file: 'summaryContent',
+    from: "  const draftSide = (draftSources ?? []).filter((source) => source.role !== 'explanation');",
+    to: '  const draftSide = draftSources ?? [];',
+    pattern: 'issue #76 第 3 刀：段落隔离',
+    test: 'tests/unit/explanation-points.test.mjs',
+  },
+  {
+    label: '说明要点也允许引用条文段落（解释与规定混成一片）',
+    file: 'summaryContent',
+    from: "  const explanationSide = (draftSources ?? []).filter((source) => source.role === 'explanation');",
+    to: '  const explanationSide = draftSources ?? [];',
+    pattern: 'issue #76 第 3 刀：段落隔离',
+    test: 'tests/unit/explanation-points.test.mjs',
+  },
+  {
+    label: '说明要点缺引用/缺说明也落库（页面出现无从核对的小节）',
+    file: 'summaryContent',
+    from: "    if (quote === null || text === '') continue;",
+    to: '    if (false) continue;',
+    pattern: 'issue #76 第 3 刀：段落隔离',
+    test: 'tests/unit/explanation-points.test.mjs',
+  },
 ];
 
 let red = 0;
