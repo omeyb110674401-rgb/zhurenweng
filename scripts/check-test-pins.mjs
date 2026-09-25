@@ -65,6 +65,7 @@ const TARGETS = {
   compose: 'docker-compose.yml',
   dailyBackup: 'deploy/daily-backup.sh',
   alertBackup: 'scripts/alert-backup-failure.mjs',
+  pipelineHealth: 'src/lib/pipeline-health.ts',
   journalPg: 'drizzle/postgres/meta/_journal.json',
   journalSqlite: 'drizzle/sqlite/meta/_journal.json',
   // 本脚本自己：它改写工作区源码，所以"崩了能不能自愈"和任何一处实现同样需要钉住
@@ -795,6 +796,22 @@ const CASES = [
     to: "    .set({ aiSummaryJson: null, summaryStatus: 'pending' })",
     pattern: 'issue #67：clearSummaryForRedraft',
     test: 'tests/e2e/summary-redraft.test.mjs',
+  },
+  {
+    label: '探针没看到备份目录也报健康（把"我不知道"折叠成"没问题"）',
+    file: 'pipelineHealth',
+    from: '  if (!input.seenDir) {',
+    to: '  if (false) {',
+    pattern: 'issue #74：备份产物判据',
+    test: 'tests/unit/pipeline-health.test.mjs',
+  },
+  {
+    label: '备份新鲜度不看阈值（永远 ok ⇒ #68 那种"整天没备份"再也不会响）',
+    file: 'pipelineHealth',
+    from: "    verdict: input.newestAgeHours <= BACKUP_MAX_AGE_HOURS ? 'ok' : 'fail',",
+    to: "    verdict: 'ok',",
+    pattern: 'issue #74：备份产物判据',
+    test: 'tests/unit/pipeline-health.test.mjs',
   },
   {
     label: '每日备份的安装片段丢掉 CRON_TZ=UTC（`30 19` 就变成北京时间，备份静默不跑）',
