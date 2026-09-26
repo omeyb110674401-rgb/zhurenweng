@@ -14,7 +14,9 @@ import Database from 'better-sqlite3';
  * 头注的规则 1），所以排序与筛选的 SQL 实现必须由这份从源码执行的测试来钉。
  *
  * 丁 / 戊 / 丙 三行分别钉住三件容易写错的事：
- * - 丁：库里 `status='open'` 但截止日已过 → 「只看未截止」要按**展示口径**排掉它；
+ * - 丁：库里 `status='open'` 但截止日已过 → **既**要被「只看未截止」按展示口径排掉（issue #62），
+ *   **也**不能被默认排序当成"还能提意见"摆上头屏（issue #79：生产实测头屏 9 条已截止）。
+ *   这两件事必须一起钉：只修筛选不改排序的话，首页第一屏仍然是一堆提不了意见的条目；
  * - 戊：`first_seen_at` 为 NULL（迁移 0013 之前的存量）→ 「最近新增」不能把它算进来；
  * - 丙：**今天被重新抓过**（`fetched_at` = 现在）但 40 天前就收录了 → 判据用错列
  *   （拿 `fetched_at` 当"什么时候进来的"）时，这条会天天被当成新增。线上 178 条条目
@@ -107,16 +109,19 @@ after(() => {
 });
 
 describe('issue #62 仓储层：排序档位', () => {
-  it('不传 sort = 原倒计时序；`deadline` 档与它一字不差', async () => {
+  it('不传 sort 档 = 还能提意见的在前（按展示口径判）、再按截止日期升序；`deadline` 档与它一字不差', async () => {
     const plain = marks(await noticesRepo.listNoticesFiltered({}));
-    assert.equal(plain, inOrder(D, B, A, E, C));
+    // 乙(+2) 甲(+30) 戊(+60) 是还能提意见的；丙(已截止) 丁(库里还写 open、截止日已过) 沉底。
+    // 丁的位置就是 issue #79 的修复点：它曾经凭库列 status 排在最前（截止日 -1 天最早）。
+    assert.equal(plain, inOrder(B, A, E, C, D));
     assert.equal(marks(await noticesRepo.listNoticesFiltered({ sort: 'deadline' })), plain);
   });
 
   it('`published` / `newest` / `clicks` 三档各自换掉了顺序（不是换个参数名走同一条 SQL）', async () => {
     assert.equal(marks(await noticesRepo.listNoticesFiltered({ sort: 'published' })), inOrder(B, C, D, E, A));
     assert.equal(marks(await noticesRepo.listNoticesFiltered({ sort: 'newest' })), inOrder(A, D, B, C, E));
-    assert.equal(marks(await noticesRepo.listNoticesFiltered({ sort: 'clicks' })), inOrder(C, E, A, D, B));
+    // 甲乙并列 0 点击，尾键仍走同一份聚合序 ⇒ 还能提意见的甲在已截止的乙前
+    assert.equal(marks(await noticesRepo.listNoticesFiltered({ sort: 'clicks' })), inOrder(C, E, A, B, D));
   });
 
   it('每一档翻页翻完 = 全集且不重复（末位 `asc(id)` 尾键；并列行不得被 LIMIT/OFFSET 拆乱）', async () => {
@@ -144,7 +149,8 @@ describe('issue #62 仓储层：只看未截止与最近新增', () => {
 
   it('firstSeenWithinDays 用 first_seen_at，不是每天覆盖的 fetched_at', async () => {
     const rows = await noticesRepo.listNoticesFiltered({ firstSeenWithinDays: 30 });
-    assert.equal(marks(rows), inOrder(D, B, A));
+    // 顺序仍走默认档（还能提意见的在前）：乙(+2) 甲(+30) 在前，丁已过期沉底
+    assert.equal(marks(rows), inOrder(B, A, D));
     // 丙今天被重抓过（fetched_at = 现在），但它 40 天前就进库了：按 fetched_at 判它会被算成新增
     assert.ok(!rows.some((row) => row.id === C.id), '丙是 40 天前收录的老条目，重抓不算新增');
     assert.ok(!rows.some((row) => row.id === E.id), '戊没有收录时间（NULL），不能算新增');

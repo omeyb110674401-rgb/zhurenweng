@@ -20,8 +20,9 @@ import { noticeItems, robotsMeta, stripSsrComments } from './helpers/html.mjs';
  * - 甲：新收录（2 天前）、晚截止（+30 天）、3 次点击
  * - 乙：最新发布（-35 天）、+2 天截止、0 次点击
  * - 丙：库里已 closed、50 次点击
- * - 丁：**库里还写 open，但截止日已过（-1 天）** —— 「只看未截止」必须按展示口径排掉它
- *   （issue #43 的同一件事：抓取每日一轮，刚过截止的条目在库里仍是 open）
+ * - 丁：**库里还写 open，但截止日已过（-1 天）** —— 两处都要按展示口径判它：
+ *   「只看未截止」必须排掉它（issue #43 的同一件事：抓取每日一轮，刚过截止的条目在库里仍是 open），
+ *   **默认排序也不许把它当"还能提意见"摆在头屏**（issue #79，线上实测头屏 9 条已截止）
  * - 戊：`first_seen_at` 为 NULL 的存量行 —— 任何「最近新增」都不该把它算进来
  *
  * 零外部依赖（ADR-0001）：临时 SQLite + stub LLM / 邮件。
@@ -155,9 +156,11 @@ after(async () => {
 });
 
 describe('issue #62：排序档位真实生效', () => {
-  it('不带参数 = 原倒计时序（未截止优先 → 截止升序），既有首页行为一字不差', async () => {
-    // 未截止优先：丁(-1) 乙(+2) 甲(+30) 戊(+60) 在前，已截止的丙沉底
-    assertOrder(await page(), [D, B, A, E, C], '默认档');
+  it('不带参数 = 未截止优先（按展示口径）→ 截止升序，已截止的沉底', async () => {
+    // 还能提意见的：乙(+2) 甲(+30) 戊(+60)，按截止升序在前；沉底的：丙(已截止) 丁(-1)。
+    // 丁的位置是 issue #79 的修复点 —— 它库里还写着 open，但截止日是昨天，
+    // 「未截止优先」如果按库列判，头屏第一屏就是这条提不了意见的条目（线上实测 9 条）。
+    assertOrder(await page(), [B, A, E, C, D], '默认档');
   });
 
   it('`?sort=deadline` 与不带参数完全相同（默认档位没有偷偷换实现）', async () => {
@@ -175,8 +178,9 @@ describe('issue #62：排序档位真实生效', () => {
   });
 
   it('`?sort=clicks` 并列时按倒计时兜底，不是「同分随机序」', async () => {
-    // 点击：丙(50) > 戊(9) > 甲(3) > 丁 / 乙(0)；同为 0 时按倒计时 → 丁(-1) 在乙(+2) 前
-    assertOrder(await page('?sort=clicks'), [C, E, A, D, B], '点击档');
+    // 点击：丙(50) > 戊(9) > 甲(3) > 乙 / 丁(0)；同为 0 时按聚合序兜底 ——
+    // 乙还能提意见、丁已过期（#79 之后聚合序的第一键是展示口径）
+    assertOrder(await page('?sort=clicks'), [C, E, A, B, D], '点击档');
   });
 
   it('未知排序值不生效（回落默认档，而不是报错或空页）', async () => {
@@ -220,8 +224,9 @@ describe('issue #62：`?open=1` 只看未截止', () => {
 
 describe('issue #62：`?since=N` 最近新增', () => {
   it('只留最近 N 天收录的；`first_seen_at` 为 NULL 的存量不进来', async () => {
-    assertOrder(await page('?since=7'), [D, A], '近 7 天');
-    assertOrder(await page('?since=30'), [D, B, A], '近 30 天');
+    // 集合不含丙 / 戊；顺序仍走默认档：甲还能提意见（乙不入近 7 天），丁已截止 ⇒ 沉底
+    assertOrder(await page('?since=7'), [A, D], '近 7 天');
+    assertOrder(await page('?since=30'), [B, A, D], '近 30 天');
   });
 
   it('近 30 天含乙（20 天前收录），不含丙（40 天）与戊（NULL）', async () => {
@@ -270,7 +275,7 @@ describe('issue #62：入口与索引口径', () => {
     const html = await page('?sort=clicks');
     assert.match(html, /按提意见最多排序/);
     assert.ok(!/按征求意见截止日期排序/.test(html), '说明不能停在默认排序上');
-    assertOrder(html, [C, E, A, D, B], '点击档');
+    assertOrder(html, [C, E, A, B, D], '点击档');
     assert.equal(
       /data-testid="sort-link"[^>]*aria-current="true"[^>]*>([^<]+)</.exec(html)?.[1],
       '提意见最多',

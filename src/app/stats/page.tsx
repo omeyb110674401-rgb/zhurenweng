@@ -257,7 +257,7 @@ export default async function StatsPage() {
                       />
                     </td>
                     <td className="stat-num">
-                      {/* 「未截止」与首页 ?open=1 用的是同一份 SQL 判据（repo 的 openCondition），
+                      {/* 「未截止」与首页 ?open=1 用的是同一份 SQL 判据（repo 的 stillOpen），
                           两处一旦分家，这一格就不再等于点进去的条数 */}
                       <DrillNumber
                         count={facet.openCount}

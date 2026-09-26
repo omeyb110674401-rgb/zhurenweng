@@ -101,6 +101,21 @@ describe('issue #76：覆盖度那句话的三种写法', () => {
     assert.doesNotMatch(verdict.detail, /全部 0/);
   });
 
+  it('#79：数到 0 处时不许替判据编一个来源（旧文案硬编码"按标题判为修正案"）', () => {
+    const bare = changeCoverageVerdict(0, countChangeMarkers('一份没有修改表述的正文'));
+    assert.doesNotMatch(bare.detail, /按标题判为修正案/, '判据可能来自附件名或附件正文，不是标题');
+    assert.match(bare.detail, /给不出「共几处」/);
+
+    // 传了判据就照抄判据：生产那 22 条的判据是**附件正文**，页面却说"按标题判的"
+    const withBasis = changeCoverageVerdict(
+      0,
+      countChangeMarkers('一份没有修改表述的正文'),
+      '附件正文含对照措辞「原条款」',
+    );
+    assert.match(withBasis.detail, /附件正文含对照措辞「原条款」/);
+    assert.doesNotMatch(withBasis.detail, /按标题/);
+  });
+
   it('列得比分母少要照实说少', () => {
     const markers = countChangeMarkers('第二条修改为甲。删去第七条。增加一条，作为第八条。');
     // 一句"增加一条，作为第八条"同时是新增与条序调整：数的是"有多少处表述要解释"，

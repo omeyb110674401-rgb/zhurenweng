@@ -41,6 +41,40 @@ const EXPLANATION_TEXT = [
 
 const AMENDED_ID = 'b'.repeat(32);
 const FRESH_ID = 'c'.repeat(32);
+/**
+ * 打包清单（genre=package_plan）：标题里「等2项」**先于**「修正」命中，
+ * 而它的附件恰恰是一份标准的修订对照文本 —— 也就是"模型完全有理由吐出一张改动点表"。
+ *
+ * 这条存在的唯一理由是让**体裁门可观测**：新案夹具里的改动词只能出现在编制说明里，
+ * 而 `changes` 的逐字反查只认草案那一侧的段落（说明的话不许当"规定本身"落库），
+ * 所以新案那条无论如何都产不出改动点 —— 撤掉体裁门它也不会红。
+ * 2026-09-26 实测：`check-test-pins.mjs` 当场报「这条断言没钉住任何东西」，
+ * 于是补了这条打包清单（生产里真有「等11项强制性国家标准」这种标题）。
+ */
+const PACKAGE_ID = 'e'.repeat(32);
+const PACKAGE_TITLE = '关于征求《某某法》等2项法律草案（修正草案征求意见稿）意见的公告';
+const PACKAGE_ATTACHMENT_URL = 'https://attachments.test/package.docx';
+/**
+ * 存量错判那条（回填用）：金丝雀《美丽河湖评价技术导则》的形状 ——
+ * 一份**全新**标准，正文里只有一个「现行」（"现行标准未对…作出规定"），没有任何改动词。
+ * 旧词表据此把它判成修正案（生产 22 条如此），收窄词表后它应当回到新案草案。
+ */
+const STALE_ID = 'f'.repeat(32);
+const STALE_TITLE = '关于公开征求国家标准《美丽河湖评价技术导则（征求意见稿）》意见的通知';
+const STALE_ATTACHMENT_URL = 'https://attachments.test/stale-guide.docx';
+const STALE_TEXT = [
+  '美丽河湖评价技术导则（征求意见稿）',
+  '1 范围',
+  '本文件规定了美丽河湖评价的指标体系、评价方法与评价程序，适用于指导各地开展美丽河湖建设成效评价。',
+  '2 规范性引用文件',
+  '下列文件中的内容通过文中的规范性引用而构成本文件必不可少的条款，凡是注日期的引用文件，仅该日期对应的版本适用于本文件。',
+  '3 术语和定义',
+  '现行标准未对水生生物完整性作出规定，本文件补充了该项指标及其赋分方法，并明确了数据来源与监测频次的要求。',
+  '4 评价指标体系',
+  '评价指标包括水环境质量、水生生物完整性、岸线生态缓冲带、公众满意度四类，各类指标的分值权重与赋分细则见附录 A。',
+  '5 评价方法与程序',
+  '评价工作由省级生态环境主管部门组织，按资料收集、现场调查、指标赋分、结果校核四个步骤开展，评价周期为三年一次。',
+].join('\n');
 const ATTACHMENT_NAME = '某某法（修正草案征求意见稿）.docx';
 const ATTACHMENT_URL = 'https://attachments.test/amend.docx';
 const FRESH_ATTACHMENT_URL = 'https://attachments.test/fresh.docx';
@@ -80,6 +114,30 @@ const FRESH_TEXT = [
   '第九条 主管部门应当会同有关部门建立联合监管机制，实现许可、处罚与检查信息的实时归集共享。',
   '第十条 参与者应当依照本决定办理相关手续并提交必要材料，配合完成现场核查与资料核验工作。',
   '第十一条 本决定规定的期限以工作日计算，不含法定节假日；逾期提出的申请应当当场告知补正。',
+].join('\n');
+
+const FRESH_EXPLANATION_NAME = '某某决定（草案征求意见稿）编制说明.docx';
+const FRESH_EXPLANATION_URL = 'https://attachments.test/fresh-explain.docx';
+
+/**
+ * 新案那份编制说明：**里面故意留了一句"改动词"**（"与现行做法相比，删去了…"）。
+ *
+ * 这不是随手加的长度填充，而是让**体裁门真的可观测**所必需的夹具：
+ * stub 的回响规则是"条文里出现可计数的改动词（修改为 / 删去 / 增加一条）就产出一条改动点"，
+ * 而"新案不该长出一张改动点表"这道门（`summarize-notices.ts`）拦的正是那种产出。
+ * 夹具里没有这样一行时，撤掉那道门不会有任何可观测差异 —— 2026-09-26 实测：
+ * 这条 pin 退化成"撤了也不红"（`check-test-pins.mjs` 报「这条断言没钉住任何东西」）。
+ * 而真实的误判形状就是它：一份新案草案自己的说明里在讲"相比现行做法删去了什么"，
+ * 模型据此吐出一张"改动点"表 —— 一份首次制定的文件没有"改了哪几处"可言。
+ * 另：这份说明里的「现行」同时也是 #79 的回归位（它不再是体裁信号）。
+ */
+const FRESH_EXPLANATION_TEXT = [
+  '一、制定的必要性',
+  '现行做法下同类事项由各部门分别受理，申请人需要重复提交材料，办理周期偏长，基层反映较为集中。',
+  '二、主要思路与主要修改',
+  '本决定为首次制定。与现行做法相比，删去了实践中已无法执行的两项前置条件，把办理时限、公开义务与监督方式一并写入条文。',
+  '三、征求意见的范围',
+  '本次公开征求意见面向各类经营主体与社会公众，收到的意见逐条研究，采纳情况在后续说明中一并交代。',
 ].join('\n');
 
 let workDir;
@@ -165,7 +223,39 @@ before(async () => {
     deadlineAt: '2026-11-30',
     status: 'open',
     bodyText: '现就该决定草案公开征求意见，请于截止日期前反馈。',
-    attachments: [{ name: ATTACHMENT_NAME, url: FRESH_ATTACHMENT_URL }],
+    attachments: [
+      { name: ATTACHMENT_NAME, url: FRESH_ATTACHMENT_URL },
+      // 说明那份是**为了让"新案不该有改动点"这道门可观测**而故意留的（见上面那段说明）
+      { name: FRESH_EXPLANATION_NAME, url: FRESH_EXPLANATION_URL },
+    ],
+    fetchedAt: new Date().toISOString(),
+  });
+
+  await noticesRepo.upsertNotice({
+    id: PACKAGE_ID,
+    sourceId: 'e2e-amendment',
+    title: PACKAGE_TITLE,
+    agency: '测试部',
+    url: 'https://source.test/package.html',
+    publishedAt: '2026-09-20',
+    deadlineAt: '2026-11-30',
+    status: 'open',
+    bodyText: '现就这2项法律草案公开征求意见，请于截止日期前反馈。',
+    attachments: [{ name: ATTACHMENT_NAME, url: PACKAGE_ATTACHMENT_URL }],
+    fetchedAt: new Date().toISOString(),
+  });
+
+  await noticesRepo.upsertNotice({
+    id: STALE_ID,
+    sourceId: 'e2e-amendment',
+    title: STALE_TITLE,
+    agency: '测试部',
+    url: 'https://source.test/stale.html',
+    publishedAt: '2026-09-20',
+    deadlineAt: '2026-11-30',
+    status: 'open',
+    bodyText: '现就该国家标准公开征求意见，请于截止日期前反馈。',
+    attachments: [{ name: ATTACHMENT_NAME, url: STALE_ATTACHMENT_URL }],
     fetchedAt: new Date().toISOString(),
   });
 
@@ -173,6 +263,16 @@ before(async () => {
     { noticeId: AMENDED_ID, name: ATTACHMENT_NAME, url: ATTACHMENT_URL, text: AMENDED_TEXT },
     { noticeId: AMENDED_ID, name: EXPLANATION_NAME, url: EXPLANATION_URL, text: EXPLANATION_TEXT },
     { noticeId: FRESH_ID, name: ATTACHMENT_NAME, url: FRESH_ATTACHMENT_URL, text: FRESH_TEXT },
+    {
+      noticeId: FRESH_ID,
+      name: FRESH_EXPLANATION_NAME,
+      url: FRESH_EXPLANATION_URL,
+      text: FRESH_EXPLANATION_TEXT,
+    },
+    // 打包清单那条复用同一份"修订对照"正文：它就是要让模型有理由吐出改动点
+    { noticeId: PACKAGE_ID, name: ATTACHMENT_NAME, url: PACKAGE_ATTACHMENT_URL, text: AMENDED_TEXT },
+    // 存量错判那条（回填用）：正文里只有「现行」，一个字都没改过现行文本
+    { noticeId: STALE_ID, name: ATTACHMENT_NAME, url: STALE_ATTACHMENT_URL, text: STALE_TEXT },
   ];
   // 清单必须**按公示一次给全**：syncAttachmentManifest 会把本轮清单里没有的行撤下，
   // 一个附件调一次就会把先写进去的那份正文删掉（我第一版踩在这里，表现为整条没喂进摘要）。
@@ -240,7 +340,8 @@ describe('issue #76 第 2 刀：修正案改动点', () => {
     );
   });
 
-  it('正文里有"现行"二字不等于修正案：新案条目不长出这张表', () => {
+  it('正文里有"现行"二字不等于修正案：新案条目不长出这张表', async () => {
+    const { countChangeMarkers } = await import('../../src/lib/amendment-coverage.ts');
     const row = readGenre(FRESH_ID);
     assert.equal(row.genre, 'new_draft', `新案不该被措辞带跑，实际依据：${row.basis}`);
     const { json } = readSummary(FRESH_ID);
@@ -250,8 +351,29 @@ describe('issue #76 第 2 刀：修正案改动点', () => {
       json.keyPoints.length > 0,
       '新案正文必须够长并被喂进摘要，否则本用例退化成假绿灯（见夹具里那段长度注释）',
     );
+    // 第二层前提：夹具的说明里**确实**有一句 stub 会回响的改动词 ⇒
+    // 撤掉体裁门时 `changes` 真会非空（2026-09-26 之前它不会，那条 pin 因此是假的）
+    assert.ok(
+      countChangeMarkers(FRESH_EXPLANATION_TEXT).total > 0,
+      '新案夹具的说明里要有一处可计数的改动词，否则这道门撤了也不红',
+    );
     assert.equal(json.changeMarkers, null, '没判成修正案就不该有覆盖度');
     assert.deepEqual(json.changes, []);
+  });
+
+  it('非修正案（打包清单）即使模型吐出改动点也一律丢弃 —— 体裁真的门控产品形状', () => {
+    const row = readGenre(PACKAGE_ID);
+    assert.equal(row.genre, 'package_plan', `「等2项」要先于「修正」命中，实际依据：${row.basis}`);
+    const { json } = readSummary(PACKAGE_ID);
+    assert.ok(json, `打包清单这条也应生成摘要，日志：${logs.join('\n').slice(-400)}`);
+    // 前提：附件确实喂进去了 —— 否则"没有改动点"只是"没喂"的副产品（本仓库栽过的那族假绿灯）
+    assert.ok(json.keyPoints.length > 0, '这份对照正文必须够长并被喂进摘要');
+    assert.equal(json.changeMarkers, null, '不是修正案就没有"共几处"的分母');
+    assert.deepEqual(
+      json.changes,
+      [],
+      '模型吐出的改动点表必须被体裁门清掉 —— 撤掉那道门时这条要红（它是那道门唯一的可观测点）',
+    );
   });
 
   it('编制说明按自己的小节逐条落库，且引用只出自说明（段落隔离走真路径）', () => {
@@ -317,5 +439,73 @@ describe('issue #76 第 2 刀：修正案改动点', () => {
     assert.ok(decision, '正文级证据应当足以改写判定');
     assert.equal(decision.genre, 'amendment');
     assert.equal(readGenre(id).evidence, 'attachment_text');
+  });
+});
+
+/**
+ * issue #79：改了词表之后，存量怎么改过来 —— 这一组复刻生产那 22 条的真实状态。
+ *
+ * 它们存的是 `genre=amendment` + `genre_evidence=attachment_text` + 依据那句话
+ * 「附件正文含对照措辞「现行」」。收窄词表后重算出来是**标题级证据**（rank 1 < 3），
+ * 于是「弱证据不许覆盖强证据」这条守则把它原样挡住 ⇒ **一条都改不动**，
+ * 5 条本该是新案草案的条目会继续挂着「修正案」角标、继续用修正案模板。
+ * `force` 就是为"输入本身变了"（词表换了）准备的门 —— 它不改判据，只承认旧的"强证据"
+ * 已经是一条过期结论。
+ *
+ * 放文件末尾：这一组会写库改体裁，跑在前面的断言依赖 before 里那份初始状态。
+ */
+describe('issue #79：改词表后的存量回填', () => {
+  /** 把这条置回"旧词表判出来的样子"。生产就是这么存的，所以只能直接写库复刻。 */
+  function makeStale() {
+    const db = new Database(dbFile);
+    try {
+      db.prepare(
+        "update notices set genre = 'amendment', genre_evidence = 'attachment_text', " +
+          "genre_basis = '附件正文含对照措辞「现行」' where id = ?",
+      ).run(STALE_ID);
+    } finally {
+      db.close();
+    }
+  }
+
+  it('不带 force：覆盖规矩把改动全挡掉（这正说明它救不了词表变更）', async () => {
+    makeStale();
+    const { backfillNoticeGenres } = await import('../../src/db/repo/notices.ts');
+    const report = await backfillNoticeGenres({ apply: true });
+    assert.ok(report.skipped > 0, `应有条目被覆盖规矩跳过，实际 ${report.skipped} 条`);
+    assert.ok(
+      !report.samples.some((row) => row.id === STALE_ID),
+      '它不该出现在"本次改写"名单里 —— 旧证据是 attachment_text，重算出来的 title 比它弱',
+    );
+    const row = readGenre(STALE_ID);
+    assert.equal(row.genre, 'amendment', '没带 force ⇒ 错判原样留着（这就是要 force 的原因）');
+    assert.match(row.basis, /现行/, '依据也还是那句已经不成立的话');
+  });
+
+  it('带 force：按当前词表重算，回到新案草案，依据同时换掉', async () => {
+    const { backfillNoticeGenres } = await import('../../src/db/repo/notices.ts');
+
+    const dry = await backfillNoticeGenres({ apply: false, force: true });
+    const sample = dry.samples.find((row) => row.id === STALE_ID);
+    assert.ok(sample, 'force 之后它应当出现在改写名单里（dry-run 也必须看得见）');
+    assert.equal(sample.from, 'amendment');
+    assert.equal(sample.to, 'new_draft');
+    assert.equal(readGenre(STALE_ID).genre, 'amendment', 'dry-run 绝不写库');
+
+    await backfillNoticeGenres({ apply: true, force: true });
+    const after = readGenre(STALE_ID);
+    assert.equal(after.genre, 'new_draft', '一份全新标准不该再挂着「修正案」角标');
+    assert.equal(after.evidence, 'title');
+    // 依据要换成新算出来的那句（"标题含「导则」且无改现行文本的迹象"—— 注意它本身就带
+    // 「现行」二字，所以判据是"不再声称正文里有对照措辞"，不是"不含现行"）
+    assert.doesNotMatch(after.basis, /对照措辞/, '依据里不许再留着那句已经不算数的话');
+    assert.equal(after.basis, '标题含「导则」且无改现行文本的迹象');
+
+    // 幂等：再跑一次不该又"改写"一遍（算出来与存量逐字相同就不写）
+    const again = await backfillNoticeGenres({ apply: true, force: true });
+    assert.ok(
+      !again.samples.some((row) => row.id === STALE_ID),
+      'force 也要幂等：第二次跑它不该再出现在改写名单里',
+    );
   });
 });

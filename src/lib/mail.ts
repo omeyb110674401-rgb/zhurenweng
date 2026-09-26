@@ -159,16 +159,30 @@ const STAGE_LABELS: Record<ReminderStage, string> = { d7: '截止前 7 天', d3:
 const STAGE_NOMINAL_DAYS: Record<ReminderStage, number> = { d7: 7, d3: 3 };
 
 /**
- * 截止日那一行的文案。
+ * 剩余天数的读者说法（issue #79）。
  *
- * 不写「截止前 7 天提醒」而实际剩 2 天 —— 那是界面在撒谎。任务停摆导致补发时如实标注，
- * 顺带也解释了为什么有人会比别人晚收到一封。
+ * `daysUntil` 的 0 表示**今天就是截止日**，而旧文案把它直接拼成「还剩 0 天」——
+ * 生产实测发出的 5 封提醒全是这个样子（订阅 09-21 建立，而 worker 那天起没跑，
+ * 7 天档一路补到 09-26 当天才发出去）。"还剩 0 天"既不像人话，也让人以为已经晚了：
+ * 今天恰恰是**还能提意见的最后一天**，这句必须说成「今天截止」。
+ */
+function remainingDaysText(days: number): string {
+  if (days < 0) return '已过截止日期';
+  if (days === 0) return '今天截止';
+  return `还剩 ${days} 天`;
+}
+
+/**
+ * 补发标注（issue #79）：**一层括号、一件事只说一遍**。
+ *
+ * 旧文案在补发时是「（还剩 0 天，截止前 7 天档补发（原定提前 7 天，实际剩 0 天））」——
+ * 双层括号，且"剩 0 天"刚说完又说一遍。现在它是一句并列的补充，用「；」接在同一层括号里：
+ * 主句只说事实（哪一天截止、还剩几天），补发那件事另说，而且**不再重复天数**。
+ * 不写「截止前 7 天提醒」而实际剩 2 天 —— 那是界面在撒谎，所以补发这件事必须照实说。
  */
 function reminderStageNote(stage: ReminderStage, days: number): string {
   const nominal = STAGE_NOMINAL_DAYS[stage];
-  return days === nominal
-    ? `${STAGE_LABELS[stage]}档`
-    : `${STAGE_LABELS[stage]}档补发（原定提前 ${nominal} 天，实际剩 ${days} 天）`;
+  return days === nominal ? '' : `；本档原定在${STAGE_LABELS[stage]}发出，这次是补发`;
 }
 
 /** 订阅侧的固定承诺：两档各一封，漏跑的那天下一轮补上。 */
@@ -243,15 +257,19 @@ export function buildReminderEmail(input: {
   const { notice, days, stage } = input;
   const detail = noticeDetailUrl(notice.id);
   const unsubscribe = unsubscribeUrl(input.unsubscribeToken);
-  const subject = `【主人翁】截止提醒：${notice.title}（剩 ${days} 天）`;
+  const remaining = remainingDaysText(days);
+  const subject = `【主人翁】截止提醒：${notice.title}（${remaining}）`;
   return {
     to: input.email,
     subject,
+    // 标题**只在第一行出现一次**（issue #79）：旧文案第一行是
+    // `你订阅的公示「${title}」征求意见即将截止：`，而标题本身就常以「征求意见」结尾
+    // （全库恰好 5 条这样，实测发出的 5 封全部中招）⇒ 念成「…征求意见征求意见即将截止」；
+    // 紧接着第二行又原样重复一次标题。现在首行不再拼任何后缀，第二行取消。
     text: [
-      `你订阅的公示「${notice.title}」征求意见即将截止：`,
+      `你订阅的公示「${notice.title}」即将截止：`,
       '',
-      `标题：${notice.title}`,
-      `截止日期：${notice.deadlineAt ?? '未标注'}（还剩 ${days} 天，${reminderStageNote(stage, days)}）`,
+      `截止日期：${notice.deadlineAt ?? '未标注'}（${remaining}${reminderStageNote(stage, days)}）`,
       `站内详情（含 AI 摘要与提意指引）：`,
       detail,
       `官方原文（请前往官方渠道提交意见）：`,
@@ -265,8 +283,8 @@ export function buildReminderEmail(input: {
       SITE_FOOTER,
     ].join('\n'),
     html: [
-      `<p>你订阅的公示「${escapeHtml(notice.title)}」征求意见即将截止：</p>`,
-      `<p>截止日期：<strong>${escapeHtml(notice.deadlineAt ?? '未标注')}</strong>（还剩 ${days} 天，${reminderStageNote(stage, days)}）</p>`,
+      `<p>你订阅的公示「${escapeHtml(notice.title)}」即将截止：</p>`,
+      `<p>截止日期：<strong>${escapeHtml(notice.deadlineAt ?? '未标注')}</strong>（${escapeHtml(remaining + reminderStageNote(stage, days))}）</p>`,
       `<p><a href="${escapeHtml(detail)}">站内详情（含 AI 摘要与提意指引）</a></p>`,
       `<p><a href="${escapeHtml(notice.url)}">官方原文（请前往官方渠道提交意见）</a></p>`,
       `<p>${escapeHtml(REMINDER_POLICY_TEXT)}不想再收到提醒？<a href="${escapeHtml(unsubscribe)}">退订（打开页面后点确认）</a>。</p>`,

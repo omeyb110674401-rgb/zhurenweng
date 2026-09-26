@@ -65,7 +65,10 @@ describe('提醒邮件的档位措辞与实际剩余一致', () => {
     url: 'https://source.test/notice.html',
   };
 
-  it('按点发出时只标档位，不提补发', () => {
+  /** 截止日期那一行（文案都在这一行上，断言就不必去猜别的行）。 */
+  const deadlineLineOf = (text) => text.split('\n').find((line) => line.startsWith('截止日期：'));
+
+  it('按点发出时只写事实：哪一天截止、还剩几天，不提补发', () => {
     const mail = buildReminderEmail({
       email: 'reader@example.test',
       notice,
@@ -74,8 +77,11 @@ describe('提醒邮件的档位措辞与实际剩余一致', () => {
       unsubscribeToken: 'tok',
     });
     assert.match(mail.subject, /剩 7 天/);
-    assert.match(mail.text, /还剩 7 天，截止前 7 天档）/);
-    assert.ok(!mail.text.includes('档补发'), '没晚就不该把这一封标成补发（政策说明里那句"漏跑会补发"不算）');
+    assert.equal(deadlineLineOf(mail.text), '截止日期：2026-10-05（还剩 7 天）');
+    assert.ok(
+      !mail.text.includes('这次是补发'),
+      '没晚就不该把这一封标成补发（政策说明里那句"漏跑会补发"不算）',
+    );
   });
 
   it('补发时明写「补发」与实际剩余天数（不能一边剩 5 天一边自称"截止前 7 天提醒"）', () => {
@@ -87,8 +93,59 @@ describe('提醒邮件的档位措辞与实际剩余一致', () => {
       unsubscribeToken: 'tok',
     });
     assert.match(mail.subject, /剩 5 天/, '主题按实际剩余写');
-    assert.match(mail.text, /截止前 7 天档补发（原定提前 7 天，实际剩 5 天）/);
-    assert.match(mail.html, /补发/, 'HTML 版同样标注');
+    // 补发这件事**不许把括号套起来**：原文案是
+    // 「（还剩 0 天，截止前 7 天档补发（原定提前 7 天，实际剩 0 天））」
+    assert.equal(
+      deadlineLineOf(mail.text),
+      '截止日期：2026-10-05（还剩 5 天；本档原定在截止前 7 天发出，这次是补发）',
+    );
+    assert.match(mail.html, /这次是补发/, 'HTML 版同样标注');
+  });
+
+  it('今天截止不许写成「还剩 0 天」（这是还能提意见的最后一天）', () => {
+    const mail = buildReminderEmail({
+      email: 'reader@example.test',
+      notice,
+      days: 0,
+      stage: 'd3',
+      unsubscribeToken: 'tok',
+    });
+    assert.equal(deadlineLineOf(mail.text), '截止日期：2026-10-05（今天截止；本档原定在截止前 3 天发出，这次是补发）');
+    assert.doesNotMatch(mail.text, /还剩 0 天/);
+    assert.doesNotMatch(mail.html, /还剩 0 天/);
+    assert.match(mail.subject, /今天截止/);
+  });
+
+  it('截止日期那一行只有一层括号（双层括号读起来要读者自己配对）', () => {
+    for (const days of [7, 5, 0]) {
+      const mail = buildReminderEmail({
+        email: 'reader@example.test',
+        notice,
+        days,
+        stage: 'd7',
+        unsubscribeToken: 'tok',
+      });
+      const line = deadlineLineOf(mail.text);
+      assert.equal((line.match(/（/g) ?? []).length, 1, `剩 ${days} 天的截止日期行：${line}`);
+      assert.equal((line.match(/）/g) ?? []).length, 1, `剩 ${days} 天的截止日期行：${line}`);
+    }
+  });
+
+  it('标题只出现一次，且不在标题后硬拼「征求意见」（issue #79：全库恰好 5 条标题自带这个词）', () => {
+    const mail = buildReminderEmail({
+      email: 'reader@example.test',
+      notice: { ...notice, title: '住房城乡建设部关于《某某标准》公开征求意见的通知' },
+      days: 3,
+      stage: 'd3',
+      unsubscribeToken: 'tok',
+    });
+    // 第一行是标题唯一出现的地方；旧文案第一行拼了「征求意见即将截止」，
+    // 第二行又原样重复一次标题 —— 念出来是「…征求意见征求意见即将截止」
+    const occurrences = mail.text.split('公开征求意见的通知').length - 1;
+    assert.equal(occurrences, 1, `标题应只出现一次，实际 ${occurrences} 次：\n${mail.text}`);
+    assert.ok(!mail.text.includes('征求意见征求意见'), '不许把标题自带的「征求意见」再拼一遍');
+    assert.ok(!mail.text.includes('标题：'), '第二行那次重复已经取消');
+    assert.match(mail.text.split('\n')[0], /^你订阅的公示「.+」即将截止：$/);
   });
 
   it('订阅侧承诺改成可兑现的说法：漏跑的那天下一轮补一次，且不会重复发', () => {

@@ -5,6 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { after, before, describe, it } from 'node:test';
+import Database from 'better-sqlite3';
 import { startAppServer } from './helpers/app-server.mjs';
 import { createFixtureServer } from './helpers/fixture-server.mjs';
 import { noticeItems, stripSsrComments as stripComments } from './helpers/html.mjs';
@@ -112,5 +113,36 @@ describe('issue #76：详情页体裁角标', () => {
     assert.equal(/class="genre-badge"/.test(amendment), true);
     // 状态徽标与体裁徽标各是各的：状态回答"来不来得及"，体裁回答"该看什么"
     assert.match(amendment, /data-testid="notice-status-badge"/);
+  });
+
+  /**
+   * issue #79：这条正是线上那个空栏的形状 —— 体裁靠**正文里那截"现行"**判成修正案
+   * （或者像这里一样靠标题），而改动点数出来是 0，页面于是渲染出：
+   * 「改动点」标题 + 一句"没检测到成文的修改表述" + 一张没有行的表。
+   *
+   * 断言分两截，缺一截这条用例就会变成假绿灯：
+   * 1. 先证明前提成立（库里真的有摘要、真的带着一份"数到 0 处"的覆盖度）——
+   *    否则"页面上没有改动点"可能只是因为这条压根没摘要；
+   * 2. 再断言整块不渲染，**连标题都不出现**（只剩 note 也算占着一栏）。
+   */
+  it('一处改动都数不到时，不渲染一个空的「改动点」栏', async () => {
+    const db = new Database(dbFile, { readonly: true });
+    const row = db
+      .prepare('select genre, ai_summary_json as json from notices where title = ?')
+      .get(AMENDMENT_TITLE);
+    db.close();
+    assert.equal(row?.genre, 'amendment', '上面那条用例已证它被判成修正案');
+    assert.ok(row?.json, '这条应当有摘要（stub 端口），否则下面的断言测不到渲染分支');
+    const summary = JSON.parse(row.json);
+    assert.deepEqual(summary.changes, [], '没有可喂的附件正文 ⇒ 改动点必然是空数组');
+    assert.equal(summary.changeMarkers?.total, 0, '分母是 0（不是"没数过"）—— 空栏就是这么长出来的');
+
+    const html = await detailOf(AMENDMENT_TITLE);
+    assert.match(html, /data-testid="ai-summary"/, '摘要卡片本身要在，排除"整页没渲染"这种假通过');
+    assert.ok(
+      !html.includes('data-testid="summary-changes"'),
+      '一行改动点都没有时，整块「改动点」不该出现（空栏读起来像"这条没改什么"）',
+    );
+    assert.ok(!html.includes('改动点'), '连标题都不该有 —— 有标题就等于向读者承诺了一栏内容');
   });
 });

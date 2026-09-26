@@ -1,6 +1,14 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { GENRE_LABELS, deriveNoticeGenre, genreDecisionWins } from '../../src/lib/notice-genre.ts';
+import {
+  AMENDMENT_TEXT_MARKERS,
+  CHANGE_TEXT_MARKERS,
+  GENRE_LABELS,
+  GENRE_ONLY_TEXT_MARKERS,
+  deriveNoticeGenre,
+  genreDecisionWins,
+} from '../../src/lib/notice-genre.ts';
+import { countChangeMarkers } from '../../src/lib/amendment-coverage.ts';
 
 /**
  * 单元（issue #76）：体裁判定的顺序与"不许兜底"。
@@ -99,5 +107,73 @@ describe('issue #76：证据强度覆盖规矩', () => {
     assert.equal(genreDecisionWins('attachment_text', 'title'), true);
     assert.equal(genreDecisionWins('title', 'title'), true, '同强度要能跟随标题变化重算');
     assert.equal(genreDecisionWins('none', null), true);
+  });
+});
+
+/**
+ * issue #79：两份"改动词表"的关系，以前只写在注释里，于是它们静默漂移了。
+ *
+ * 漂移的后果不是"判定偶尔不准"，而是**页面自相矛盾**：体裁靠 `现行` 判成修正案
+ * （生产 52 条里 22 条如此），而算覆盖度的那份词表根本不认它 ⇒ 页面上出现一个
+ * 标题写着「改动点」、note 却说"没检测到改动"的空栏（体裁判据在**附件正文**，
+ * 而旧文案还硬编码成"按标题判为修正案"）。
+ *
+ * 所以这里钉的不是"某个词在不在表里"，而是**两份表的关系**：
+ * 判体裁认的每个词，要么数得到，要么被显式声明为"只判体裁、不计数"。
+ */
+describe('issue #79：体裁词表与改动计数同源', () => {
+  it('体裁词表里每个词，要么能被改动计数数到，要么在「只判体裁」名单里', () => {
+    for (const word of AMENDMENT_TEXT_MARKERS) {
+      const counted = countChangeMarkers(word).total > 0;
+      const declared = GENRE_ONLY_TEXT_MARKERS.includes(word);
+      assert.ok(
+        counted || declared,
+        `「${word}」既数不到、也没声明为只判体裁 —— 它会让判成修正案的条目渲染出一个空的「改动点」栏`,
+      );
+    }
+  });
+
+  it('声明为「只判体裁」的词确实数不到（这个名单不能用来掩盖漏数）', () => {
+    for (const word of GENRE_ONLY_TEXT_MARKERS) {
+      assert.equal(
+        countChangeMarkers(word).total,
+        0,
+        `「${word}」既然数得到，就不该留在"只判体裁"名单里 —— 它会带着一个假的分母`,
+      );
+    }
+  });
+
+  it('计数那份是体裁那份的子集，且两部分逐字组成全表（不是各写一遍）', () => {
+    for (const word of CHANGE_TEXT_MARKERS) {
+      assert.equal(countChangeMarkers(word).total > 0, true, `「${word}」是计数词，必须真的数得到`);
+      assert.ok(AMENDMENT_TEXT_MARKERS.includes(word), `「${word}」判体裁时也该认`);
+    }
+    assert.deepEqual(
+      [...AMENDMENT_TEXT_MARKERS].sort(),
+      [...CHANGE_TEXT_MARKERS, ...GENRE_ONLY_TEXT_MARKERS].sort(),
+    );
+  });
+
+  it('「现行」不再是体裁信号：全新标准的编制说明里本来就会写它', () => {
+    assert.ok(!AMENDMENT_TEXT_MARKERS.includes('现行'), '它把新案误判成修正案，见 #79 的生产实测');
+    // 生产里那 22 条的形状：一份**新起草**的标准，说明里写着"现行标准"
+    const decision = deriveNoticeGenre({
+      title: '关于公开征求《美丽河湖评价技术导则（征求意见稿）》意见的通知',
+      attachmentNames: ['美丽河湖评价技术导则（征求意见稿）.pdf', '编制说明.docx'],
+      attachmentText: '本标准与现行有关标准的关系：现行标准未对水生生物完整性作出规定。',
+    });
+    assert.equal(decision.genre, 'new_draft', `实际判据：${decision.basis}`);
+  });
+
+  it('「原条款」仍算修正案信号（它预设了有一份现行文本），只是不给分母', () => {
+    const decision = deriveNoticeGenre({
+      title: '关于公开征求《某某办法》意见的通知',
+      attachmentText: '原条款：本办法自公布之日起施行。修订后：自 2027 年 1 月 1 日起施行。',
+    });
+    assert.equal(decision.genre, 'amendment');
+    assert.match(decision.basis, /原条款/);
+    // 判成修正案但一处改动都数不出来 ⇒ 由渲染层兜底（整节不渲染），
+    // 而不是靠改动词表硬凑一个数字出来（那是用一个错数换一个空栏）
+    assert.equal(countChangeMarkers('原条款：本办法自公布之日起施行。').total, 0);
   });
 });

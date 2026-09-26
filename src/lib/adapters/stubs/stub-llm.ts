@@ -7,7 +7,7 @@ import type {
   LlmSummarizeInput,
   StructuredSummary,
 } from '../../ports.ts';
-import { AMENDMENT_TEXT_MARKERS } from '../../notice-genre.ts';
+import { CHANGE_TEXT_MARKERS } from '../../notice-genre.ts';
 import { explanationSectionLines } from '../../amendment-coverage.ts';
 import type { QuotedStructuredSummary, SummaryQuotes } from '../../summary-content.ts';
 
@@ -128,12 +128,14 @@ export class StubLlm implements LlmPort {
     // 改动点（issue #76 第 2 刀）：只有条文里真的出现"修改为 / 删去 / 增加一条"这类句子时才回响，
     // 且 quote 逐字取那一整行 —— 于是"表格里每一行都能反查到原文"在测试里走的是真路径，
     // 而普通新案夹具不会因 stub 硬造改动点多出一张表。
+    // 认的是**可计数**的那份词表（`CHANGE_TEXT_MARKERS`），不是判体裁那份全表（#79）：
+    // 回响一行"只含判体裁措辞、计数那边数不到"的改动点，等于在测试里复刻线上那个空栏。
     const changeLines = draft
       .flatMap((source) => source.text.split(/\r?\n/).map((line) => ({ name: source.name, line: line.trim() })))
       .filter(
         (item) =>
           item.line.length > 8 &&
-          AMENDMENT_TEXT_MARKERS.some((word) => item.line.includes(word)),
+          CHANGE_TEXT_MARKERS.some((word) => item.line.includes(word)),
       )
       .slice(0, 3);
     if (changeLines.length > 0) {

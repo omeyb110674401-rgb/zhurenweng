@@ -18,10 +18,6 @@ import {
   type NoticeStatus,
 } from '../types.ts';
 
-export interface ListNoticesOptions {
-  limit?: number;
-}
-
 /**
  * 抓取管线写入的条目形状（幂等 upsert 的输入）。
  * id 由调用方按原文 URL 确定性生成（sha256 前缀），重复抓取命中同一行。
@@ -49,11 +45,23 @@ export interface UpsertNoticeInput {
 
 /**
  * 聚合列表排序（issue #3，列表页所有查询共用）：
- * 1. 征求意见中在前，已截止 / 已出结果沉底；
+ * 1. **还能提意见的在前**，已截止 / 已出结果沉底；
  * 2. 组内按截止日期升序（即将截止在前），无截止日期的排最后；
  * 3. 以抓取时间降序兜底。
  * 双方言交集下 NULL 排序位置不同（SQLite 在前、PostgreSQL 在后），
  * 故用显式 CASE 归一化。
+ *
+ * **第一档为什么不用库内 `status` 列（issue #79，2026-09-26 改）**：那是**抓取时**推导的缓存，
+ * 而抓取每日一轮 —— 昨天到期的那批在下一轮抓取改口之前仍是 `open`，于是首页头屏
+ * 排满了页面自己标着「已截止」的条目（生产实测：头屏 9 条、整页 50 条里 18 条）。
+ * 一个以「出站提意点击数」为北极星的站，第一屏不能是已经提不了意见的东西。
+ * 所以第一档改用 `stillOpen()`（= `?open=1` 的 WHERE、统计页「未截止」列的同一份判据）。
+ * 这三处从此同源：排序看到的"还能提"，就是徽标和筛选器说的"还能提"。
+ *
+ * **必须每次查询现算，不能提成模块级常量**：这一档里的"今天"来自 `siteDateIso(new Date())`，
+ * 而 web 进程是长期驻留的（容器不重启就一直跑）。写成模块级常量等于把"今天"冻结在
+ * 进程启动那一刻 —— 午夜过后新过期的条目仍按未截止排序，直到下次重启。这个坑和
+ * `openCondition()` 当初写成函数是同一个理由，只是排序这一档更容易被顺手提成常量。
  *
  * **末位必须补唯一键 `id`（issue #54）**：上面四个键都不唯一 —— 同一轮抓取入库的
  * 一批条目，status / deadlineAt / fetchedAt 可以完全相同（fetchedAt 是本轮的批次
@@ -64,18 +72,21 @@ export interface UpsertNoticeInput {
  * 补上唯一键让全序成立，分页切片才互不重叠、合起来恰好等于全集。
  * `id` 由原文 URL 的 sha256 前缀确定性生成（见 UpsertNoticeInput），天然唯一且稳定。
  */
-const AGGREGATION_ORDER = [
-  sql`case when ${notices.status} = 'open' then 0 else 1 end`,
-  sql`case when ${notices.deadlineAt} is null then 1 else 0 end`,
-  asc(notices.deadlineAt),
-  desc(notices.fetchedAt),
-  asc(notices.id),
-];
+function aggregationOrder(): SQL[] {
+  return [
+    sql`case when ${stillOpen()} then 0 else 1 end`,
+    sql`case when ${notices.deadlineAt} is null then 1 else 0 end`,
+    asc(notices.deadlineAt),
+    desc(notices.fetchedAt),
+    asc(notices.id),
+  ];
+}
 
 /**
  * 各排序档位的 SQL 实现（issue #62；档位清单在 lib/notice-sort.ts，那里说明为什么
  * 清单不放这一层）。默认 `deadline` 就是原来的 `AGGREGATION_ORDER` —— 不传参数时
  * **一字不差**，首页与既有钻取链接、以及所有没改过的调用方行为不变。
+ * （2026-09-26 起这一档的第一键改按展示口径判未截止，见 `aggregationOrder()` 的说明。）
  *
  * 写成 `Record<NoticeSortKey, …>` 而不是 switch：加一档而忘了在这里补实现会**编译不过**，
  * switch 带 default 时则会静默退化成默认排序（`?sort=` 看着生效了，实际什么都没变）。
@@ -83,45 +94,41 @@ const AGGREGATION_ORDER = [
  * 每一档末位都必须是 `asc(id)`：#54 的教训是「排序不唯一 ⇒ `LIMIT/OFFSET` 分页会在页边界
  * 重复一行、挤掉另一行」，而并列在这几个字段上极常见（同一轮抓进来的批次时间戳相同、
  * 点击数大量为 0）。新增排序时若忘了这个尾键，测试照样全绿、线上才会出错。
+ *
+ * 与 `aggregationOrder()` 同理，各档也要**现算**（`deadline` / `clicks` 两档里含
+ * 「今天」），所以这里存的是构造函数而不是数组。
  */
 const NULLS_LAST = (column: SQLWrapper) => sql`case when ${column} is null then 1 else 0 end`;
 
-const ORDERS: Record<NoticeSortKey, SQL[]> = {
-  deadline: AGGREGATION_ORDER,
+const ORDERS: Record<NoticeSortKey, () => SQL[]> = {
+  deadline: aggregationOrder,
   // 最新发布：缺发布日期的沉底（与统计页「缺发布日期不计入分布」同一口径）。
   // RSS feed 也走这一档（issue #6 的 feed 是时间线语义，不是倒计时序）——
   // 原先那里另有一份 `listNoticesByPublishedDesc`，两处排序迟早分家，已合并到这一档。
-  published: [
+  published: () => [
     NULLS_LAST(notices.publishedAt),
     desc(notices.publishedAt),
     desc(notices.fetchedAt),
     asc(notices.id),
   ],
   // 最近收录：按 first_seen_at（建行时写入、不随每日抓取覆盖），不是 fetched_at
-  newest: [NULLS_LAST(notices.firstSeenAt), desc(notices.firstSeenAt), asc(notices.id)],
+  newest: () => [
+    NULLS_LAST(notices.firstSeenAt),
+    desc(notices.firstSeenAt),
+    asc(notices.id),
+  ],
   // 提意见最多：并列（大量条目为 0）时再按倒计时排，避免"同分随机序"
-  clicks: [desc(notices.outboundClicks), ...AGGREGATION_ORDER],
+  clicks: () => [desc(notices.outboundClicks), ...aggregationOrder()],
 };
 
 function orderFor(sort: NoticeSortKey | undefined): SQL[] {
-  return ORDERS[sort ?? 'deadline'];
-}
-
-/** 未带筛选的全量列表（RSS / feed 与内部脚本用）：固定默认倒计时序，不受 `?sort=` 影响。 */
-export async function listNotices(options: ListNoticesOptions = {}): Promise<NoticeRecord[]> {
-  const db = await getDb();
-  const rows = await db
-    .select()
-    .from(notices)
-    .orderBy(...AGGREGATION_ORDER)
-    .limit(options.limit ?? 50);
-  return rows.map(toNoticeRecord);
+  return ORDERS[sort ?? 'deadline']();
 }
 
 /**
  * 分类浏览查询（issue #9）：领域标签 / 发布机关 / 关键词三维度可任意组合
  * （全部可分享于 querystring：/?category=…&agency=…&q=…），默认排序沿用
- * AGGREGATION_ORDER 的倒计时排序；传 sort 换口径（issue #62，见 NOTICE_SORT_KEYS）。
+ * `aggregationOrder()` 的倒计时排序；传 sort 换口径（issue #62，见 NOTICE_SORT_KEYS）。
  *
  * 过滤语义：
  * - category：领域标签精确命中（categoryTagsJson 存 JSON 数组文本，用带引号
@@ -262,18 +269,24 @@ function periodBucketCondition(key: PeriodBucketKey) {
 }
 
 /**
- * 「还没截止」的 SQL 判据（issue #62 的 `?open=1`，issue #65 起统计页的
- * 「未截止」列也用同一份）。
+ * 「还没截止」的 SQL 判据 —— 全站只有这一份。
+ *
+ * 三处用它，**必须**同源，否则页面上的数字和顺序会互相打架：
+ * 1. `?open=1` 的 WHERE（issue #62）；
+ * 2. 统计页「未截止」列与来源下拉里那个 `openCount`（issue #65）——
+ *    「点进去的条数 = 表格上的数字」这条不变式（issue #36）就压在这份共用上；
+ * 3. **默认排序的第一档**（issue #79，2026-09-26 起）：头屏不能排满页面自己标着
+ *    「已截止」的条目，见 `aggregationOrder()`。
  *
  * 按**展示口径**判，与页面上的徽标同源（issue #43 的那件事）：库内 status 是抓取时
  * 推导的，刚过截止的条目在下一轮抓取前仍写着 open。只看未截止的人若拿到那条，
  * 看到的徽标却是「已截止」—— 筛选器在说谎。
  * 截止日为空的条目留下：它没有"已过"的截止日，`effectiveStatus` 也判它 open。
  *
- * 收成函数而不是两处各写一遍，是为了统计页那个「点进去的条数 = 表格上的数字」的
- * 不变式（issue #36）：CASE 里那份和 WHERE 里这份一旦分家，数字就开始骗人。
+ * 收成函数而不是常量：`siteDateIso(new Date())` 必须**每次查询现算**（进程长期驻留，
+ * 提成模块级常量等于把"今天"冻结在启动那一刻）。排序那一档尤其容易踩这个坑。
  */
-function openCondition() {
+function stillOpen() {
   return and(
     eq(notices.status, 'open'),
     or(
@@ -334,7 +347,7 @@ function filterConditions(options: ListNoticesFilteredOptions) {
     conditions.push(eq(notices.sourceId, options.sourceId));
   }
   if (options.openOnly) {
-    conditions.push(openCondition());
+    conditions.push(stillOpen());
   }
   if (options.firstSeenWithinDays !== undefined) {
     // 同形状的 UTC ISO 字符串按字节序比较 = 按时间先后比较；下界形状的出处见
@@ -418,7 +431,7 @@ export interface NoticeSourceFacet {
   /** false = 条目引用了登记表里没有的源 */
   registered: boolean;
   count: number;
-  /** 未截止条数，判据与 `?open=1` 同一份 `openCondition()`（点进去的条数 = 表格数字） */
+  /** 未截止条数，判据与 `?open=1` 同一份 `stillOpen()`（点进去的条数 = 表格数字） */
   openCount: number;
   /** 该源最近一次新收录条目的 `first_seen_at`；一条都没有时为 null */
   lastFirstSeenAt: string | null;
@@ -431,7 +444,7 @@ export async function listNoticeSourceFacets(): Promise<NoticeSourceFacet[]> {
       .select({
         id: notices.sourceId,
         count: sql<number>`count(*)`,
-        openCount: sql<number>`sum(case when ${openCondition()} then 1 else 0 end)`,
+        openCount: sql<number>`sum(case when ${stillOpen()} then 1 else 0 end)`,
         lastFirstSeenAt: sql<string | null>`max(${notices.firstSeenAt})`,
       })
       .from(notices)
@@ -663,13 +676,24 @@ function parseAttachments(text: string): NoticeAttachment[] {
 }
 
 /**
- * 存量体裁回填（issue #76）。判据与生产路径完全同一份（`deriveNoticeGenre` +
- * `genreDecisionWins`），这里只负责"取数 + 是否写库"。
+ * 存量体裁回填（issue #76）。判据与生产路径完全同一份（`deriveNoticeGenre`），
+ * 这里只负责"取数 + 是否写库"。
  *
  * 一条刻意的不对称：**已判定过的条目只有在新证据更强时才改写**。否则回填脚本每跑一次
  * 就会把按附件正文升级成"修正案"的条目降回按标题判的结果，摘要模板天天抖。
+ *
+ * 而这条守卫会让**改词表**这类修复彻底落不了地（issue #79 实测）：收窄词表之后，
+ * 那 22 条靠正文「现行」判进来的条目重算出来一律是"标题级证据"（rank 1），
+ * 比存着的 `attachment_text`（rank 3）弱 ⇒ 全走 `skipped`，一条都改不动，
+ * 5 条本该变成新案的条目会继续挂着"修正案"角标与修正案模板。
+ *
+ * 所以 `force: true` 是给"输入变了"这种情形的逃生门 —— 不是绕过判据，而是承认
+ * **强弱只是同一套词表内部的相对关系**：词表本身换了，旧的"强证据"就只是一条过期结论。
+ * 上面的注释里"标题真的变了由调用方显式重算"说的也是这件事，`force` 就是那个显式。
+ * 用它时要看清报告：`samples` 会逐条列出 from → to 与新的依据，改动面是可核对的。
+ * （`force` 仍然尊重"算出来与存量逐字相同就不写"这一条，所以重复跑是幂等的。）
  */
-export async function backfillNoticeGenres(options: { apply: boolean }): Promise<{
+export async function backfillNoticeGenres(options: { apply: boolean; force?: boolean }): Promise<{
   total: number;
   changed: number;
   skipped: number;
@@ -715,7 +739,7 @@ export async function backfillNoticeGenres(options: { apply: boolean }): Promise
     });
     byGenre[decision.genre] = (byGenre[decision.genre] ?? 0) + 1;
     const storedEvidence = row.genreEvidence as GenreEvidenceKind | null;
-    if (row.genre !== null && !genreDecisionWins(decision.evidence, storedEvidence)) {
+    if (!options.force && row.genre !== null && !genreDecisionWins(decision.evidence, storedEvidence)) {
       skipped += 1;
       continue;
     }

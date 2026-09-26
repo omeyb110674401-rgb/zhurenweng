@@ -8,7 +8,7 @@
  * 少的那些就是喂给模型的窗口没装下的部分（单份附件窗口 8,000 字，而中位附件就有 7,476 字、
  * p90 46,902 字），这行数字同时也是"要不要为此上多轮调用"的唯一诚实依据。
  */
-import { AMENDMENT_TEXT_MARKERS } from './notice-genre.ts';
+
 
 /** 改动类型：与页面上的中文标签一一对应（模型给的类型只用于分类展示，不进判据）。 */
 export type ChangeKind = 'modify' | 'add' | 'delete' | 'renumber' | 'other';
@@ -23,8 +23,12 @@ export const CHANGE_KIND_LABELS: Record<ChangeKind, string> = {
 
 /**
  * 每类改动在官方对照文字里的典型写法。
- * 刻意只认"官方写法"：这些模式同时也是判体裁的词（见 AMENDMENT_TEXT_MARKERS），
- * 一套词表两个用途，不会出现"判成修正案但改动点数是 0"的自相矛盾页面。
+ *
+ * 这份词表比体裁词表（`notice-genre.ts` 的 `CHANGE_TEXT_MARKERS`）宽：它认得"删除 /
+ * 新增…条 / 作为第…条"这些**只在对照文本里出现**的写法，而判体裁只需要最不容易误伤的那几个。
+ * 方向是单向的 —— **判体裁认的词必须在这里也数得到**（否则就是 #79 那个"判成修正案
+ * 却一处改动都数不出来"的自相矛盾页面），反过来不必：数得到的词不一定足以判体裁。
+ * 这条关系由 `tests/unit/notice-genre.test.mjs` 的「词表同源」一例钉住，不靠注释自觉。
  */
 const KIND_PATTERNS: Record<Exclude<ChangeKind, 'other'>, RegExp> = {
   modify: /修改为|修改如下|作.{0,4}修改/g,
@@ -65,12 +69,24 @@ export interface CoverageVerdict {
  * - `complete`：列出的不少于正文检测到的 ⇒ "已列出全部 N 处"；
  * - `partial`：列得少 ⇒ 明说"还有 M−N 处没列出（本站读到的那一截里没有）"，
  *   这是**窗口不够**的直接证据，不粉饰成"以上是主要内容"；
- * - `no_markers`：正文里一个改动表述都没检测到（体裁是靠标题判的）⇒ 不给数字，
- *   写"未在附件正文里检测到成文的修改表述"，别让读者以为"0 处改动=这条没改什么"。
+ * - `no_markers`：正文里一个改动表述都没检测到 ⇒ 不给数字，写"没数到"，
+ *   别让读者以为"0 处改动 = 这条没改什么"。
+ *
+ * `no_markers` 那句为什么要把 `genreBasis` 摆出来（issue #79）：这条公示之所以有
+ * 「改动点」这一栏，是因为体裁被判成了修正案，而**判据不一定是标题** —— 可能是附件里
+ * 有新旧的对照表，也可能是正文里有对照措辞。旧文案把判据硬编码成「按标题判为修正案」，
+ * 于是在靠正文判进来的条目上，页面替自己的判据编了一个来源。宁可把真实依据照抄出来。
  */
-export function changeCoverageVerdict(listed: number, markers: ChangeMarkerCount): CoverageVerdict {
+export function changeCoverageVerdict(
+  listed: number,
+  markers: ChangeMarkerCount,
+  /** 体裁判定依据（`notice.genreBasis`，人话）；没有就只说不给数字 */
+  genreBasis?: string | null,
+): CoverageVerdict {
   if (markers.total === 0) {
-    return { state: 'no_markers', detail: '未在附件正文里检测到成文的修改表述（按标题判为修正案）' };
+    const basis = genreBasis?.trim() ?? '';
+    const why = basis === '' ? '' : `；这条判为修正案的依据是：${basis}`;
+    return { state: 'no_markers', detail: `附件正文里没有数到成文的修改表述，这一栏给不出「共几处」${why}` };
   }
   if (listed >= markers.total) {
     return { state: 'complete', detail: `已列出正文里检测到的全部 ${markers.total} 处修改表述` };
@@ -126,6 +142,3 @@ export function explanationCoverageVerdict(
     detail: `这份说明检测到约 ${sections} 个小节，本页列出 ${listed} 个 —— 其余的不在本站读到的那一截里`,
   };
 }
-
-/** 反查用得到的词表导出位（避免调用方各自抄一遍常量）。 */
-export { AMENDMENT_TEXT_MARKERS };

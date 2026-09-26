@@ -191,53 +191,61 @@ export function SummaryView({
          * 上面那行覆盖度是这块的心脏：分母是本站在**全部**附件正文里数出来的修改表述数，
          * 不是模型的自我申报。列得比分母少就照实说"其余的不在本站读到的那一截里" ——
          * 这既是对读者诚实，也是将来决定"要不要为长文上多轮调用"的唯一依据。
+         *
+         * **一行都没有时整节不渲染**（issue #79）：曾经只要 `changeMarkers` 存在就渲染，
+         * 于是 44% 的修正案（体裁靠正文里的"现行"判进来、而词表另一侧不认它）长出一个
+         * 标题写着「改动点」、note 却说"没检测到改动"的空栏。空栏传达的不是"改动点是空的"，
+         * 而是"这一栏没东西可看" —— 后者不该占一个标题。与「编制说明要点」
+         * （`explanationPoints` 为空即整节不出现）同一处理。
          */}
-        {summary.changes.length > 0 || summary.changeMarkers !== null ? (
+        {summary.changes.length === 0 ? null : (
           <div className="summary-section" data-testid="summary-changes">
             <h2 className="summary-section-title">改动点</h2>
             {summary.changeMarkers ? (
               <p className="summary-section-note" data-testid="summary-change-coverage">
-                {changeCoverageVerdict(summary.changes.length, summary.changeMarkers).detail}
+                {changeCoverageVerdict(
+                  summary.changes.length,
+                  summary.changeMarkers,
+                  notice.genreBasis,
+                ).detail}
               </p>
             ) : null}
-            {summary.changes.length === 0 ? null : (
-              <div
-                className="stat-table-wrap"
-                role="region"
-                tabIndex={0}
-                aria-label="改动点表（窄屏可横向滚动）"
-              >
-                <table className="stat-table" data-testid="summary-change-table">
-                  <thead>
-                    <tr>
-                      <th scope="col">条款</th>
-                      <th scope="col">类型</th>
-                      <th scope="col">改了什么</th>
-                      <th scope="col">原文（本站逐字摘录）</th>
+            <div
+              className="stat-table-wrap"
+              role="region"
+              tabIndex={0}
+              aria-label="改动点表（窄屏可横向滚动）"
+            >
+              <table className="stat-table" data-testid="summary-change-table">
+                <thead>
+                  <tr>
+                    <th scope="col">条款</th>
+                    <th scope="col">类型</th>
+                    <th scope="col">改了什么</th>
+                    <th scope="col">原文（本站逐字摘录）</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {summary.changes.map((change, index) => (
+                    <tr key={index}>
+                      <th scope="row">{change.clause}</th>
+                      <td>{CHANGE_KIND_LABELS[change.kind]}</td>
+                      <td>{change.text}</td>
+                      <td>
+                        <p>{change.quote}</p>
+                        <p className="draft-point-source" data-testid="summary-change-source">
+                          {change.source
+                            ? `出处：附件《${change.source}》（本站从附件逐字提取，未做改写）`
+                            : '出处：未标注（这条的引用没能反查到本轮喂入的条文）'}
+                        </p>
+                      </td>
                     </tr>
-                  </thead>
-                  <tbody>
-                    {summary.changes.map((change, index) => (
-                      <tr key={index}>
-                        <th scope="row">{change.clause}</th>
-                        <td>{CHANGE_KIND_LABELS[change.kind]}</td>
-                        <td>{change.text}</td>
-                        <td>
-                          <p>{change.quote}</p>
-                          <p className="draft-point-source" data-testid="summary-change-source">
-                            {change.source
-                              ? `出处：附件《${change.source}》（本站从附件逐字提取，未做改写）`
-                              : '出处：未标注（这条的引用没能反查到本轮喂入的条文）'}
-                          </p>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
+                  ))}
+                </tbody>
+              </table>
+            </div>
           </div>
-        ) : null}
+        )}
         {(() => {
           /*
            * 编制说明要点（issue #76 第 3 刀）。

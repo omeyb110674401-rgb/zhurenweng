@@ -538,8 +538,11 @@ const CASES = [
   {
     label: '列表排序参数被忽略（四档排序全退成默认倒计时序）',
     file: 'noticesRepo',
-    from: "  return ORDERS[sort ?? 'deadline'];",
-    to: '  return AGGREGATION_ORDER;',
+    // 2026-09-26（issue #79）起 `ORDERS` 存的是**构造函数**而不是数组：聚合序的第一键
+    // 要按展示口径现算"今天"，提成模块级常量会把今天冻结在进程启动那一刻。
+    // 所以这里连那次调用一起撤（撤掉调用 = 四档全走默认聚合序）。
+    from: "  return ORDERS[sort ?? 'deadline']();",
+    to: '  return aggregationOrder();',
     pattern: 'issue #62 仓储层：排序档位',
     test: 'tests/e2e/discovery-repo.test.mjs',
   },
@@ -710,7 +713,9 @@ const CASES = [
   {
     label: '「未截止」那一格按库列算（表上多出来的那条点进去其实已截止）',
     file: 'noticesRepo',
-    from: '        openCount: sql<number>`sum(case when ${openCondition()} then 1 else 0 end)`,',
+    // 判据函数自 2026-09-26（issue #79）起叫 `stillOpen()`（原名 `openCondition()`）：
+    // 它现在多了第三个调用方 —— 默认排序的第一档，所以名字不能再只说"open=1 的条件"
+    from: '        openCount: sql<number>`sum(case when ${stillOpen()} then 1 else 0 end)`,',
     to: "        openCount: sql<number>`sum(case when ${notices.status} = 'open' then 1 else 0 end)`,",
     pattern: 'issue #65 仓储层：来源聚合',
     test: 'tests/e2e/source-facets.test.mjs',
@@ -948,11 +953,33 @@ const CASES = [
     test: 'tests/unit/amendment-changes.test.mjs',
   },
   {
-    label: '体裁不门控产品形状（新案也会长出一张改动点表）',
+    label: '体裁不门控产品形状（非修正案也会长出一张改动点表）',
     file: 'summarize',
     from: "        if (target.genre !== 'amendment' && Array.isArray(summary.changes)) {",
     to: '        if (false && Array.isArray(summary.changes)) {',
     pattern: 'issue #76 第 2 刀：修正案改动点',
+    test: 'tests/e2e/summary-amendment-changes.test.mjs',
+  },
+  {
+    // 2026-09-26 补（issue #79）：体裁门有两半 —— 清掉 `changes`，以及**不给非修正案算覆盖度分母**。
+    // 上面那条只能证明前半（要靠打包清单那条夹具才可观测：新案夹具里的改动词只出现在编制说明里，
+    // 而逐字反查只认草案那一侧，所以新案无论如何都产不出改动点）。
+    // 这一条钉后半：分母为 null 是「新案不该有"共几处"这句话」的唯一证据。
+    label: '体裁不门控覆盖度分母（新案也带上一份"共几处"）',
+    file: 'summarize',
+    from: "        target.genre === 'amendment'\n          ? countChangeMarkers(fullTexts.map((row) => row.text).join(' '))\n          : null;",
+    to: "        countChangeMarkers(fullTexts.map((row) => row.text).join(' '));",
+    pattern: 'issue #76 第 2 刀：修正案改动点',
+    test: 'tests/e2e/summary-amendment-changes.test.mjs',
+  },
+  {
+    // 2026-09-26 补（issue #79）：`force` 是"改了词表之后存量才改得动"的唯一出口。
+    // 撤掉它就等于回到"覆盖规矩把全部改动挡在门外"—— 那正是生产上那 22 条一条都修不了的原因。
+    label: '词表变更后回填仍守弱证据不覆盖强证据（22 条错判一条都改不动）',
+    file: 'noticesRepo',
+    from: '    if (!options.force && row.genre !== null && !genreDecisionWins(decision.evidence, storedEvidence)) {',
+    to: '    if (row.genre !== null && !genreDecisionWins(decision.evidence, storedEvidence)) {',
+    pattern: 'issue #79：改词表后的存量回填',
     test: 'tests/e2e/summary-amendment-changes.test.mjs',
   },
   {
