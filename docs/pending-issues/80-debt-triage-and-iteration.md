@@ -145,7 +145,21 @@ error 转 message 写了 7 遍 + 24 处内联、`toNoticeRecord` 三份且**已�
 - 「7 项功能在生产实测可用」是我在 2026-09-26 用公开地址逐条点的（RSS 子 feed 192→72/17、
   `?source=npc` 50→5、`?open=1` 把「已截止」徽标从 18 打到 0）。
 - 流程图 `docs/zhurenweng-iteration.html` 由 archify 以 **showcase** 质检交付：
-  `ok=true`、**0 条几何诊断**、9 项 artifact 检查全过，spec/artifact 双 SHA-256 收据。
-  **但视觉复核未完成**：archify 的 `visual-check` 需要 Chrome 而本机不可用，
-  我用浏览器实测了「无横向溢出（0 个元素）+ 卡片渲染 + viewBox 720×528」，
-  **没有**做像素级人眼复核 —— 当时所用模型不接受图像输入。这条按未完成记。
+  `ok=true`、**0 条几何诊断**、9 项 artifact 检查全过，spec/artifact 双 SHA-256 收据
+  （artifact `60e470ae…` / 636,719 字节）。
+- **但视觉复核（visual-check）没做成，按未完成记，且原因是查清了的**：
+  archify 报 `Chrome exited before visual-check completed (0)`。实测诊断：本机**已有 11 个 Chrome
+  进程在跑**（用户自己的会话），此时再启动 Chrome 会把命令行转交给既有实例并**立刻以 0 退出**、
+  不产出任何输出（我直接跑 `chrome --headless=new --dump-dom` 也是退出码 0、输出长度 0）。
+  **我没有去杀用户的浏览器**，所以 archify 的 1440×900 / 1600×1000 / 1920×1080 / 2048×1320
+  四档containment 与截图都没拿到。
+- 我自己用浏览器实测到的替代证据：**横向无溢出**（扫描全部元素，0 个 `right > innerWidth`）、
+  卡片正常渲染、SVG viewBox `0 0 720 528`。**但 1280×800 下 `scrollHeight=1224 > 800`，
+  即页面纵向需要滚动**；而 1440×900 及以上是否符合「不滚动」的约束，**我没有验证过**。
+  按 SVG 720:528 的宽高比推算，在更宽的视口下 SVG 会被放得更高，纵向溢出很可能依然存在 ——
+  这是我的推测，不是测量结果。要用它做展示件之前，请在能跑 headless Chrome 的环境里
+  补一次 `node bin/archify.mjs visual-check docs/zhurenweng-iteration.html --json`。
+- 中间我推翻了自己四次几何假设（列宽由内容决定、列距固定约 76px、6 列放不下、加宽列反而溢出），
+  最终靠「4 列 + 62px 节点 + 通道走线」过门。这个过程本身也是「先量再做」的一个小样本。
+- 另：该 HTML 636KB，会随 `Dockerfile.web` 的 `COPY . .` 进 web 镜像层
+  （`.dockerignore` 没有排除 `docs/`）。无害但不必要，要瘦身就把 `docs` 加进排除清单。
