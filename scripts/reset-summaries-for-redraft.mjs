@@ -26,6 +26,11 @@
  *     worker node scripts/reset-summaries-for-redraft.mjs --apply --all 2>&1 | tee /root/redraft.log
  *       # 全量（按条文字数降序，收益大的在前）。**带 -v 或 tee**：
  *       # `run --rm` 会删掉容器内写的文件，stdout 才是不会丢的那份备份
+ *   docker compose run --rm -v /var/backups/zhurenweng:/var/backups/zhurenweng \
+ *     worker node scripts/reset-summaries-for-redraft.mjs --apply --ids 00f8313e,90311b62 2>&1 | tee /root/redraft.log
+ *       # 点名重跑（2026-09-26 加，issue #79）：改的是**体裁模板**而不是缺条文时用它 ——
+ *       # 这类条目通常已经带着可核对的条文要点，会被幂等过滤跳过，所以 --ids 明确绕过那层过滤。
+ *       # id 可写前 8 位（前缀必须唯一，匹配到多条会当场报错退出）。
  *
  * 清空只把它们放回 pending；真正重跑要等下一轮摘要任务（或重启 worker 立刻跑一轮）。
  * 恢复：`#BACKUP {"id":…,"previousSummaryJson":…}` 每行一条，按 id 写回 `notices.ai_summary_json`
@@ -53,6 +58,24 @@ if (!Number.isFinite(limit) && !all) {
 }
 if (limit < 1) {
   console.error('--limit 必须 >= 1');
+  process.exit(1);
+}
+
+/**
+ * `--ids`（issue #79）：点名重跑，给"体裁模板变了"这种情形用 —— 那时条目往往
+ * **已经带着可核对的条文要点**（所以会被下面的幂等过滤跳过），要的却是换一套提示词重写。
+ * 接受前 8 位前缀；前缀不唯一就当场报错，不做"猜一个"。
+ */
+const idsIndex = process.argv.indexOf('--ids');
+const idArgs =
+  idsIndex >= 0
+    ? (process.argv[idsIndex + 1] ?? '')
+        .split(',')
+        .map((item) => item.trim())
+        .filter((item) => item !== '')
+    : [];
+if (idsIndex >= 0 && idArgs.length === 0) {
+  console.error('--ids 后面要跟逗号分隔的 id（可写前 8 位），例如 --ids 00f8313e,90311b62');
   process.exit(1);
 }
 
@@ -94,36 +117,83 @@ console.log(
     `${redone} 条已带上可核对的条文要点（跳过，工具因此可重复跑）⇒ 可置换池 ${pool.length} 条`,
 );
 
+/**
+ * 点名名单 → 条目。三种情况都要吵出来而不是静默缩小工作范围：
+ * 前缀匹配到 0 条、匹配到多条、以及匹配到的条目**已经截止**（清了就永久失去摘要，
+ * 这是本工具唯一的硬红线，`--ids` 也不许绕过）。
+ */
+let picked;
+if (idArgs.length > 0) {
+  const matched = [];
+  const problems = [];
+  for (const prefix of idArgs) {
+    const hits = withSummary.filter((row) => row.id.startsWith(prefix));
+    if (hits.length === 0) {
+      problems.push(`--ids ${prefix}：库里没有以它开头、且已有摘要的条目`);
+      continue;
+    }
+    if (hits.length > 1) {
+      problems.push(`--ids ${prefix}：匹配到 ${hits.length} 条，前缀不唯一（写长一点）`);
+      continue;
+    }
+    if (hits[0].status === SUMMARY_NOT_SUMMARIZED_STATUS) {
+      problems.push(`--ids ${prefix}：这条已截止，清空等于永久失去摘要 —— 本工具不动它`);
+      continue;
+    }
+    matched.push(hits[0]);
+  }
+  if (problems.length > 0) {
+    for (const problem of problems) console.error(`✖ ${problem}`);
+    console.error('点名的条目有问题，中止（一个字节都没改）');
+    process.exit(1);
+  }
+  picked = matched;
+  console.log(
+    `点名重跑 ${picked.length} 条（--ids 会绕过"已经有条文要点"那层幂等过滤：` +
+      `换的是体裁模板，不是补条文 —— 上面那段池子统计与本次名单无关）`,
+  );
+  for (const row of picked) {
+    const sources = await draftSourcesForSummary(row);
+    const chars = sources.reduce((sum, source) => sum + source.text.length, 0);
+    console.log(
+      `  ${row.id.slice(0, 8)} ${sources.length} 份 / ${chars} 字符  ${row.title.slice(0, 34)}`,
+    );
+  }
+}
+
 // 逐条问摘要任务自己：这条现在重跑会喂进几份、多少字条文
 const scored = [];
-for (const row of pool) {
+for (const row of picked ?? pool) {
   const sources = await draftSourcesForSummary(row);
   const chars = sources.reduce((sum, source) => sum + source.text.length, 0);
   if (sources.length > 0) scored.push({ row, files: sources.length, chars });
 }
 scored.sort((a, b) => b.chars - a.chars);
 
-const noDraft = pool.length - scored.length;
-console.log(
-  `会被喂进条文的 ${scored.length} 条；剩下 ${noDraft} 条没有可读条文（附件没抽出来 / 没附件 / ` +
-    `正文本身够长）—— 重跑它们只会白花一次调用，不动`,
-);
-for (const item of scored.slice(0, 15)) {
-  // 「字符」而不是「字」：提示词预算（每份 8,000 / 合计 12,000 个**汉字**）按汉字数算，
-  // 这里打的是字符串长度，两者不是一回事，混着写会让人以为预算被超了
+if (!picked) {
+  const noDraft = pool.length - scored.length;
   console.log(
-    `  ${item.row.id.slice(0, 8)} 条文 ${item.files} 份 / ${item.chars} 字符  ${item.row.title.slice(0, 30)}`,
+    `会被喂进条文的 ${scored.length} 条；剩下 ${noDraft} 条没有可读条文（附件没抽出来 / 没附件 / ` +
+      `正文本身够长）—— 重跑它们只会白花一次调用，不动`,
   );
+  for (const item of scored.slice(0, 15)) {
+    // 「字符」而不是「字」：提示词预算（每份 8,000 / 合计 12,000 个**汉字**）按汉字数算，
+    // 这里打的是字符串长度，两者不是一回事，混着写会让人以为预算被超了
+    console.log(
+      `  ${item.row.id.slice(0, 8)} 条文 ${item.files} 份 / ${item.chars} 字符  ${item.row.title.slice(0, 30)}`,
+    );
+  }
+  if (scored.length > 15) console.log(`  …另 ${scored.length - 15} 条`);
 }
-if (scored.length > 15) console.log(`  …另 ${scored.length - 15} 条`);
 
 if (!apply) {
   console.log('\n只读模式（未加 --apply）：一个字都没改。');
   process.exit(0);
 }
 
-const picked = scored.slice(0, limit).map((item) => item.row);
-if (picked.length === 0) {
+// 点名模式下名单已经定了（且已逐条报过"会喂进几份"），不再按字数排序取前 N
+const chosen = picked ?? scored.slice(0, limit).map((item) => item.row);
+if (chosen.length === 0) {
   console.log('没有可置换的条目，退出。');
   process.exit(0);
 }
@@ -132,7 +202,7 @@ const backupDir = process.env.REDRAFT_BACKUP_DIR || '/var/backups/zhurenweng';
 const backupFile = path.join(backupDir, `pre-redraft-${new Date().toISOString().replace(/[:.]/g, '-')}.jsonl`);
 
 // 备份先取出来，一条都不先清：清空是单向操作
-const before = await peekSummaries(picked.map((row) => row.id));
+const before = await peekSummaries(chosen.map((row) => row.id));
 const lines = before.map((row) =>
   JSON.stringify({
     id: row.id,
@@ -159,17 +229,17 @@ try {
 } catch (error) {
   console.log(`（未能写文件：${String(error.message)}；以 stdout 的 #BACKUP 行为准）`);
 }
-console.log(`备份行数 ${before.length} / 待清空 ${picked.length} —— 对不上就不要继续`);
-if (before.length !== picked.length) {
+console.log(`备份行数 ${before.length} / 待清空 ${chosen.length} —— 对不上就不要继续`);
+if (before.length !== chosen.length) {
   console.error('备份条数与名单不符，中止（一个字节都没改）');
   process.exit(1);
 }
 
-await clearSummaryForRedraft(picked.map((row) => row.id));
+await clearSummaryForRedraft(chosen.map((row) => row.id));
 console.log(
-  `已清空并置回 pending：${picked.length} 条 ⇒ 等下一轮摘要任务（或 docker compose up -d worker 立刻跑一轮）`,
+  `已清空并置回 pending：${chosen.length} 条 ⇒ 等下一轮摘要任务（或 docker compose up -d worker 立刻跑一轮）`,
 );
-for (const row of picked) console.log(`  ${row.id.slice(0, 8)}  ${row.title.slice(0, 36)}`);
+for (const row of chosen) console.log(`  ${row.id.slice(0, 8)}  ${row.title.slice(0, 36)}`);
 
 /**
  * 只读不改：按名单取当前摘要值。备份必须在清空**之前**落盘（清空是单向的），
