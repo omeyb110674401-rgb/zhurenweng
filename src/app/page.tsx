@@ -21,6 +21,7 @@ import { NOTICE_SORT_KEYS, NOTICE_SORT_LABELS, type NoticeSortKey } from '@/lib/
 import { SINCE_OPTION_DAYS } from '@/lib/notice-recency';
 import { buildNoticeListJsonLd, serializeJsonLd } from '@/lib/notice-jsonld';
 import { DOMAIN_CATEGORIES } from '@/lib/categories';
+import { AUDIENCE_HINTS, AUDIENCE_LABELS, NOTICE_AUDIENCES, type NoticeAudience } from '@/lib/audience';
 import { siteUrl } from '@/lib/site-url';
 import { mailerReady } from '@/lib/mailer-availability';
 import { SiteFooter } from '@/app/_lib/site-footer';
@@ -78,6 +79,11 @@ export async function generateMetadata({ searchParams }: HomePageProps): Promise
 /** 当前生效的筛选状态（全部可分享于 querystring：/?category=…&agency=…&q=…&page=N）。 */
 interface FilterState {
   category?: string;
+  /**
+   * 受众面（issue #83）：与领域正交的第二个维度 —— 领域答"关于什么事"，
+   * 受众面答"该谁来看、该谁去提意见"（公众广域 / 行业专业 / 未判定）。
+   */
+  audience?: NoticeAudience;
   agency?: string;
   keyword?: string;
   /**
@@ -122,6 +128,7 @@ function buildFilterHref(current: FilterState, next: Partial<FilterState>): stri
   const merged = { ...current, ...next };
   const search = new URLSearchParams();
   if (merged.category) search.set('category', merged.category);
+  if (merged.audience) search.set('audience', merged.audience);
   if (merged.agency) search.set('agency', merged.agency);
   // lead 只在有机关筛选时才有意义（无机关时它不改变任何结果）
   if (merged.agency && merged.leadAgencyOnly) search.set('lead', '1');
@@ -144,6 +151,7 @@ export default async function HomePage({ searchParams }: HomePageProps) {
   const query = parseHomeQuery(await searchParams);
   const current: FilterState = {
     category: query.category,
+    audience: query.audience,
     agency: query.agency,
     keyword: query.keyword,
     from: query.from,
@@ -156,7 +164,7 @@ export default async function HomePage({ searchParams }: HomePageProps) {
     openOnly: query.openOnly,
     sinceDays: query.sinceDays,
   };
-  const { category, agency, keyword, from, to, period, source } = current;
+  const { category, audience, agency, keyword, from, to, period, source } = current;
   const hasFilter = query.hasFilter;
 
   const size = pageSize();
@@ -164,6 +172,7 @@ export default async function HomePage({ searchParams }: HomePageProps) {
   const requestedPage = query.page;
   const filter = {
     category,
+    audience,
     agency,
     keyword,
     publishedFromMonth: from,
@@ -372,6 +381,37 @@ export default async function HomePage({ searchParams }: HomePageProps) {
         {/* 分类浏览筛选条（issue #9）：领域标签云 + 机关下拉 + 关键词框，
             全部经 URL 参数驱动、服务端渲染，不依赖客户端 JS */}
         <div className="filter-bar" data-testid="notice-filter-bar">
+          {/*
+            受众面筛选条（issue #83）：与领域标签**正交**的第二个维度 ——
+            领域答"这是关于什么事"，受众面答"该谁来看、该谁去提意见"。
+            站长的原始诉求就是把「立法、税收这类影响面广的」与「林业、住房这类
+            主要影响特定从业者的」分成两个大类；「未判定」也留在条上，因为
+            筛出未判定的那批正是逐条改进规则（lib/audience.ts 的覆盖表）的入口。
+          */}
+          <nav className="audience-cloud" data-testid="audience-filter" aria-label="按受众面筛选">
+            <span className="filter-group-label">受众面</span>
+            <a
+              className={`category-chip${audience === undefined ? ' category-chip-active' : ''}`}
+              href={buildFilterHref(current, { audience: undefined })}
+              data-testid="audience-filter-all"
+              aria-current={audience === undefined ? 'true' : undefined}
+            >
+              全部
+            </a>
+            {NOTICE_AUDIENCES.map((key) => (
+              <a
+                key={key}
+                className={`category-chip${audience === key ? ' category-chip-active' : ''}`}
+                href={buildFilterHref(current, { audience: audience === key ? undefined : key })}
+                data-testid="audience-filter-link"
+                data-audience={key}
+                title={AUDIENCE_HINTS[key]}
+                aria-current={audience === key ? 'true' : undefined}
+              >
+                {AUDIENCE_LABELS[key]}
+              </a>
+            ))}
+          </nav>
           <nav className="category-cloud" data-testid="category-filter" aria-label="按领域筛选">
             <a
               className={`category-chip${category === undefined ? ' category-chip-active' : ''}`}
@@ -404,6 +444,10 @@ export default async function HomePage({ searchParams }: HomePageProps) {
             aria-label="按机关与关键词筛选"
           >
             {category !== undefined && <input type="hidden" name="category" value={category} />}
+            {/* 受众面也要留住（issue #83，与下面 sort / open / since 同一件事）：
+                表单里没这个字段时，用户只填个关键词点「筛选」就会静默丢掉刚选的受众面，
+                页面顶部却还显示着他筛过的那一档 */}
+            {audience !== undefined && <input type="hidden" name="audience" value={audience} />}
             {from !== undefined && <input type="hidden" name="from" value={from} />}
             {to !== undefined && <input type="hidden" name="to" value={to} />}
             {period !== undefined && <input type="hidden" name="period" value={period} />}

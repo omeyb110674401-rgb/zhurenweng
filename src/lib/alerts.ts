@@ -86,7 +86,9 @@ export async function sendTaskFailureAlert(input: TaskFailureAlertInput): Promis
   }
 
   try {
-    await recordAlertSend(alertDate, input.jobName, sourceId, input.now.toISOString());
+    // 错误摘要一并落库（issue #83）：邮件的去重标记顺手成为"这封告警说了什么"的留痕，
+    // 否则复盘时只能去翻收件箱（09-21 起那十几封就是这么丢的）
+    await recordAlertSend(alertDate, input.jobName, sourceId, input.now.toISOString(), input.error);
   } catch (error) {
     // 去重标记写入失败只影响当日重复抑制，记日志即可
     logLine(input.log, `告警去重标记写入失败（当日可能重复告警）：${errorText(error)}`);

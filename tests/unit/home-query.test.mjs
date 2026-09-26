@@ -156,6 +156,8 @@ describe('parseHomeQuery：筛选状态与索引口径', () => {
   it('筛选与页码可以并存（索引口径由 hasFilter 决定，与页码无关）', () => {
     assert.deepEqual(parseHomeQuery({ q: '意见', page: '3' }), {
       category: undefined,
+      // 受众面（issue #83）：与领域正交的第二个分类维度，同样进 hasFilter
+      audience: undefined,
       agency: undefined,
       keyword: '意见',
       from: undefined,
@@ -294,6 +296,47 @@ describe('source 参数：按来源筛选（issue #65）', () => {
     assert.equal(
       subFeedHref(parseHomeQuery({ source: 'miit', open: '1' })),
       '/feed.xml?source=miit&open=1',
+    );
+  });
+});
+
+describe('audience 参数：按受众面筛选（issue #83）', () => {
+  it('三档取值都生效，且进 hasFilter（改了集合就该算）', () => {
+    for (const value of ['public', 'sector', 'unknown']) {
+      const query = parseHomeQuery({ audience: value });
+      assert.equal(query.audience, value);
+      assert.equal(query.hasFilter, true, `audience=${value} 是筛选维度`);
+    }
+  });
+
+  it('未知值不生效（与领域标签同一处理：任意 querystring 不该触发无效筛选）', () => {
+    for (const bad of ['', 'both', 'PUBLIC', '公众广域', 'all']) {
+      const query = parseHomeQuery({ audience: bad });
+      assert.equal(query.audience, undefined, `audience=${JSON.stringify(bad)} 不该生效`);
+      assert.equal(query.hasFilter, false);
+    }
+    assert.equal(parseHomeQuery({ audience: ['sector', 'public'] }).audience, 'sector', '数组取首值');
+  });
+
+  it('口径说明里说得出是哪一档（数字站不住脚时读者要能看出是谁造成的）', () => {
+    assert.equal(describeHomeQuery(parseHomeQuery({ audience: 'public' })), '受众面：公众广域');
+    assert.equal(
+      describeHomeQuery(parseHomeQuery({ audience: 'unknown', open: '1' })),
+      '受众面：未判定 · 只看未截止',
+    );
+    // 与领域标签并存时顺序固定（首页那行「筛选后共 N 条（…）」与 feed 标题共用这一份）
+    assert.equal(
+      describeHomeQuery(parseHomeQuery({ category: '生态环境', audience: 'sector' })),
+      '生态环境 · 受众面：行业专业',
+    );
+  });
+
+  it('子 feed 地址带上受众面（页面筛过的条件，订阅路径上不许丢）', () => {
+    assert.equal(subFeedHref(parseHomeQuery({ audience: 'sector' })), '/feed.xml?audience=sector');
+    assert.equal(
+      subFeedHref(parseHomeQuery({ audience: 'sector', category: '生态环境', sort: 'clicks' })),
+      '/feed.xml?category=%E7%94%9F%E6%80%81%E7%8E%AF%E5%A2%83&audience=sector',
+      '排序不是条件，不进地址',
     );
   });
 });

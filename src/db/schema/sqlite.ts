@@ -99,6 +99,20 @@ export const notices = sqliteTable('notices', {
   /** 判定用的证据种类（none/title/attachment_names/attachment_text）：弱证据不许覆盖强证据，
    *  否则抓取每轮重写标题会把抽取任务刚升级的判定降回去（详见 src/lib/notice-genre.ts） */
   genreEvidence: text('genre_evidence'),
+  /**
+   * 受众面（issue #83）：这条公示**该谁来看、该谁去提意见** ——
+   * public 公众广域（立法 / 税收 / 社保医保等，影响不特定多数人）/
+   * sector 行业专业（技术标准、行业规程、许可准入，读者以从业者为主）/
+   * unknown 判不出来（不兜底）。判据与优先级见 src/lib/audience.ts。
+   *
+   * 与领域标签 `category_tags_json` 是**两个正交维度**：领域答"关于什么事"，
+   * 受众面答"谁该看" —— 一条《城市绿地设计标准（修订征求意见稿）》属于「生态环境」，
+   * 却是「行业专业」。列表页筛选与详情页角标读的都是这一列。
+   * NULL = 本列上线前的存量，没判定过（由 scripts/tag-notice-audience.mjs 回填）。
+   */
+  audience: text('audience'),
+  /** 凭什么这么判（一句人话，后台与审计脚本展示用）—— 与体裁同一规矩：不许留看不出依据的字段 */
+  audienceBasis: text('audience_basis'),
   /** 出站提意点击数（北极星指标） */
   outboundClicks: integer('outbound_clicks').notNull().default(0),
   /**
@@ -151,6 +165,15 @@ export const alertSends = sqliteTable(
     sourceId: text('source_id').notNull(),
     /** 发送时间，ISO 8601 */
     sentAt: text('sent_at').notNull(),
+    /**
+     * 那封告警说了什么（issue #83）：与邮件正文里那段错误摘要同一个字符串。
+     *
+     * 为什么必须补这一列：此前表里只有「哪天、哪个任务、哪个源、几点发的」——
+     * 09-21 起站长收到过 14 封告警，**内容已不可考**（邮件在收件箱里翻了才看得到，
+     * 而"当时到底报了什么"恰恰是事后复盘唯一需要的信息）。成本一列，价值是"以后查得到"。
+     * 存量行的该列为 NULL（那时没记），页面与 SQL 一律按"未记录"显示，不猜。
+     */
+    errorSummary: text('error_summary'),
   },
   (table) => [
     primaryKey({ columns: [table.alertDate, table.jobName, table.sourceId] }),

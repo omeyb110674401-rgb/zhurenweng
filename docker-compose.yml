@@ -73,6 +73,12 @@ services:
       # 计数在进程内存里 —— 单实例部署有效，多副本时实际阈值会乘以副本数。
       SUBSCRIBE_RATE_LIMIT_PER_HOUR: ${SUBSCRIBE_RATE_LIMIT_PER_HOUR:-}
       ADMIN_LOGIN_RATE_LIMIT_PER_HOUR: ${ADMIN_LOGIN_RATE_LIMIT_PER_HOUR:-}
+      # 列表 / 检索每页条数（issue #83 补上转发）。此前这两个旋钮**只写在文档与代码里**，
+      # compose 一个都不传 —— 操作者按 README 改了 `.env`、`docker compose up -d web`，
+      # 页面条数纹丝不动，而没有任何地方报错（最难查的一类问题）。
+      # 留空 = 用代码缺省（50）；非法值按代码里的判定退回缺省，不会把页面变成 0 条。
+      LIST_PAGE_SIZE: ${LIST_PAGE_SIZE:-}
+      SEARCH_PAGE_SIZE: ${SEARCH_PAGE_SIZE:-}
     ports:
       - "127.0.0.1:3000:3000"
     depends_on:
@@ -148,6 +154,18 @@ services:
       ATTACHMENT_BLOCKED_RETRY_DAYS: ${ATTACHMENT_BLOCKED_RETRY_DAYS:-}
       ATTACHMENT_REFRESH_DAYS: ${ATTACHMENT_REFRESH_DAYS:-}
       ATTACHMENT_MAX_BYTES: ${ATTACHMENT_MAX_BYTES:-}
+      # 摘要重试与附件抽取的四个旋钮（issue #83 补上转发）：同样属于"文档承诺可调、
+      # 实际没接线"的那一批。逐一说明它们各管什么：
+      # - SUMMARY_MAX_RETRIES：一次摘要最多重试几次（决定最坏占用多久，缺省 3）
+      # - SUMMARY_RETRY_DELAY_MS：重试的基础退避（缺省 500）
+      # - ATTACHMENT_MAX_ATTEMPTS：单个附件最多尝试几轮（含被熔断跳过的轮次，缺省 3）
+      # - ATTACHMENT_NOTICES_PER_ROUND：一轮最多处理多少条公示的附件（缺省 60）
+      # - ATTACHMENT_PROBE_BYTES：判型只读文件头多少字节（缺省 65536）
+      SUMMARY_MAX_RETRIES: ${SUMMARY_MAX_RETRIES:-}
+      SUMMARY_RETRY_DELAY_MS: ${SUMMARY_RETRY_DELAY_MS:-}
+      ATTACHMENT_MAX_ATTEMPTS: ${ATTACHMENT_MAX_ATTEMPTS:-}
+      ATTACHMENT_NOTICES_PER_ROUND: ${ATTACHMENT_NOTICES_PER_ROUND:-}
+      ATTACHMENT_PROBE_BYTES: ${ATTACHMENT_PROBE_BYTES:-}
     depends_on:
       db:
         condition: service_healthy

@@ -32,16 +32,24 @@ export async function hasAlertSend(
   return rows.length > 0;
 }
 
-/** 记录告警发送标记（邮件发送成功后调用）；复合主键冲突时静默忽略，保证幂等。 */
+/**
+ * 记录告警发送标记（邮件发送成功后调用）；复合主键冲突时静默忽略，保证幂等。
+ *
+ * `errorSummary` 是**那封邮件里那段错误摘要**（issue #83）：落下来是为了事后查得到
+ * "当时报了什么" —— 此前表里只有时间与任务名，站长 09-21 起收到的那十几封告警
+ * 内容已不可考，复盘时只能靠翻收件箱。传 null 表示这次没有可记的摘要（不该发生，
+ * 但列可空，别为了类型好看编一个空串：空串与"没记"在 SQL 里是两件事）。
+ */
 export async function recordAlertSend(
   alertDate: string,
   jobName: string,
   sourceId: string,
   sentAt: string,
+  errorSummary: string | null = null,
 ): Promise<void> {
   const db = await getDb();
   await db
     .insert(alertSends)
-    .values({ alertDate, jobName, sourceId, sentAt })
+    .values({ alertDate, jobName, sourceId, sentAt, errorSummary })
     .onConflictDoNothing();
 }

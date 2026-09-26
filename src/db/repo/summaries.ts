@@ -70,6 +70,9 @@ export interface ReviewQueueItem {
   /** 体裁与判定依据（issue #76）：摘要失败时操作者要先知道系统以为它在摘要哪一种东西 */
   genre: string | null;
   genreBasis: string | null;
+  /** 受众面与判定依据（issue #83）：同上 —— 复核时也要知道这份文件找的是谁的意见 */
+  audience: string | null;
+  audienceBasis: string | null;
 }
 
 export async function listNoticesForReview(limit = 50): Promise<ReviewQueueItem[]> {
@@ -85,6 +88,8 @@ export async function listNoticesForReview(limit = 50): Promise<ReviewQueueItem[
       deadlineAt: notices.deadlineAt,
       genre: notices.genre,
       genreBasis: notices.genreBasis,
+      audience: notices.audience,
+      audienceBasis: notices.audienceBasis,
     })
     .from(notices)
     .where(eq(notices.summaryStatus, 'failed_review'))

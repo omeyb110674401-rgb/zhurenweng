@@ -68,3 +68,15 @@ select email,
        categories_json
   from subscriptions
  order by created_at;
+
+\echo '=== 6) 告警留痕：最近 15 封告警**说了什么**（issue #83 新增列）'
+-- 在这一列之前，表里只有时间与任务名 —— 09-21 起那十几封告警内容已不可考，
+-- 复盘只能去翻收件箱。存量行的 error_summary 是 NULL（那时没记），如实显示"未记录"。
+select alert_date,
+       job_name,
+       coalesce(nullif(source_id, ''), '（任务级）')  as 源,
+       substr(sent_at, 1, 19)                        as 发送于,
+       coalesce(left(error_summary, 80), '（未记录：本列上线前的存量）') as 说了什么
+  from alert_sends
+ order by sent_at desc
+ limit 15;

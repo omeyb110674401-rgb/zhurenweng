@@ -1141,6 +1141,65 @@ body {
   font-variant-numeric: tabular-nums;
 }
 
+/* 受众面角标（issue #83）：与体裁角标同一行的第三种角标。体裁说"这是哪种文件"，
+   受众面说"这份文件找的是谁的意见" —— 两者都比状态淡（不抢"该不该行动"的注意力），
+   但受众面用底色区分两类：读者扫一眼就知道这份公示要不要自己开口。 */
+.audience-badge {
+  padding: 2px 8px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.audience-public {
+  color: #92400e;
+  background: #fffbeb;
+  border-color: #fcd34d;
+}
+
+.audience-sector {
+  color: #1e3a8a;
+  background: #eff6ff;
+  border-color: #bfdbfe;
+}
+
+/* 受众面筛选条（issue #83）：与领域标签云同住筛选条，但**先出现** ——
+   "该谁看"是比"关于什么事"更靠前的判断（读者先想知道这跟我有没有关系）。
+   外观沿用 category-chip 的胶囊，只多一个组标签把两排的语义分开。 */
+.audience-cloud {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.filter-group-label {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+/* ===== 摘要依据标签（issue #83）=====
+   摘要卡底部那行「摘要依据：…」的标签。它回答的是"这份摘要是读了条文写的，
+   还是只读了公告本身"—— 是**可核对性**的一部分，所以给它一个底色的胶囊，
+   但比正文小一号（它不是内容，是内容的出处说明）。 */
+.summary-basis {
+  display: inline-block;
+  margin-right: 6px;
+  padding: 1px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: var(--paper);
+  color: var(--ink-soft);
+  font-size: 12px;
+}
+
+.summary-basis-attachment-points {
+  color: #166534;
+  background: #f0fdf4;
+  border-color: #bbf7d0;
+}
+
 /* ===== 领域分类浏览与筛选（issue #9）===== */
 
 .filter-bar {

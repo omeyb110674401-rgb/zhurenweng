@@ -19,3 +19,26 @@
 - 任何切片的验收标准中"docker compose up"改为"`npm run e2e` 全绿 + docker-compose.yml 存在且与服务清单一致"。
 - 方言交集可能牺牲个别 PG 特性（如 JSONB 索引）；数据量小（国家级公示每月数十条），可接受。
 - Meilisearch 适配器的集成验证推迟到生产部署（issue #13）阶段，属已知风险。
+
+## 补充：PostgreSQL 那一半**没有被测过**（2026-09-26，issue #83）
+
+上面那句"迁移按方言分别生成"留下了一个**看起来是绿的**边界，这轮把它写下来，免得下一个人
+以为 PG 侧也被门守着：
+
+- **事实**：10 个仓库模块（versions / summaries / subscriptions / stats / sources / reminders /
+  notifications / alerts / notices / attachments）一律 `import { … } from '../schema/sqlite.ts'`，
+  与当前驱动无关；`src/db/client.ts` 对 PG 驱动返回的是 `return db as unknown as AppDatabase;`
+  —— 一次**没有任何运行时校验**的类型断言。
+- **因此**：① 所有仓库查询的类型检查是针对 SQLite schema 做的，PG 列类型（int8 / timestamptz …）
+  从未参与编译；② 本地 e2e 全绿**不能**说明生产那条路径也对 —— 这正是 0012–0014
+  迁移在生产被**静默跳过**（本地全新库永远全跑、看不出跳过）那一类事故的土壤。
+- **被守住的与没被守住的**：迁移文件本身有守卫（`tests/e2e/migrations-integrity.test.mjs`：
+  两方言序号一致、同名迁移列集合一致、`when` 严格递增，以及"存量库向后迁移"的真实两阶段回放）；
+  **没被守住的是驱动行为与类型转换**，它只在生产真跑时暴露，目前靠线上抽查兜着。
+- **本轮的处置（最小动作）**：把这条边界写进 ADR —— 让它不再看起来是绿的。**没有**为它补测试，
+  因为一条能真正覆盖它的测试需要本地 PostgreSQL，而那正是本 ADR 第 1 条拒绝的前提。
+- **要动它的触发条件**（任一成立再考虑）：① PG 侧再出一次"只在生产成立"的缺陷；
+  ② 数据量或并发上到需要 PG 专属特性（JSONB 索引、`ON CONFLICT` 的 PG 语义差异等）；
+  ③ 换机器时能跑起一个 Postgres 容器。届时的方向是给仓库层加双方言类型（或至少给
+  "只在 PG 上成立"的分支加形状守卫）—— 先例是 `periodDaysExpr`：它是全项目**唯一**被允许
+  按驱动分支的地方，理由与边界写在那段注释里。

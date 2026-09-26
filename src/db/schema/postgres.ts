@@ -86,6 +86,15 @@ export const notices = pgTable('notices', {
   /** 判定用的证据种类（none/title/attachment_names/attachment_text）：弱证据不许覆盖强证据，
    *  否则抓取每轮重写标题会把抽取任务刚升级的判定降回去（详见 src/lib/notice-genre.ts） */
   genreEvidence: text('genre_evidence'),
+  /**
+   * 受众面（issue #83）：public 公众广域 / sector 行业专业 / unknown 未判定。
+   * 与领域标签（category_tags_json）正交：领域答"关于什么事"，受众面答"谁该看、
+   * 谁该去提意见"。判据与优先级见 src/lib/audience.ts。
+   * NULL = 本列上线前的存量，没判定过（由 scripts/tag-notice-audience.mjs 回填）。
+   */
+  audience: text('audience'),
+  /** 凭什么这么判（一句人话）—— 与体裁同一规矩：不许留一个看不出依据的字段 */
+  audienceBasis: text('audience_basis'),
   /** 出站提意点击数（北极星指标） */
   outboundClicks: integer('outbound_clicks').notNull().default(0),
   /**
@@ -138,6 +147,8 @@ export const alertSends = pgTable(
     sourceId: text('source_id').notNull(),
     /** 发送时间，ISO 8601 */
     sentAt: text('sent_at').notNull(),
+    /** 那封告警说了什么（issue #83）：与邮件正文里那段错误摘要同一个字符串；存量为 NULL */
+    errorSummary: text('error_summary'),
   },
   (table) => [
     primaryKey({ columns: [table.alertDate, table.jobName, table.sourceId] }),

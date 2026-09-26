@@ -1,4 +1,5 @@
 import type { GenreEvidenceKind, NoticeGenre } from '../lib/notice-genre.ts';
+import type { NoticeAudience } from '../lib/audience.ts';
 
 /**
  * 中立的领域类型 —— 仓库层（src/db/repo）对外的数据形状，
@@ -100,6 +101,14 @@ export interface NoticeRecord {
   genreBasis: string | null;
   /** 判定用的证据种类（弱证据不覆盖强证据） */
   genreEvidence: GenreEvidenceKind | null;
+  /**
+   * 受众面（issue #83）：这条公示"该谁来看、该谁去提意见"。与领域标签正交 ——
+   * 领域答"关于什么事"，受众面答"谁该看"。null = 本列上线前的存量、没判定过；
+   * 'unknown' 才是「判过了但没线索」，两者都显示「未判定」但只有前者待回填。
+   */
+  audience: NoticeAudience | null;
+  /** 凭什么这么判（一句人话，后台与审计脚本展示） */
+  audienceBasis: string | null;
   /** 出站提意点击数（北极星指标） */
   outboundClicks: number;
   /** 版本链（issue #10）：上一轮版本条目 id；首版 / 未关联为 null */

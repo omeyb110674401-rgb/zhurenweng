@@ -1,7 +1,8 @@
 import { and, eq, isNotNull } from 'drizzle-orm';
 import { getDb } from '../client.ts';
 import { notices, reminderSends } from '../schema/sqlite.ts';
-import type { NoticeRecord, NoticeStatus, ReminderStage } from '../types.ts';
+import { toNoticeRecordWithoutContent } from './notice-record.ts';
+import type { NoticeRecord, ReminderStage } from '../types.ts';
 
 /**
  * 截止提醒仓库（issue #7）：提醒候选条目查询 + 发送去重标记。
@@ -9,42 +10,11 @@ import type { NoticeRecord, NoticeStatus, ReminderStage } from '../types.ts';
  * 去重键 = 条目 × 提醒档（d7 / d3）× 订阅，即 reminder_sends 的复合主键，
  * 重复触发任务不会重发。数据量为国家级公示的量级（每月数十条），候选条目
  * 直接全量取出后在应用层按剩余天数筛选，保证双方言 SQL 交集。
+ *
+ * 行→记录的映射走 ./notice-record.ts 的**不带内容**那一支（issue #83 F 项）：
+ * 本文件原先自己抄了一份映射表，加一列要记得改三处。
  */
-
-function toNoticeRecord(row: typeof notices.$inferSelect): NoticeRecord {
-  return {
-    id: row.id,
-    sourceId: row.sourceId,
-    title: row.title,
-    agency: row.agency,
-    url: row.url,
-    publishedAt: row.publishedAt,
-    deadlineAt: row.deadlineAt,
-    status: row.status as NoticeStatus,
-    categoryTags: safeParseArray(row.categoryTagsJson),
-    bodyText: row.bodyText,
-    attachments: [],
-    aiSummary: null,
-    summaryModel: row.summaryModel,
-    fetchedAt: row.fetchedAt,
-    firstSeenAt: row.firstSeenAt,
-    outboundClicks: row.outboundClicks,
-    versionOf: row.versionOf,
-    versionSeq: row.versionSeq,
-    genre: row.genre as NoticeRecord['genre'],
-    genreBasis: row.genreBasis,
-    genreEvidence: row.genreEvidence as NoticeRecord['genreEvidence'],
-  };
-}
-
-function safeParseArray(text: string): string[] {
-  try {
-    const parsed = JSON.parse(text) as unknown;
-    return Array.isArray(parsed) ? parsed.map((item) => String(item)) : [];
-  } catch {
-    return [];
-  }
-}
+const toNoticeRecord = toNoticeRecordWithoutContent;
 
 /** 提醒候选条目：征求意见中且带截止日期。 */
 export async function listOpenNoticesWithDeadline(): Promise<NoticeRecord[]> {

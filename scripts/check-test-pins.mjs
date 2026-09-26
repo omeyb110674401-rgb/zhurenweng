@@ -8,6 +8,10 @@
  * 于是它同时是一张可执行的清单。
  *
  * 用法：node scripts/check-test-pins.mjs
+ * **它现在是门的一部分**（issue #83，2026-09-26）：挂在 `pretest` 上，所以 `npm test`
+ * 会先跑一遍它。此前它是 1,181 行、113 条用例、**0 个调用者** —— 只有"记得手动跑"时才跑，
+ * 而人一定会忘（发行记录见 issue #80："验证是手艺而不是门"）。按需单跑仍然可以，
+ * 快速循环用 `npm run test:unit`（它只跑 check-pins-clean 那道崩溃守卫，不跑本脚本）。
  * 退出码非 0 的情况：某条断言撤掉实现后仍然为绿（说明它没钉住任何东西），
  * 或者某个 `from` 片段在源码里找不到（说明代码改过、这条用例已经过期）。
  *
@@ -68,6 +72,16 @@ const TARGETS = {
   alertBackup: 'scripts/alert-backup-failure.mjs',
   pipelineHealth: 'src/lib/pipeline-health.ts',
   noticeGenre: 'src/lib/notice-genre.ts',
+  // issue #83 补的三个"从没被自证覆盖过"的关键面：SSRF 防护、北极星计数的门口、
+  // 后台 HTML 转义。它们此前要么只有 e2e 覆盖（而 e2e 跑的是构建产物，撤源码不红），
+  // 要么一个测试都没有 —— 正是最该"撤掉实现必须变红"的三处。
+  netGuard: 'src/lib/net-guard.ts',
+  outboundCounting: 'src/lib/outbound-counting.ts',
+  htmlEscape: 'src/lib/html-escape.ts',
+  // issue #83 新增的判定与分类（三个纯函数，各自有单测钉着）
+  audience: 'src/lib/audience.ts',
+  summaryBasis: 'src/lib/summary-basis.ts',
+  errorsLib: 'src/lib/errors.ts',
   journalPg: 'drizzle/postgres/meta/_journal.json',
   journalSqlite: 'drizzle/sqlite/meta/_journal.json',
   // 本脚本自己：它改写工作区源码，所以"崩了能不能自愈"和任何一处实现同样需要钉住
@@ -1030,6 +1044,79 @@ const CASES = [
     to: '.split(/\\|/).length;',
     pattern: '转义过的竖线',
     test: 'tests/unit/docs-integrity.test.mjs',
+  },
+  // ── issue #83：新加的几条 + 三个"从没被自证覆盖过"的关键面 ──────────────
+  {
+    // SSRF 的核心那一行：撤掉它，私网 / 环回 / 云元数据字面量全部放行
+    // （末尾剥点那条守卫不是唯一防线，`ipv4Value` 自己也能吃下 `10.0.0.1.`，
+    //  所以拿它当靶子会得到一条"撤了也不红"的假用例 —— 这正是本脚本存在的理由）
+    label: 'SSRF：IPv4 私网段判定被撤（169.254.169.254 云元数据直接放行）',
+    file: 'netGuard',
+    from: '    return BLOCKED_IPV4_RANGES.some(([base, prefix]) => inIpv4Range(ipv4, base, prefix));',
+    to: '    return false;',
+    pattern: 'IPv4 私网、环回、链路本地、CGNAT 与保留段',
+    test: 'tests/unit/net-guard.test.mjs',
+  },
+  {
+    // 北极星指标的门口：这一行被撤掉，爬虫与 curl 的每一次遍历都算成"读者的一次提意"
+    label: '北极星：脚本 / 爬虫 UA 照常计数（指标被机器灌水）',
+    file: 'outboundCounting',
+    from: '  if (SCRIPT_CLIENT_UA.test(ua) || BOT_UA_PATTERN.test(ua)) {',
+    to: '  if (false) {',
+    pattern: '空 UA 与脚本运行时 UA 都不算',
+    test: 'tests/unit/outbound-counting.test.mjs',
+  },
+  {
+    // 后台是**带令牌的登录态**，而它插值的错误信息 / 源名来自源站。撤掉转义 = 一发 XSS
+    label: '后台转义：`<` 不再转义（源站可控的错误信息变成真标签）',
+    file: 'htmlEscape',
+    from: "    .replaceAll('<', '&lt;')",
+    to: "    .replaceAll('<', '<')",
+    pattern: '五个字符全部转义',
+    test: 'tests/unit/admin-html.test.mjs',
+  },
+  {
+    label: '受众面：「办法」也被当成立法（负向断言被撤，行业规章全被推给公众）',
+    file: 'audience',
+    from: 'const LAW_DRAFT =\n  /(?<![办方做想用说合])法',
+    to: 'const LAW_DRAFT =\n  /法',
+    pattern: '「办法」里的法字不算立法',
+    test: 'tests/unit/audience.test.mjs',
+  },
+  {
+    label: '受众面：判不出来硬塞进一类（「未判定」这个诚实的出口被堵死）',
+    file: 'audience',
+    from: "  return { audience: 'unknown', basis: '标题与来源都没有足够线索，不兜底成任何一类' };",
+    to: "  return { audience: 'sector', basis: '标题与来源都没有足够线索，兜底成行业专业' };",
+    pattern: '判不出来就是 unknown',
+    test: 'tests/unit/audience.test.mjs',
+  },
+  {
+    // 撤销的是"读了附件但产不出条文要点"与"读了且要点已产出"的区分：撤掉之后
+    // 名单 / 打包清单类会被标成「已优化」，页面又会指着一段不存在的栏位说话
+    label: '摘要依据：不再区分「喂了附件但零要点」（名单类被标成已优化）',
+    file: 'summaryBasis',
+    from: '            : input.hasAttachmentPoints',
+    to: '            : false',
+    pattern: '附件要点已产出',
+    test: 'tests/unit/summary-basis.test.mjs',
+  },
+  {
+    label: '摘要依据：旧模板不再算「可重跑」（运营拿着清单也不知道该跑哪些）',
+    file: 'summaryBasis',
+    from: "    return template === 'current' ? 'optimized' : 'upgradable';",
+    to: "    return 'optimized';",
+    // 注意 pattern 是**正则**：名字里的 `+` 会被当成量词，所以只取没有元字符的一段
+    pattern: '旧模板',
+    test: 'tests/unit/summary-basis.test.mjs',
+  },
+  {
+    label: '错误文本退回不认 Error（日志与告警里只剩 [object Object]）',
+    file: 'errorsLib',
+    from: '  return error instanceof Error ? error.message : String(error);',
+    to: '  return String(error);',
+    pattern: 'Error 实例取 message',
+    test: 'tests/unit/errors.test.mjs',
   },
 ];
 

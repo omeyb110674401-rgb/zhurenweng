@@ -27,6 +27,7 @@ function feedSearchParams(url: URL): HomeSearchParams {
   const pick = (name: string): string | undefined => params.get(name) ?? undefined;
   return {
     category: pick('category'),
+    audience: pick('audience'),
     agency: pick('agency'),
     q: pick('q'),
     lead: pick('lead'),
@@ -45,6 +46,9 @@ export async function GET(request: Request): Promise<Response> {
   const query = parseHomeQuery(feedSearchParams(url));
   const notices = await listNoticesFiltered({
     category: query.category,
+    // 受众面（issue #83）：feed 与页面共用同一份解析，所以「只订这一批」的地址
+    // 带 ?audience= 时订到的就是页面上那一批（subFeedHref 也把这一维写进地址）
+    audience: query.audience,
     agency: query.agency,
     keyword: query.keyword,
     sourceId: query.source,

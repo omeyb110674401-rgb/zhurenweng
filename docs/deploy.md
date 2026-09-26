@@ -100,9 +100,13 @@ bash /opt/zhurenweng/deploy/enter-smtp-credentials.sh          # 交互式录 QQ
 
 ```bash
 docker compose up -d --build
-docker compose ps          # 五服务应为 running / healthy
+docker compose ps          # 五服务应为 running；只有 db 带 healthcheck（会额外显示 healthy）
 docker compose logs -f caddy web worker --tail=50
 ```
+
+> `docker-compose.yml` 里**只有 `db` 定义了 healthcheck**（其余四个服务没有探针，
+> 所以 `compose ps` 的 STATUS 列不会出现 `(healthy)`）。2026-09-26 核过：`web` 与 `worker`
+> 靠 `depends_on: db: condition: service_healthy` 等数据库就绪，自身健康与否看日志与站点。
 
 ## 5. HTTPS（Caddy 自动签发）
 

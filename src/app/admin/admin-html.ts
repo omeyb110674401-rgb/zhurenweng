@@ -1,7 +1,8 @@
 import type { SourceRecord } from '@/db/types';import { GENRE_LABELS, type NoticeGenre } from '../../lib/notice-genre.ts';
+import { AUDIENCE_LABELS, type NoticeAudience } from '../../lib/audience.ts';
 
 import type { ReviewQueueItem } from '@/db/repo/summaries';
-import { SOURCE_UNHEALTHY_AFTER_CONSECUTIVE_FAILURES } from '@/lib/source-health';
+import { SOURCE_UNHEALTHY_AFTER_CONSECUTIVE_FAILURES } from '../../lib/source-health.ts';
 
 /**
  * 管理后台的 HTML 渲染（issue #12）。
@@ -10,16 +11,15 @@ import { SOURCE_UNHEALTHY_AFTER_CONSECUTIVE_FAILURES } from '@/lib/source-health
  * （内联样式、零客户端 JS、零新依赖），换取对状态码的完全控制 ——
  * 未授权返回真实 401，表单提交后 303 重定向回本页。
  * 所有插值统一经 escapeHtml 转义（错误信息 / 源名等可能含任意字符）。
+ * `escapeHtml` 与邮件正文用的是**同一份**（`lib/html-escape.ts`，issue #83 合并）——
+ * 此前两个文件各有一份逐字节相同的实现，邮件那份有安全测试、这份没有。
  */
 
-export function escapeHtml(value: string): string {
-  return value
-    .replaceAll('&', '&amp;')
-    .replaceAll('<', '&lt;')
-    .replaceAll('>', '&gt;')
-    .replaceAll('"', '&quot;')
-    .replaceAll("'", '&#39;');
-}
+// 转义函数的来源见上面的 import；这里再导出一次是给"只想 import 后台模块"的调用方
+// （含测试）留的稳定入口，实现只有一处。
+export { escapeHtml };
+
+import { escapeHtml } from '../../lib/html-escape.ts';
 
 /** 空值展示占位 */
 const DASH = '—';
@@ -230,6 +230,9 @@ function reviewItem(item: ReviewQueueItem): string {
     `<p class="muted">发布机关：${escapeHtml(item.agency)} · 源：${escapeHtml(item.sourceId)} · 状态：${escapeHtml(item.status)} · 截止：${item.deadlineAt ? escapeHtml(item.deadlineAt) : DASH}</p>`,
     `<p class="muted">原文：<a href="${escapeHtml(item.url)}">${escapeHtml(item.url)}</a></p>`,
     `<p class="muted">体裁：${item.genre ? escapeHtml(GENRE_LABELS[item.genre as NoticeGenre] ?? item.genre) : DASH}${item.genreBasis ? ` ｜ 依据：${escapeHtml(item.genreBasis)}` : ''}</p>`,
+    // 受众面（issue #83）：与体裁并排显示的依据行 —— 复核一条摘要时，"这份文件找的是谁的意见"
+    // 决定了提示词该往哪个方向调；判定依据同屏可见，判错了当场能看出是哪条规则撞的
+    `<p class="muted">受众面：${item.audience ? escapeHtml(AUDIENCE_LABELS[item.audience as NoticeAudience] ?? item.audience) : DASH}${item.audienceBasis ? ` ｜ 依据：${escapeHtml(item.audienceBasis)}` : ''}</p>`,
     `<form method="post" action="/admin/review" class="inline">`,
     `<input type="hidden" name="noticeId" value="${escapeHtml(item.id)}">`,
     `<input type="hidden" name="action" value="reset">`,

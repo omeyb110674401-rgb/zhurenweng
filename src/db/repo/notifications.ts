@@ -1,7 +1,8 @@
 import { and, gte, inArray, isNotNull } from 'drizzle-orm';
 import { getDb } from '../client.ts';
 import { noticeNotifications, notices } from '../schema/sqlite.ts';
-import type { NoticeRecord, NoticeStatus } from '../types.ts';
+import { toNoticeRecordWithoutContent } from './notice-record.ts';
+import type { NoticeRecord } from '../types.ts';
 
 /**
  * 新公示通知仓库（issue #60 第 3 刀）：候选条目查询 + 每人每条的去重标记。
@@ -10,42 +11,11 @@ import type { NoticeRecord, NoticeStatus } from '../types.ts';
  * 后者每天被抓取覆盖，用它当判据会把三个月前的条目天天重新通知一遍。
  * 存量行 `first_seen_at` 为 NULL 且被 `isNotNull` 挡在门外 —— 这是"刚确认订阅的老邮箱
  * 不会收到库里全部历史公示"这条保证的落点。
+ *
+ * 行→记录的映射走 ./notice-record.ts 的**不带内容**那一支（issue #83 F 项）：
+ * 邮件模板不挂附件清单、也不引用摘要 JSON，本文件原先自己抄了一份映射表。
  */
-
-function toNoticeRecord(row: typeof notices.$inferSelect): NoticeRecord {
-  return {
-    id: row.id,
-    sourceId: row.sourceId,
-    title: row.title,
-    agency: row.agency,
-    url: row.url,
-    publishedAt: row.publishedAt,
-    deadlineAt: row.deadlineAt,
-    status: row.status as NoticeStatus,
-    categoryTags: safeParseArray(row.categoryTagsJson),
-    bodyText: row.bodyText,
-    attachments: [],
-    aiSummary: null,
-    summaryModel: row.summaryModel,
-    fetchedAt: row.fetchedAt,
-    firstSeenAt: row.firstSeenAt,
-    outboundClicks: row.outboundClicks,
-    versionOf: row.versionOf,
-    versionSeq: row.versionSeq,
-    genre: row.genre as NoticeRecord['genre'],
-    genreBasis: row.genreBasis,
-    genreEvidence: row.genreEvidence as NoticeRecord['genreEvidence'],
-  };
-}
-
-function safeParseArray(text: string): string[] {
-  try {
-    const parsed = JSON.parse(text) as unknown;
-    return Array.isArray(parsed) ? parsed.map((item) => String(item)) : [];
-  } catch {
-    return [];
-  }
-}
+const toNoticeRecord = toNoticeRecordWithoutContent;
 
 /**
  * 首次收录时间在 `sinceIso` 之后的条目（按首次收录升序：汇总里旧的在前，读起来是时间线）。

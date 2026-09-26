@@ -1,4 +1,5 @@
 import { daysUntil } from '../../src/lib/dates.ts';
+import { errorMessage } from '../../src/lib/errors.ts';
 import { buildReminderEmail } from '../../src/lib/mail.ts';
 import { createMailerPort } from '../../src/lib/ports.ts';
 import { matchesSubscriptionRules } from '../../src/lib/subscription.ts';
@@ -28,10 +29,6 @@ const REMINDER_DAYS: readonly { days: number; stage: ReminderStage }[] = [
   { days: 7, stage: 'd7' },
   { days: 3, stage: 'd3' },
 ];
-
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
-}
 
 /**
  * 档位判定按**窗口 + 已发标记**，不按「剩余天数正好等于 7 / 3」。

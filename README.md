@@ -754,9 +754,16 @@ issue #29 补上国家网信办（PRD M1 源清单点名的最后两个），现
 
 ```bash
 npm run db:generate        # SQLite   → drizzle/sqlite/
-npm run db:generate:pg     # PostgreSQL → drizzle/pg/
+npm run db:generate:pg     # PostgreSQL → drizzle/postgres/
 npm run db:migrate         # 对当前 DB_DRIVER 的库应用迁移
 ```
+
+> ⚠️ `db:generate` / `db:generate:pg` **目前在非交互 shell 里跑不动**（2026-09-26 实测）：
+> drizzle-kit 的元数据快照只到 `0008`，journal 却已经到 `0016`，于是它每次都要交互式确认
+> "这是不是重命名"（`Error: Interactive prompts require a TTY`）。`0009` 起各条迁移是**手写**的
+> （照 `drizzle/<dialect>/0015_add_notice_genre.sql` 的形状加一条 SQL，再往 `meta/_journal.json`
+> 追加一项、`when` 必须比上一条大 —— 否则存量库会被静默跳过，见
+> `tests/e2e/migrations-integrity.test.mjs` 里 2026-09-24 那次事故的记录）。
 
 ## docker-compose（生产对齐）
 

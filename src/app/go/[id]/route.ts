@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { getNoticeById, recordOutboundClick } from '@/db/repo/notices';
 import { siteDateIso } from '@/lib/dates';
+import { notCountableReason } from '@/lib/outbound-counting';
 
 /**
  * 出站跳转端点（PRD「出站转化埋点」）：/go/<条目ID>
@@ -70,43 +71,11 @@ function errorPage(status: number, message: string): NextResponse {
   });
 }
 
-/** 爬虫 / 机器人 UA 特征（不区分大小写）：搜索引擎、AI 爬虫、站点扫描器、监控探针。 */
-const BOT_UA_PATTERN =
-  /bot|crawler|spider|slurp|scrapy|headless|lighthouse|monitor|uptime|facebookexternalhit|semrush|ahrefs|mj12|dotbot|yandex|petal|bytespider|gptbot|claudebot|anthropic|perplexity/i;
-
-/** 恰为脚本运行时名（可带版本号）的 UA：curl/8.4.0、node、Go-http-client/1.1 … */
-const SCRIPT_CLIENT_UA =
-  /^(node|nodejs|undici|curl|wget|python-requests|python-urllib|httpx|aiohttp|axios|node-fetch|go-http-client|java|okhttp)(\/[\d.]+)?$/i;
-
 /**
- * 请求为什么不该计入北极星指标：返回原因字符串，可计数时返回 null。
- *
- * 空 UA 也算机器 —— 真实浏览器一定会带 UA。
- *
- * 除 UA 之外的两维（issue #52）：
- * - **HEAD**：Next 会用 GET 处理器自动实现 HEAD（App Router 的既定行为），于是
- *   `curl -I`、链接校验器、监控探针都成了「一次点击」；
- * - **预取 / 预渲染**：`Purpose: prefetch`（Chrome 的推测性预取）与
- *   `Sec-Purpose: prefetch|prerender` 会在读者**还没点**的时候就来取一次。
- * 两者都不是「人读了标题并决定去官方页面」，计进去等于自己给指标灌水 ——
- * 库内那 46 行机器点击就是这么来的（issue #17 的 UA 过滤只挡住了其中一类）。
+ * 计数判据已抽到 `src/lib/outbound-counting.ts`（issue #83）：那是北极星指标的门口，
+ * 必须有能被"撤掉实现变红"的测试守着，而本文件在 `src/app/**` 下（e2e 跑的是构建产物，
+ * 改这里对 e2e 无效）。判据与词表一字未改，只是换了个能被单测直接执行的家。
  */
-function notCountableReason(request: Request): string | null {
-  const ua = (request.headers.get('user-agent') ?? '').trim();
-  if (ua === '') return '空 UA';
-  if (SCRIPT_CLIENT_UA.test(ua) || BOT_UA_PATTERN.test(ua)) {
-    return `机器 UA：${ua.slice(0, 120)}`;
-  }
-  if (request.method === 'HEAD') return 'HEAD 请求';
-
-  const purpose = `${request.headers.get('purpose') ?? ''} ${request.headers.get('sec-purpose') ?? ''}`
-    .trim()
-    .toLowerCase();
-  if (purpose.includes('prefetch') || purpose.includes('prerender')) {
-    return `预取 / 预渲染：${purpose}`;
-  }
-  return null;
-}
 
 export async function GET(
   request: Request,

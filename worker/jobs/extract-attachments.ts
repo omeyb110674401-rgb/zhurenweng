@@ -21,6 +21,7 @@ import {
   selectAttachmentCandidates,
 } from '../../src/lib/attachment-select.ts';
 import { envInt } from '../../src/lib/env-int.ts';
+import { errorMessage } from '../../src/lib/errors.ts';
 import { attachmentUrlCandidates } from '../../src/lib/attachment-url.ts';
 import { crawlFetch, readCappedBuffer } from './crawl-notices.ts';
 import type { Job, JobContext } from '../registry.ts';
@@ -77,10 +78,6 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => {
     setTimeout(resolve, ms);
   });
-}
-
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
 }
 
 function hostOf(url: string): string {

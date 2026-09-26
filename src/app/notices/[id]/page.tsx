@@ -16,6 +16,7 @@ import { summaryDisplayState } from '@/lib/summary-display';
 import { buildNoticeJsonLd, serializeJsonLd } from '@/lib/notice-jsonld';
 import { effectiveStatus } from '@/lib/notice-status';
 import { GENRE_LABELS } from '@/lib/notice-genre';
+import { AUDIENCE_LABELS } from '@/lib/audience';
 import { llmReady } from '@/lib/llm-availability';
 import { mailerReady } from '@/lib/mailer-availability';
 import { OG_IMAGE } from '@/lib/page-metadata';
@@ -178,6 +179,22 @@ export default async function NoticeDetailPage({ params }: NoticeDetailPageProps
             {notice.genre !== null && notice.genre !== 'unknown' ? (
               <span className="genre-badge" data-testid="notice-genre-badge">
                 {GENRE_LABELS[notice.genre]}
+              </span>
+            ) : null}
+            {/*
+             * 受众面角标（issue #83）。与体裁角标并排，但回答的是另一个问题：
+             * 体裁说"这是哪种文件"（修正案 / 新案 / 名单），受众面说"这份文件找的是谁的意见"
+             * —— 后者决定普通读者要不要往下读。`basis` 挂在 title 上（悬停可看判据），
+             * 因为"凭什么这么判"是**可核对性**的一部分：判错了要能一眼看出是哪条规则撞的。
+             */}
+            {notice.audience !== null && notice.audience !== 'unknown' ? (
+              <span
+                className={`audience-badge audience-${notice.audience}`}
+                data-testid="notice-audience-badge"
+                data-audience={notice.audience}
+                title={notice.audienceBasis ?? undefined}
+              >
+                {AUDIENCE_LABELS[notice.audience]}
               </span>
             ) : null}
           </div>

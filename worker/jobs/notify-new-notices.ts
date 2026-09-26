@@ -1,6 +1,7 @@
 import { createMailerPort } from '../../src/lib/ports.ts';
 import { envInt } from '../../src/lib/env-int.ts';
 import { mailerReady, mailerUnavailableReason } from '../../src/lib/mailer-availability.ts';
+import { errorMessage } from '../../src/lib/errors.ts';
 import {
   MAX_NOTICES_PER_EMAIL,
   buildNewNoticesEmail,
@@ -33,10 +34,6 @@ import type { Job, JobContext } from '../registry.ts';
 
 /** 通知回看窗口（天）：只通知这段时间内首次收录的条目。 */
 const LOOKBACK_DAYS = envInt('NOTIFY_LOOKBACK_DAYS', 7, { min: 1, max: 90 });
-
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
-}
 
 /** 回看窗口的起点（ISO）。`first_seen_at` 为 NULL 的存量条目由仓库层的 isNotNull 挡掉。 */
 function sinceOf(now: Date, days: number): string {

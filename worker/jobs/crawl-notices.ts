@@ -10,6 +10,7 @@ import {
 } from '../../src/db/repo/sources.ts';
 import { syncNoticesToSearchIndex } from '../../src/lib/search/sync.ts';
 import { siteDateIso } from '../../src/lib/dates.ts';
+import { errorMessage } from '../../src/lib/errors.ts';
 import {
   SOURCE_UNHEALTHY_AFTER_CONSECUTIVE_FAILURES,
   isSourceDegraded,
@@ -475,10 +476,6 @@ async function preserveStoredDetail(
     bodyText: notice.bodyText ?? stored.bodyText,
     attachments: notice.attachments.length > 0 ? notice.attachments : stored.attachments,
   };
-}
-
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
 }
 
 export const crawlNoticesJob: Job = {

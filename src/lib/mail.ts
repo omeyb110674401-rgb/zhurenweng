@@ -1,6 +1,10 @@
 import type { NoticeRecord, ReminderStage, SubscriptionRules } from '../db/types.ts';
 import type { MailMessage } from './ports.ts';
 import type { RuleMatchableSubscription } from './subscription.ts';
+// HTML 转义（issue #37 建立，issue #83 起与后台共用一份实现）：本文件原本自带一份
+// `escapeHtml`，与 `app/admin/admin-html.ts` 那份**逐字节相同** —— 两份的下场是
+// "邮件那份有安全测试、后台那份一个都没有"。现在两边都打这一份，测试各从一侧覆盖。
+import { escapeHtml } from './html-escape.ts';
 
 /**
  * 邮件内容构建（issue #7）：确认邮件与截止提醒邮件。
@@ -25,25 +29,11 @@ export function appBaseUrl(): string {
 
 const SITE_FOOTER = '主人翁 · 政府公示与征求意见信息聚合（发现 · 读懂 · 行动）';
 
-/**
- * HTML 转义（issue #37）：**凡是插进 html 正文的动态值都必须过这一层**，
- * 包括 href 里的动态值 —— 属性里一个双引号就能跳出引号、改写整段标记，
- * 而官方原文链接来自源站、退订链接带用户 token，都不是本站能替其担保的内容。
- *
- * 为什么必须做：邮件正文是手工拼的 HTML 字符串，此前把用户输入与库内数据直接插值 ——
- * 订阅关键词来自表单（`关键词：<b>x</b>` 会被当标签渲染）、错误摘要来自抓取失败的
- * 原始报文、条目标题来自源站。后果不只是排版乱：任何人可以用**别人的邮箱**提交带
- * HTML 的订阅规则，收件人收到的确认邮件里就会渲染攻击者控制的标签与链接（钓鱼面）。
- * 纯文本部分（text）不需要转义，用户看到的就是字面内容。
+/*
+ * `escapeHtml` 的来源见文件头的 import（issue #83 合并）：那一段的完整理由
+ * ——「凡是插进 html 正文的动态值都必须过这一层，包括 href 里的动态值」——
+ * 连同实现一起搬到了 `lib/html-escape.ts`，别再在这里长回第二份。
  */
-function escapeHtml(value: string): string {
-  return value
-    .replaceAll('&', '&amp;')
-    .replaceAll('<', '&lt;')
-    .replaceAll('>', '&gt;')
-    .replaceAll('"', '&quot;')
-    .replaceAll("'", '&#39;');
-}
 
 function confirmUrl(confirmToken: string): string {
   return `${appBaseUrl()}/subscribe/confirm?token=${encodeURIComponent(confirmToken)}`;

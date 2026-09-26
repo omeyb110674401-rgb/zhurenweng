@@ -22,6 +22,7 @@
     "e2e": "next build && node --test \"tests/e2e/**/*.test.mjs\"",
     "pree2e": "node scripts/check-pins-clean.mjs",
     "test:unit": "node --test \"tests/unit/**/*.test.mjs\"",
+    "pretest": "node scripts/check-test-pins.mjs",
     "pretest:unit": "node scripts/check-pins-clean.mjs",
     "test": "npm run test:unit && npm run e2e"
   },

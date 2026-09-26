@@ -7,6 +7,7 @@
  */
 
 import { isKnownCategory } from '../../lib/categories.ts';
+import { AUDIENCE_LABELS, isKnownAudience, type NoticeAudience } from '../../lib/audience.ts';
 import { isPeriodBucketKey, periodBucketLabel, type PeriodBucketKey } from '../../lib/notice-period.ts';
 import { MAX_SINCE_DAYS } from '../../lib/notice-recency.ts';
 import { isNoticeSortKey, type NoticeSortKey } from '../../lib/notice-sort.ts';
@@ -26,6 +27,7 @@ export interface HomeSearchParams {
   sort?: string | string[];
   open?: string | string[];
   since?: string | string[];
+  audience?: string | string[];
 }
 
 /** 取 querystring 参数首值并去空白；空串视为未传。 */
@@ -127,6 +129,11 @@ export function sinceParam(value: string | string[] | undefined): number | undef
 export interface HomeQuery {
   /** 领域标签（未知值不生效：避免任意 querystring 触发无效筛选） */
   category?: string;
+  /**
+   * 受众面（issue #83）：`public` / `sector` / `unknown`，未知值不生效（与领域同一处理）。
+   * 与领域正交 —— 领域答"关于什么事"，它答"该谁来看、该谁去提意见"。
+   */
+  audience?: NoticeAudience;
   agency?: string;
   keyword?: string;
   /** 机关筛选只算牵头机关（issue #36，统计页钻取链接带 lead=1 进来） */
@@ -175,6 +182,9 @@ export function monthRangeSummary(from: string | undefined, to: string | undefin
 export function describeHomeQuery(query: HomeQuery, sourceName?: string): string {
   return [
     query.category,
+    // 受众面（issue #83）：这行文字是「筛选后共 N 条」里 N 的口径说明，
+    // 少说一个维度，读者就只能猜这个 0 是谁造成的（与下面「只看未截止」同一条规矩）
+    query.audience ? `受众面：${AUDIENCE_LABELS[query.audience]}` : '',
     query.agency
       ? query.leadAgencyOnly
         ? `机关（牵头）：${query.agency}`
@@ -206,6 +216,7 @@ export function describeHomeQuery(query: HomeQuery, sourceName?: string): string
 export function subFeedHref(query: HomeQuery, prefix = ''): string {
   const search = new URLSearchParams();
   if (query.category) search.set('category', query.category);
+  if (query.audience) search.set('audience', query.audience);
   // lead 只在有机关筛选时才有意义（与首页 buildFilterHref 同一处理）
   if (query.agency) {
     search.set('agency', query.agency);
@@ -226,6 +237,9 @@ export function subFeedHref(query: HomeQuery, prefix = ''): string {
 export function parseHomeQuery(params: HomeSearchParams): HomeQuery {
   const categoryParam = firstParam(params.category);
   const category = categoryParam !== undefined && isKnownCategory(categoryParam) ? categoryParam : undefined;
+  const audienceParam = firstParam(params.audience);
+  const audience =
+    audienceParam !== undefined && isKnownAudience(audienceParam) ? audienceParam : undefined;
   const agency = firstParam(params.agency);
   const keyword = firstParam(params.q);
   // 区间优先；两端都没给时才认旧别名 `?month=`（折平为 from = to，issue #45 的
@@ -245,6 +259,7 @@ export function parseHomeQuery(params: HomeSearchParams): HomeQuery {
   const sinceDays = sinceParam(params.since);
   return {
     category,
+    audience,
     agency,
     keyword,
     from,
@@ -258,6 +273,7 @@ export function parseHomeQuery(params: HomeSearchParams): HomeQuery {
     page: pageParam(params.page),
     hasFilter:
       category !== undefined ||
+      audience !== undefined ||
       agency !== undefined ||
       keyword !== undefined ||
       from !== undefined ||

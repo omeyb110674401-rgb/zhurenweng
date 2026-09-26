@@ -186,6 +186,31 @@ describe('部署环境变量契约（compose ↔ .env.example ↔ docs ↔ 代�
     );
   });
 
+  it('issue #83 的七个旋钮真的接上了（此前文档承诺可调、compose 一个都不传）', () => {
+    // 2026-09-26 实测：这七个在代码里有缺省、在 README / FOLLOWUPS 里被当成可调项，
+    // 而 `docker compose` 一个都不转发 —— 照文档改 `.env` 再重启，行为毫无变化、
+    // 也没有任何地方报错。这条按"旋钮 → 该去哪个服务"逐条钉住转发关系：
+    // 少一个都会让"填了就生效"重新变成假话（上面两条不变量查的是全集，查不出这种单点丢失）。
+    const expected = {
+      web: ['LIST_PAGE_SIZE', 'SEARCH_PAGE_SIZE'],
+      worker: [
+        'SUMMARY_MAX_RETRIES',
+        'SUMMARY_RETRY_DELAY_MS',
+        'ATTACHMENT_MAX_ATTEMPTS',
+        'ATTACHMENT_NOTICES_PER_ROUND',
+        'ATTACHMENT_PROBE_BYTES',
+      ],
+    };
+    for (const [service, keys] of Object.entries(expected)) {
+      const actual = services.get(service);
+      assert.ok(actual, `compose 应有 ${service} 服务`);
+      for (const key of keys) {
+        assert.ok(actual.has(key), `${service} 没拿到 ${key}：文档说它可调，实际改了不生效`);
+        assert.ok(envVars.has(key), `${key} 未在 .env.example 声明（操作者无从填写）`);
+      }
+    }
+  });
+
   it('web 与 worker 都拿到 LLM / SMTP / 检索全套配置', () => {
     for (const service of ['web', 'worker']) {
       const keys = services.get(service);

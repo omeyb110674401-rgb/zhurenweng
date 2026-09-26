@@ -5,6 +5,7 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { describe, it } from 'node:test';
+import Database from 'better-sqlite3';
 import { resolveBash } from './helpers/bash.mjs';
 
 /**
@@ -161,6 +162,43 @@ describe('issue #71：告警脚本自己（复用 worker 的告警出口）', ()
     assert.equal(first.outbox.length, 1, `第一次应当真发出去，实际：${first.out}`);
     const second = runAlertScript({ dbFile });
     assert.match(second.out, /未送出|当日已发过/, `第二次应被去重，实际：${second.out}`);
+  });
+
+  /**
+   * issue #83：告警**内容**要留在库里。
+   *
+   * 此前 alert_sends 只有（哪天 × 任务 × 源 × 发送时间）—— 09-21 起站长收到过十几封告警，
+   * 事后想复盘"当时到底报了什么"只能去翻收件箱，而收件箱不是留痕的地方。
+   * 这条断言跑的是真脚本 + 真 SQLite：写进去的必须与邮件正文里那段摘要同源。
+   */
+  it('告警落库留痕：alert_sends 记下那封邮件说了什么（issue #83）', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'zw-alert-summary-'));
+    const dbFile = path.join(dir, 'shared.db');
+    const { code, out, outbox } = runAlertScript({ dbFile });
+    assert.equal(code, 0, `脚本必须零退出，输出：${out}`);
+    assert.equal(outbox.length, 1, '这一条要有真邮件，否则留痕无从谈起');
+
+    const db = new Database(dbFile, { readonly: true });
+    let row;
+    try {
+      row = db
+        .prepare('select alert_date, job_name, source_id, sent_at, error_summary from alert_sends')
+        .get();
+    } finally {
+      db.close();
+    }
+    assert.ok(row, 'alert_sends 应有一行去重标记');
+    assert.equal(row.job_name, 'daily-backup');
+    assert.match(
+      row.error_summary ?? '',
+      /每日数据库备份失败/,
+      '库里要存下那封告警说了什么，而不是只有时间与任务名',
+    );
+    // 与真正发出去的那封信同源：同一个字符串既进了邮件，也进了库
+    assert.ok(
+      outbox[0].includes(row.error_summary),
+      '库里存的摘要应当是邮件里那段（不是另写一句概括）',
+    );
   });
 
   it('发信本身失败 ⇒ 仍然零退出（不能把备份的退出码换成告警脚本的）', () => {

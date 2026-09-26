@@ -14,6 +14,7 @@ import {
   type SummaryStatus,
 } from '@/lib/summary-content';
 import { draftAvailability, type DraftAvailabilityInput } from '@/lib/summary-display';
+import { summaryProvenance, summaryTemplateOf } from '@/lib/summary-basis';
 
 /**
  * 详情页摘要展示（issue #4 建立，issue #55/#56 重构为「参与导引」，issue #57 第 6 步
@@ -132,6 +133,21 @@ export function SummaryView({
 
   const deadlineText = summary.deadline.text ?? notice.deadlineAt ?? '未标注';
   const draft = draftAvailability(attachmentReport ?? null);
+  /**
+   * 摘要依据（issue #83）：读者有权知道这份摘要是"读了随文条文写的"还是"只读了公告本身"。
+   * 判据收在 `lib/summary-basis.ts` 一处（页面 / 后台 / 审计脚本共用），这里只负责渲染。
+   *
+   * 「附件条文要点」那一栏存在与否，与底部这行说明**必须同源**：曾经只要
+   * `read-and-used` 就写"上方「草案条文要点」摘自…"，而名单 / 打包清单类的条目
+   * 读了附件也产不出条文要点 —— 那行字于是指着一段不存在的栏位说话。
+   */
+  const hasAttachmentPoints =
+    summary.keyPoints.length > 0 || summary.explanationPoints.length > 0 || summary.changes.length > 0;
+  const provenance = summaryProvenance({
+    attachment: attachmentReport ?? null,
+    hasAttachmentPoints,
+    template: summaryTemplateOf(safeParseJson(summaryJson)),
+  });
 
   return (
     <section className="summary-card" data-testid="ai-summary">
@@ -302,11 +318,31 @@ export function SummaryView({
       </div>
 
       <p className="summary-sources" data-testid="summary-sources">
+        {/*
+          依据标签（issue #83）：这行是**分类本身**，下面那句是它的展开说明。
+          读者扫一眼标签就知道这份摘要的输入是什么；`data-basis` 让审计与测试
+          不必去解析中文（分类的单一来源是 lib/summary-basis.ts）。
+        */}
+        <span
+          className={`summary-basis summary-basis-${provenance.basis}`}
+          data-testid="summary-basis"
+          data-basis={provenance.basis}
+        >
+          摘要依据：{provenance.label}
+        </span>
         {draft.kind === 'read-and-used' ? (
-          <>
-            上方「草案条文要点」摘自<b>本站从随文附件里逐字读取的条文</b>（{draft.files} 份 /
-            约 {draft.chars} 字），条文本身以下方附件与官方原文为准。
-          </>
+          hasAttachmentPoints ? (
+            <>
+              上方「草案条文要点」摘自<b>本站从随文附件里逐字读取的条文</b>（{draft.files} 份 /
+              约 {draft.chars} 字），条文本身以下方附件与官方原文为准。
+            </>
+          ) : (
+            <>
+              本站已从随文附件里读取到条文（{draft.files} 份 / 约 {draft.chars} 字），
+              但这份公告属名单 / 打包清单一类，<b>没有可逐条摘录的条文</b>；
+              上面几段只依据公告本身，具体内容请看下方附件清单或官方原文页面。
+            </>
+          )
         ) : draft.kind === 'read-not-used' ? (
           <>
             本站已能读取随文附件的草案条文（{draft.files} 份），<b>本页摘要未使用这些条文</b>；

@@ -9,10 +9,10 @@ import { recencyCutoffIso } from '../../lib/notice-recency.ts';
 import type { NoticeSortKey } from '../../lib/notice-sort.ts';
 import { deriveCategoryTags } from '../../lib/categories.ts';
 import { deriveNoticeGenre, genreDecisionWins, type GenreEvidenceKind } from '../../lib/notice-genre.ts';
+import { deriveNoticeAudience, type NoticeAudience } from '../../lib/audience.ts';
 import { agencyKeysOf, canonicalAgency, splitAgencies } from '../../lib/agencies.ts';
+import { toNoticeRecord } from './notice-record.ts';
 import {
-  safeParseJson,
-  safeParseJsonArray,
   type NoticeAttachment,
   type NoticeRecord,
   type NoticeStatus,
@@ -159,6 +159,14 @@ export interface ListNoticesFilteredOptions {
    */
   leadAgencyOnly?: boolean;
   /**
+   * 受众面（issue #83）：`public` 公众广域 / `sector` 行业专业 / `unknown` 未判定。
+   *
+   * `unknown` 这一档**连 NULL 一起收**（`is null or = 'unknown'`）：对本列上线前的存量
+   * 来说，NULL 就是"还没归类"，与"判过了但没线索"在运营上要的是同一件事 ——
+   * 筛出来看看还有哪些没归类。这也是唯一一处把两者合并的地方，别处都分开。
+   */
+  audience?: NoticeAudience;
+  /**
    * 标题 / 正文包含匹配的关键词；**空白分隔的多个词 = 都要命中**（子串、忽略大小写）。
    * 通配符按字面处理（issue #33：`%` / `_` 不再被当成 LIKE 通配）。
    */
@@ -298,6 +306,14 @@ function stillOpen() {
 
 function filterConditions(options: ListNoticesFilteredOptions) {
   const conditions = [];
+  if (options.audience) {
+    // unknown 连 NULL 一起收：存量未打标的行在运营口径里也是"没归类"（见选项说明）
+    conditions.push(
+      options.audience === 'unknown'
+        ? or(eq(notices.audience, 'unknown'), isNull(notices.audience))
+        : eq(notices.audience, options.audience),
+    );
+  }
   if (options.category) {
     // JSON 数组文本形如 ["医疗卫生","市场监管"]：用 %“带引号整词”% 包含匹配，
     // 引号保证元素级完整命中（查「数据」不会命中「数据与网络安全」）
@@ -532,6 +548,13 @@ export async function upsertNotice(input: UpsertNoticeInput): Promise<'inserted'
     title: input.title,
     attachmentNames: input.attachments.map((attachment) => attachment.name),
   });
+  // 受众面（issue #83）：判据只看标题与来源，两样入库时就齐了 —— 所以这里**不需要**
+  // 体裁那套"证据强弱"机制（那个存在的原因是正文要等抽取任务，判据会迟到）。
+  const audience = deriveNoticeAudience({
+    id: input.id,
+    title: input.title,
+    sourceId: input.sourceId,
+  });
   const existing = await db
     .select({
       id: notices.id,
@@ -559,6 +582,10 @@ export async function upsertNotice(input: UpsertNoticeInput): Promise<'inserted'
         bodyText: input.bodyText,
         attachmentsJson: JSON.stringify(input.attachments),
         fetchedAt: input.fetchedAt,
+        // 受众面按标题重算（标题变了判定就该跟着变）；它没有"弱证据不许覆盖强证据"
+        // 那回事 —— 判据与证据同源，每次算出来的都是同一个答案（见 lib/audience.ts）。
+        audience: audience.audience,
+        audienceBasis: audience.basis,
         // 弱证据不许覆盖强证据：抽取任务可能已把这条升级成正文级的修正案判定，
         // 无条件重写会让两个 job 来回拉扯，读者看到的摘要形态跟着抖。
         ...(genreDecisionWins(
@@ -598,6 +625,8 @@ export async function upsertNotice(input: UpsertNoticeInput): Promise<'inserted'
     genre: genre.genre,
     genreBasis: genre.basis,
     genreEvidence: genre.evidence,
+    audience: audience.audience,
+    audienceBasis: audience.basis,
     // 首次收录时间：只在这一行被创建时写入（issue #60 第 3 刀）
     firstSeenAt: input.fetchedAt,
   });
@@ -636,44 +665,10 @@ export async function recordOutboundClick(id: string): Promise<number | null> {
   return rows[0].outboundClicks;
 }
 
-function toNoticeRecord(row: typeof notices.$inferSelect): NoticeRecord {
-  return {
-    id: row.id,
-    sourceId: row.sourceId,
-    title: row.title,
-    agency: row.agency,
-    url: row.url,
-    publishedAt: row.publishedAt,
-    deadlineAt: row.deadlineAt,
-    status: row.status as NoticeStatus,
-    categoryTags: safeParseJsonArray(row.categoryTagsJson),
-    bodyText: row.bodyText,
-    attachments: parseAttachments(row.attachmentsJson),
-    aiSummary: safeParseJson(row.aiSummaryJson),
-    summaryModel: row.summaryModel,
-    fetchedAt: row.fetchedAt,
-    firstSeenAt: row.firstSeenAt,
-    genre: row.genre as NoticeRecord['genre'],
-    genreBasis: row.genreBasis,
-    genreEvidence: row.genreEvidence as NoticeRecord['genreEvidence'],
-    outboundClicks: row.outboundClicks,
-    versionOf: row.versionOf,
-    versionSeq: row.versionSeq,
-  };
-}
-
-function parseAttachments(text: string): NoticeAttachment[] {
-  const parsed = safeParseJson(text);
-  if (!Array.isArray(parsed)) return [];
-  return parsed
-    .map((item) => {
-      if (typeof item !== 'object' || item === null) return null;
-      const record = item as Record<string, unknown>;
-      if (typeof record.name !== 'string' || typeof record.url !== 'string') return null;
-      return { name: record.name, url: record.url };
-    })
-    .filter((item): item is NoticeAttachment => item !== null);
-}
+/*
+ * `toNoticeRecord` 与 `parseAttachments` 已合并到 ./notice-record.ts（issue #83 F 项）：
+ * 原先三个仓库模块各有一份行→记录映射，加一列要记得改三处，而漏改的那一处不会报错。
+ */
 
 /**
  * 存量体裁回填（issue #76）。判据与生产路径完全同一份（`deriveNoticeGenre`），
@@ -763,4 +758,62 @@ export async function backfillNoticeGenres(options: { apply: boolean; force?: bo
     byGenre,
     samples,
   };
+}
+
+/**
+ * 存量受众面回填（issue #83）。判据与生产路径**完全同一份**（`deriveNoticeAudience`），
+ * 这里只负责"取数 + 是否写库" —— 与 `backfillNoticeGenres` 同一形状，但少一样东西：
+ * **没有 `force`**。
+ *
+ * 为什么体裁需要 `force` 而受众面不需要：体裁的证据分强弱（正文 > 附件名 > 标题），
+ * 强弱是新旧结论之间的相对关系，词表一换旧结论就过期。受众面的判据只有标题与来源
+ * 两样、入库时就齐了，**每次算出来都是同一个答案** —— 没有"更弱的证据"，也就没有
+ * 需要绕过的守卫。加一条不该加的守卫，只会让下一次改词表的人以为自己也改不动。
+ */
+export async function backfillNoticeAudiences(options: { apply: boolean }): Promise<{
+  total: number;
+  changed: number;
+  byAudience: Record<string, number>;
+  samples: { id: string; from: string | null; to: string; basis: string; title: string }[];
+}> {
+  const db = await getDb();
+  const rows = await db
+    .select({
+      id: notices.id,
+      sourceId: notices.sourceId,
+      title: notices.title,
+      audience: notices.audience,
+      audienceBasis: notices.audienceBasis,
+    })
+    .from(notices);
+  const byAudience: Record<string, number> = {};
+  const samples: { id: string; from: string | null; to: string; basis: string; title: string }[] = [];
+  let changed = 0;
+  for (const row of rows) {
+    const decision = deriveNoticeAudience({
+      id: row.id,
+      title: row.title,
+      sourceId: row.sourceId,
+    });
+    byAudience[decision.audience] = (byAudience[decision.audience] ?? 0) + 1;
+    // 逐字相同就不写：重复跑是幂等的，也让"改了几条"这个数字始终是真实的改动面
+    if (row.audience === decision.audience && row.audienceBasis === decision.basis) continue;
+    changed += 1;
+    if (samples.length < 400) {
+      samples.push({
+        id: row.id,
+        from: row.audience,
+        to: decision.audience,
+        basis: decision.basis,
+        title: row.title,
+      });
+    }
+    if (options.apply) {
+      await db
+        .update(notices)
+        .set({ audience: decision.audience, audienceBasis: decision.basis })
+        .where(eq(notices.id, row.id));
+    }
+  }
+  return { total: rows.length, changed, byAudience, samples };
 }
