@@ -2,6 +2,8 @@ import { randomBytes, randomUUID } from 'node:crypto';
 import { and, eq, isNull } from 'drizzle-orm';
 import { getDb } from '../client.ts';
 import { subscriptions } from '../schema/sqlite.ts';
+import { isSubscribableAudience } from '../../lib/audience.ts';
+import type { NoticeAudience } from '../../lib/audience.ts';
 import type { SubscriptionRecord, SubscriptionRules, SubscriptionScope } from '../types.ts';
 
 /**
@@ -23,6 +25,7 @@ function toSubscriptionRecord(row: typeof subscriptions.$inferSelect): Subscript
     keywords: safeParseArray(row.keywordsJson),
     categories: safeParseArray(row.categoriesJson),
     agencies: safeParseArray(row.agenciesJson),
+    audiences: safeParseAudiences(row.audiencesJson),
     scope: row.scope === 'all' ? 'all' : 'rules',
     pending: parsePendingRules(row.pendingRulesJson),
     confirmed: row.confirmed === 1,
@@ -33,6 +36,21 @@ function toSubscriptionRecord(row: typeof subscriptions.$inferSelect): Subscript
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
   };
+}
+
+/**
+ * 受众面列的读取（issue #84）：**只认已知取值，读到别的一律丢掉**。
+ *
+ * 两条路都各有一个坏结果，选的是**可见**的那一个：丢掉未知值 = 这一档收窄失效
+ * ⇒ 订阅者**多收**几封（他会发现，我们查得到）；保留未知值 = 这个条件永远不命中
+ * ⇒ 他**一封都收不到**且没有任何报错（最坏的一种静默）。受众面是收窄条件，
+ * 放宽是安全方向，收死不是。
+ *
+ * 取值只可能从本站表单来（路由按白名单过滤），所以走到这里说明分类体系被改过名
+ * —— 那时该做的是一次显式迁移，而不是让读侧悄悄表达旧语义。
+ */
+function safeParseAudiences(text: string): NoticeAudience[] {
+  return safeParseArray(text).filter(isSubscribableAudience);
 }
 
 function safeParseArray(text: string): string[] {
@@ -57,6 +75,9 @@ function parsePendingRules(text: string | null): SubscriptionRules | null {
       keywords: list('keywords'),
       categories: list('categories'),
       agencies: list('agencies'),
+      // 待确认列与正式列共用同一份过滤：两边都只认可订阅的两档，否则"确认一次之后
+      // 规则里多了个永远不会命中的值"这种事会只在待确认那一支发生。
+      audiences: list('audiences').filter(isSubscribableAudience),
       scope: record.scope === 'all' ? 'all' : 'rules',
     };
   } catch {
@@ -65,13 +86,17 @@ function parsePendingRules(text: string | null): SubscriptionRules | null {
 }
 
 /** 一份输入的规则部分（正式列与待确认列共用同一份序列化，别写两遍）。 */
-type RulesInput = Pick<UpsertSubscriptionInput, 'keywords' | 'categories' | 'agencies' | 'scope'>;
+type RulesInput = Pick<
+  UpsertSubscriptionInput,
+  'keywords' | 'categories' | 'agencies' | 'audiences' | 'scope'
+>;
 
 function serializeRules(rules: RulesInput): string {
   return JSON.stringify({
     keywords: rules.keywords,
     categories: rules.categories,
     agencies: rules.agencies,
+    audiences: rules.audiences,
     scope: rules.scope,
   });
 }
@@ -93,6 +118,8 @@ export interface UpsertSubscriptionInput {
   categories: string[];
   /** 发布机关规则（issue #60 第 2 刀，已归一的机关名） */
   agencies: string[];
+  /** 受众面收窄条件（issue #84）：空数组 = 不限 */
+  audiences: NoticeAudience[];
   /** 订阅范围（issue #60）：'rules' 按条件 / 'all' 全部新公示 */
   scope: SubscriptionScope;
   now: Date;
@@ -103,11 +130,14 @@ export interface UpsertSubscriptionInput {
  * **共用这一份**。分家的后果是这个仓库反复记过的那种：一处写了 agencies，
  * 另一处忘了写，于是"重新提交订阅"会静默把机关规则清掉。
  */
-function ruleColumns(input: Pick<UpsertSubscriptionInput, 'keywords' | 'categories' | 'agencies' | 'scope'>) {
+function ruleColumns(
+  input: Pick<UpsertSubscriptionInput, 'keywords' | 'categories' | 'agencies' | 'audiences' | 'scope'>,
+) {
   return {
     keywordsJson: JSON.stringify(input.keywords),
     categoriesJson: JSON.stringify(input.categories),
     agenciesJson: JSON.stringify(input.agencies),
+    audiencesJson: JSON.stringify(input.audiences),
     scope: input.scope,
   };
 }
@@ -327,6 +357,7 @@ export async function confirmSubscriptionByToken(token: string): Promise<Confirm
     keywords: safeParseArray(row.keywordsJson),
     categories: safeParseArray(row.categoriesJson),
     agencies: safeParseArray(row.agenciesJson),
+    audiences: safeParseAudiences(row.audiencesJson),
     scope: row.scope === 'all' ? ('all' as const) : ('rules' as const),
   };
   await db

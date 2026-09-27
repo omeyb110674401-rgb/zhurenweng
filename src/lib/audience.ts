@@ -50,16 +50,38 @@ export const AUDIENCE_HINTS: Record<NoticeAudience, string> = {
 };
 
 /**
+ * 可**订阅**的两档（issue #84）：订阅规则里的受众面收窄条件只认这两个值。
+ *
+ * 与 `NOTICE_AUDIENCES`（筛选用的三档）的差别就是 `unknown`：筛"未判定"是运营要的
+ * （那是还没归类好的一批，筛出来才能逐条改进规则），而**订**"未判定"不是任何人
+ * 会有的意图 —— 没有人会说"请把你们没归好类的那批发给我"。想全都收的人本来就
+ * 什么都不勾（空 = 不限）。
+ */
+export const SUBSCRIBABLE_AUDIENCES: readonly NoticeAudience[] = ['public', 'sector'];
+
+/**
  * 可筛选取值与展示顺序。`unknown` 也在内 —— 它不是凑数的：对运营者来说
  * 「未判定」正是"还没归类好的那一批"，筛出来才能逐条改进规则（见 #83 的迭代约定）。
+ *
+ * 由 `SUBSCRIBABLE_AUDIENCES` 拼出来而不是再抄一遍：两份清单一旦各写一份，
+ * 迟早会出现"筛得到但订不到"（或反过来）而没有任何报错的那种漂移。
  */
-export const NOTICE_AUDIENCES: readonly NoticeAudience[] = ['public', 'sector', 'unknown'];
+export const NOTICE_AUDIENCES: readonly NoticeAudience[] = [
+  ...SUBSCRIBABLE_AUDIENCES,
+  'unknown',
+];
 
 const KNOWN_AUDIENCES: ReadonlySet<string> = new Set<string>(NOTICE_AUDIENCES);
+const SUBSCRIBABLE_SET: ReadonlySet<string> = new Set<string>(SUBSCRIBABLE_AUDIENCES);
 
 /** querystring 取值是否为已知受众面（未知值不生效，与领域标签同一处理）。 */
 export function isKnownAudience(value: string): value is NoticeAudience {
   return KNOWN_AUDIENCES.has(value);
+}
+
+/** 取值是否可作为**订阅规则**里的受众面（'public' / 'sector'，不含 'unknown'）。 */
+export function isSubscribableAudience(value: string): value is NoticeAudience {
+  return SUBSCRIBABLE_SET.has(value);
 }
 
 export interface AudienceEvidence {

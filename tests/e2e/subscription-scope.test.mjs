@@ -53,7 +53,14 @@ const mailsTo = (email) => readOutbox().filter((mail) => mail.to === email);
 
 /** 建一条已确认订阅（跳过邮件确认，直接走 token 确认那对函数）。 */
 async function confirmedSubscription(input) {
-  const created = await subsRepo.upsertSubscriptionRules({ ...input, now: new Date() });
+  // audiences 给默认空数组（= 不限）：本文件测的是机关与范围，受众面在
+  // subscribe-audience.test.mjs 里单独端到端验；这里显式写出来是为了让
+  // "这一条订阅到底有没有受众面收窄"在调用点上看得见，而不是靠默认值猜。
+  const created = await subsRepo.upsertSubscriptionRules({
+    audiences: [],
+    ...input,
+    now: new Date(),
+  });
   const confirmed = await subsRepo.confirmSubscriptionByToken(created.subscription.confirmToken);
   assert.equal(confirmed, 'confirmed', `订阅 ${input.email} 应能确认成功`);
   return created.subscription;
@@ -209,8 +216,15 @@ describe('issue #60 第 2 刀：按机关订阅与「订全部新公示」', () 
     assert.ok(joint[0].subject.includes(JOINT_TITLE), '联合发文的每个参与机关都应能单独命中');
     assert.ok(!joint[0].subject.includes(OTHER_TITLE), '无关机关的条目不该发来');
 
+    // 订全部的人这一轮两条都到档 ⇒ 合并成一封（issue #84）。旧口径下这里是 2 封，
+    // 而那正是站长在收到 6 封之后退订的原因。
     const everything = mailsTo('everything@example.test');
-    assert.equal(everything.length, 2, '订全部 ⇒ 每条新公示的提醒都该收到');
+    assert.equal(everything.length, 1, '两条同时到档应合并成一封');
+    assert.match(everything[0].subject, /2 条公示即将截止/);
+    assert.ok(
+      everything[0].text.includes(JOINT_TITLE) && everything[0].text.includes(OTHER_TITLE),
+      `合并之后两条都要在信里：${everything[0].text}`,
+    );
     assert.ok(!logs.join('\n').includes('没有可通知的订阅'));
   });
 });

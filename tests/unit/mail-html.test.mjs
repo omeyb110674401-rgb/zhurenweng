@@ -5,7 +5,6 @@ import {
   buildReminderEmail,
   buildTaskFailureAlertEmail,
 } from '../../src/lib/mail.ts';
-
 /**
  * 单元：邮件正文的 HTML 转义（issue #37）。
  *
@@ -131,5 +130,53 @@ describe('issue #37：邮件 HTML 转义', () => {
     );
     assert.match(mail.html, /href="https:\/\/example\.gov\.cn\/a&quot;onmouseover=&quot;alert\(1\)"/);
     assert.match(mail.text, /https:\/\/example\.gov\.cn\/a"onmouseover="alert\(1\)/, '纯文本保持字面');
+  });
+});
+
+/**
+ * 受众面写进确认邮件（issue #84）。
+ *
+ * 确认邮件是用户唯一能看到"我到底订了什么"的地方（本站没有账号、没有订阅管理后台，
+ * 只有邮件底部那个带 token 的入口）。所以三件事必须同时成立：勾了要说清是收窄、
+ * 「订全部 + 只看某一档」不能退化成"不限条件"、没勾就一个字都别多写。
+ */
+describe('issue #84：确认邮件里的受众面', () => {
+  const mailOf = (rules, pendingRules) =>
+    buildConfirmationEmail({
+      email: 'reader@example.test',
+      rules,
+      pendingRules,
+      confirmToken: 'confirm-token',
+      unsubscribeToken: 'unsub-token',
+    });
+
+  it('勾了受众面 ⇒ 写明这是收窄条件（不能读成"再多命中一档"）', () => {
+    const mail = mailOf({
+      keywords: ['噪声'],
+      categories: [],
+      agencies: [],
+      audiences: ['public'],
+      scope: 'rules',
+    });
+    assert.match(mail.text, /关键词：噪声/);
+    assert.match(mail.text, /受众面（收窄条件，只有这些才会发）：公众广域/);
+    assert.match(mail.html, /受众面（收窄条件，只有这些才会发）：公众广域/);
+  });
+
+  it('scope=all + 受众面 ⇒ 不能写成"不限关键词 / 领域 / 机关"（那等于把收窄说没了）', () => {
+    const mail = mailOf({ keywords: [], categories: [], agencies: [], audiences: ['public'], scope: 'all' });
+    assert.ok(
+      !mail.text.includes('不限关键词'),
+      `订全部但勾了受众面时，这句话是假的：\n${mail.text}`,
+    );
+    assert.match(mail.text, /收录的全部新公示，但只发受众面属于「公众广域」的那些/);
+  });
+
+  it('没勾受众面 ⇒ 一个字都不多写（存量订阅的确认邮件与旧版逐字一致）', () => {
+    const mail = mailOf({ keywords: ['噪声'], categories: [], agencies: [], audiences: [], scope: 'rules' });
+    assert.ok(!mail.text.includes('受众面'), `没勾就不该出现这个词：\n${mail.text}`);
+    assert.match(mail.text, /订阅范围：收录的全部新公示（不限关键词 \/ 领域 \/ 机关）|关键词：噪声/);
+    const all = mailOf({ keywords: [], categories: [], agencies: [], audiences: [], scope: 'all' });
+    assert.match(all.text, /订阅范围：收录的全部新公示（不限关键词 \/ 领域 \/ 机关）/);
   });
 });

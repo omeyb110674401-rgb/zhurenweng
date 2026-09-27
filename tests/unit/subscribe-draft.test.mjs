@@ -23,17 +23,19 @@ const draftOf = (overrides = {}) => ({
   keywords: '',
   categories: [],
   agencies: [],
+  audiences: [],
   scope: 'rules',
   ...overrides,
 });
 
 describe('订阅草稿 cookie 的编解码', () => {
-  it('往返一致：邮箱 / 关键词 / 领域 / 机关 / 范围都能原样取回', () => {
+  it('往返一致：邮箱 / 关键词 / 领域 / 机关 / 受众面 / 范围都能原样取回', () => {
     const draft = draftOf({
       email: 'a@example.com',
       keywords: '噪声污染防治 医疗',
       categories: ['生态环境'],
       agencies: ['司法部', '中国民用航空局'],
+      audiences: ['public'],
       scope: 'all',
     });
     assert.deepEqual(decodeSubscribeDraft(encodeSubscribeDraft(draft)), draft);
@@ -45,10 +47,13 @@ describe('订阅草稿 cookie 的编解码', () => {
     assert.equal(decodeSubscribeDraft(encodeSubscribeDraft(empty)), null);
   });
 
-  it('任一字段非空就算有内容（只填了关键词也要回填）', () => {
+  it('任一字段非空就算有内容（只填了关键词、只勾了受众面都要回填）', () => {
     assert.equal(hasDraftContent(draftOf({ keywords: '噪声' })), true);
     assert.equal(hasDraftContent(draftOf({ categories: ['生态环境'] })), true);
     assert.equal(hasDraftContent(draftOf({ agencies: ['司法部'] })), true);
+    // 受众面单独勾选也是一份真实输入（issue #84：「只订公众广域」是完整意图），
+    // 没有这一条就会在报错重填后把用户勾的那一档悄悄丢掉
+    assert.equal(hasDraftContent(draftOf({ audiences: ['public'] })), true);
     // 只选了「订全部」也算有内容：那是用户明确选的范围，不该被当成空草稿丢掉
     assert.equal(hasDraftContent(draftOf({ scope: 'all' })), true);
   });
@@ -80,6 +85,7 @@ describe('订阅草稿 cookie 的编解码', () => {
         keywords: 'k'.repeat(900),
         categories: Array.from({ length: 50 }, (_value, index) => `c${index}`),
         agencies: Array.from({ length: 60 }, (_value, index) => `机关${index}`),
+        audiences: ['public', 'sector', 'public', 'unknown'],
         scope: 'all',
       }),
     );
@@ -88,6 +94,7 @@ describe('订阅草稿 cookie 的编解码', () => {
     assert.ok(decoded.keywords.length <= 300, `关键词应截到 300 以内，实际 ${decoded.keywords.length}`);
     assert.equal(decoded.categories.length, 20, '领域最多保留 20 个');
     assert.equal(decoded.agencies.length, 30, '机关最多保留 30 个');
+    assert.ok(decoded.audiences.length <= 3, `受众面最多保留 3 个，实际 ${decoded.audiences.length}`);
     assert.ok(
       encodeSubscribeDraft(decoded).length < 4096,
       '编码后的 cookie 必须远小于 4KB，否则浏览器直接丢弃',

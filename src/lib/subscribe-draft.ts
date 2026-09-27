@@ -26,6 +26,8 @@ export interface SubscribeDraft {
   categories: string[];
   /** 勾选的发布机关（issue #60 第 2 刀） */
   agencies: string[];
+  /** 勾选的受众面（issue #84），原始值（'public' / 'sector'） */
+  audiences: string[];
   /** 订阅范围原始值（'rules' / 'all'），回填单选框用 */
   scope: string;
 }
@@ -35,6 +37,7 @@ const MAX_EMAIL = 254;
 const MAX_KEYWORDS = 300;
 const MAX_CATEGORIES = 20;
 const MAX_AGENCIES = 30;
+const MAX_AUDIENCES = 3;
 
 export function hasDraftContent(draft: SubscribeDraft): boolean {
   return (
@@ -42,6 +45,7 @@ export function hasDraftContent(draft: SubscribeDraft): boolean {
     || draft.keywords !== ''
     || draft.categories.length > 0
     || draft.agencies.length > 0
+    || draft.audiences.length > 0
     // scope 单独为 'all' 也算有内容：那是用户明确选的范围，不该被当成空草稿丢掉
     || draft.scope === 'all'
   );
@@ -53,6 +57,7 @@ export function encodeSubscribeDraft(draft: SubscribeDraft): string {
     keywords: draft.keywords.slice(0, MAX_KEYWORDS),
     categories: draft.categories.slice(0, MAX_CATEGORIES),
     agencies: draft.agencies.slice(0, MAX_AGENCIES),
+    audiences: draft.audiences.slice(0, MAX_AUDIENCES),
     scope: draft.scope === 'all' ? 'all' : 'rules',
   };
   return Buffer.from(JSON.stringify(capped), 'utf8').toString('base64url');
@@ -80,6 +85,11 @@ export function decodeSubscribeDraft(raw: string | undefined): SubscribeDraft | 
         ? record.agencies
             .filter((value): value is string => typeof value === 'string')
             .slice(0, MAX_AGENCIES)
+        : [],
+      audiences: Array.isArray(record.audiences)
+        ? record.audiences
+            .filter((value): value is string => typeof value === 'string')
+            .slice(0, MAX_AUDIENCES)
         : [],
       scope: record.scope === 'all' ? 'all' : 'rules',
     };

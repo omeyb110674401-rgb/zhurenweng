@@ -47,16 +47,29 @@ export async function hasReminderSend(
   return rows.length > 0;
 }
 
-/** 记录发送标记（发送成功后调用）；复合主键冲突时静默忽略，保证幂等。 */
-export async function recordReminderSend(
-  noticeId: string,
+/**
+ * 批量记录发送标记（issue #84）：一封合并提醒里列了 N 条，就在**发信成功之后**
+ * 一次性写 N 行。分成 N 次写也能work，但那时"写到一半失败"会留下一半已标记、
+ * 一半没标记的状态，而这一批本来是同生共死的（同一封信送出去的）。
+ *
+ * 冲突静默忽略，与单条版同一个理由：复合主键天然幂等，重复触发不会重发。
+ */
+export async function recordReminderSends(
+  entries: readonly { noticeId: string; stage: ReminderStage }[],
   subscriptionId: string,
-  stage: ReminderStage,
   sentAt: string,
 ): Promise<void> {
+  if (entries.length === 0) return;
   const db = await getDb();
   await db
     .insert(reminderSends)
-    .values({ noticeId, subscriptionId, reminderStage: stage, sentAt })
+    .values(
+      entries.map((entry) => ({
+        noticeId: entry.noticeId,
+        subscriptionId,
+        reminderStage: entry.stage,
+        sentAt,
+      })),
+    )
     .onConflictDoNothing();
 }

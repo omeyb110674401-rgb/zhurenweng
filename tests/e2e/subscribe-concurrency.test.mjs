@@ -89,7 +89,17 @@ describe('issue #52：并发重复提交订阅', () => {
 
   it('仓储层并发 upsert 同一新邮箱：不抛错、只建一行、且恰好一次 created', async () => {
     const email = 'race-repo@example.com';
-    const input = { email, keywords: ['噪声污染防治'], categories: [], now: new Date() };
+    const input = {
+      email,
+      keywords: ['噪声污染防治'],
+      categories: [],
+      agencies: [],
+      // 受众面（issue #84）与其余规则列同一份写入路径：并发 upsert 也要带上，
+      // 否则这条用例测的就不是"仓库层照常工作"而是"某一列没写"
+      audiences: [],
+      scope: 'rules',
+      now: new Date(),
+    };
 
     // 关键：并发调用（不是并发 HTTP）。两个调用都会在第一个 await 处让出，
     // 两次 select 都看到「不存在」→ 两个都走 insert → 后到者撞唯一约束

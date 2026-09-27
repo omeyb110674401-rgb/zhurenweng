@@ -3,6 +3,7 @@ import { createMailerPort } from '@/lib/ports';
 import {
   CATEGORY_OPTIONS,
   normalizeAgencies,
+  normalizeAudiences,
   normalizeEmail,
   normalizeKeywords,
   normalizeScope,
@@ -87,6 +88,7 @@ export async function POST(request: Request): Promise<Response> {
     keywords: String(form.get('keywords') ?? ''),
     categories: form.getAll('categories').map((value) => String(value)),
     agencies: form.getAll('agencies').map((value) => String(value)),
+    audiences: form.getAll('audiences').map((value) => String(value)),
     scope: String(form.get('scope') ?? 'rules'),
   };
 
@@ -103,8 +105,11 @@ export async function POST(request: Request): Promise<Response> {
   // 机关不做"必须在已有清单内"的白名单过滤：机构名以库为准，页面下拉只是便捷输入；
   // 用户手输一个还没出现过的新机关，订阅该条正是他想要的（等该机关入库就自然命中）。
   const agencies = normalizeAgencies(form.getAll('agencies').map((value) => String(value)));
+  // 受众面（issue #84）：与领域同一条白名单口径 —— 它决定给谁发信，未知取值一律丢掉
+  // （`normalizeAudiences` 只认 audience.ts 里那两档；未判定刻意不是可订项）。
+  const audiences = normalizeAudiences(form.getAll('audiences').map((value) => String(value)));
   const scope = normalizeScope(String(form.get('scope') ?? 'rules'));
-  const rules = validateSubscriptionRules(keywords, categoryInput, agencies, scope);
+  const rules = validateSubscriptionRules(keywords, categoryInput, agencies, scope, audiences);
   if (!rules.ok) {
     return redirectWithDraft(`/subscribe?error=${rules.reason}`, draft);
   }
@@ -114,6 +119,7 @@ export async function POST(request: Request): Promise<Response> {
     keywords,
     categories: categoryInput,
     agencies,
+    audiences,
     scope,
     now: new Date(),
   });

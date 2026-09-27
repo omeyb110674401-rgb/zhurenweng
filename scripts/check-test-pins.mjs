@@ -486,8 +486,9 @@ const CASES = [
   {
     label: '空条件被当成「订全部」（漏填的人会被所有新公示轰炸）',
     file: 'subscription',
-    from: "  if (!hasAnyRule({ keywords, categories, agencies })) return { ok: false, reason: 'no_rules' };",
-    to: "  if (false) return { ok: false, reason: 'no_rules' };",
+    // issue #84 起这一支多带了 audiences 参数（受众面单独出现也算一条规则）
+    from: '  if (!hasAnyRule({ keywords, categories, agencies, audiences })) {',
+    to: '  if (false) {',
     pattern: 'validateSubscriptionRules：范围与条件的关系是显式的',
     // 必须指单测：这条判据在**路由**里被调用，而 e2e 跑的是 .next 构建产物 ——
     // 撤掉源码里的实现，构建产物照旧，测试不会红（规则 1；本条曾经就指错成 e2e 而假绿）。
@@ -1117,6 +1118,102 @@ const CASES = [
     to: '  return String(error);',
     pattern: 'Error 实例取 message',
     test: 'tests/unit/errors.test.mjs',
+  },
+  // ---- issue #84：受众面进订阅规则 + 截止提醒合并成一封 ----
+  {
+    // 撤掉这一行 = 受众面从"收窄条件"退回"根本不起作用"。最直接的表现是
+    // 勾了「公众广域」的人照样收到行业标准 —— 而这一栏在页面上明明写着"只发这几类"。
+    label: '受众面不再收窄（勾了公众广域的人照样收到行业标准）',
+    file: 'subscription',
+    from: '  if (!matchesAudienceFilter(subscription, notice)) return false;',
+    to: '  if (false) return false;',
+    pattern: 'issue #84',
+    test: 'tests/unit/subscription-rules.test.mjs',
+  },
+  {
+    // 收窄判在 scope='all' 之后 = "订全部 + 只看公众广域"的人收到全部。
+    // 这一条单独占一个用例，因为它撤的是**顺序**而不是判断本身，最容易在重构里被挪回去。
+    label: '受众面被挪到「订全部」短路之后（收了全部却说只看那一档）',
+    file: 'subscription',
+    from: "  if (subscription.scope === 'all') return true;",
+    to: "  if (subscription.scope === 'all' && false) return true;",
+    pattern: 'scope=all 也受受众面收窄',
+    test: 'tests/unit/subscription-rules.test.mjs',
+  },
+  {
+    label: '只勾受众面被当成"没有规则"（"这类公示我都要"变成一条永远收不到信的订阅）',
+    file: 'subscription',
+    from: '  return hasAudienceRules;',
+    to: '  return false;',
+    pattern: '只勾受众面是一条完整可用的订阅',
+    test: 'tests/unit/subscription-rules.test.mjs',
+  },
+  {
+    label: '受众面不算一条有效规则（只勾受众面的人一提交就被 no_rules 拒掉）',
+    file: 'subscription',
+    from: '    || (rules.audiences ?? []).length > 0',
+    to: '    || false',
+    pattern: '受众面能单独撑起一条规则',
+    test: 'tests/unit/subscription-rules.test.mjs',
+  },
+  {
+    label: '「未判定」也变成可订档（订阅表单上多出一档没人会选的意图）',
+    file: 'audience',
+    from: "export const SUBSCRIBABLE_AUDIENCES: readonly NoticeAudience[] = ['public', 'sector'];",
+    to: "export const SUBSCRIBABLE_AUDIENCES: readonly NoticeAudience[] = ['public', 'sector', 'unknown'];",
+    pattern: '可选项只有两档',
+    test: 'tests/unit/subscription-rules.test.mjs',
+  },
+  {
+    label: '确认邮件漏写受众面（用户确认的规则与实际生效的不是同一份）',
+    file: 'mail',
+    from: '    parts.push(`受众面（收窄条件，只有这些才会发）：${audienceLabel}`);',
+    to: '    parts.push(``);',
+    pattern: 'issue #84：确认邮件里的受众面',
+    test: 'tests/unit/mail-html.test.mjs',
+  },
+  {
+    label: '订全部 + 勾了受众面时仍写成「不限关键词 / 领域 / 机关」（把收窄说没了）',
+    file: 'mail',
+    from: '      : `订阅范围：收录的全部新公示，但只发受众面属于「${audienceLabel}」的那些`;',
+    to: '      : `订阅范围：收录的全部新公示（不限关键词 / 领域 / 机关）`;',
+    pattern: 'scope=all \\+ 受众面',
+    test: 'tests/unit/mail-html.test.mjs',
+  },
+  {
+    label: '待确认规则漏写受众面（确认一次之后受众面悄悄消失）',
+    file: 'subsRepo',
+    from: '    audiences: rules.audiences,',
+    to: '    audiences: [],',
+    pattern: '确认前生效的仍是旧的那一档',
+    test: 'tests/e2e/subscribe-audience.test.mjs',
+  },
+  {
+    label: '读侧不再过滤受众面白名单（脏值留在规则里，这条订阅永远收不到信且毫无报错）',
+    file: 'subsRepo',
+    from: '  return safeParseArray(text).filter(isSubscribableAudience);',
+    to: '  return safeParseArray(text);',
+    pattern: '读侧：列里出现白名单外的值一律丢掉',
+    test: 'tests/e2e/subscribe-audience.test.mjs',
+  },
+  {
+    // 撤掉合并 = 回到"一条公示一封"。生产上真的发生过：2026-09-25 那一轮给同一个
+    // 人连发 6 封，站长随后退订（原话"订阅信息有点多"）。这条 pin 撤的是信的数量，
+    // 不是信的内容 —— 所以它必须由 e2e 来钉（e2e 里 worker 子进程跑的就是源码）。
+    label: '提醒退回「一条公示一封」（同一个人一轮里收到 N 封）',
+    file: 'reminders',
+    from: '          listed.length === 1',
+    to: '          true || listed.length === 1',
+    pattern: '提醒触发时机与内容',
+    test: 'tests/e2e/deadline-reminders.test.mjs',
+  },
+  {
+    label: '上限截断后把溢出的也标成「已通知」（那些条目用户永远看不到）',
+    file: 'reminders',
+    from: '        listed.map((item) => ({ noticeId: item.notice.id, stage: item.stage })),',
+    to: '        due.map((item) => ({ noticeId: item.notice.id, stage: item.stage })),',
+    pattern: '合并提醒的条数上限',
+    test: 'tests/e2e/subscribe-audience.test.mjs',
   },
 ];
 

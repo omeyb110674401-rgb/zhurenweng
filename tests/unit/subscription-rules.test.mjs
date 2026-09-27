@@ -4,17 +4,19 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, it } from 'node:test';
 import {
+  AUDIENCE_OPTIONS,
   hasAnyRule,
   matchesSubscriptionRules,
   normalizeAgencies,
+  normalizeAudiences,
   normalizeScope,
   validateSubscriptionRules,
 } from '../../src/lib/subscription.ts';
 
 /**
- * 单元：订阅规则的维度与匹配（issue #60 第 2 刀）。
+ * 单元：订阅规则的维度与匹配（issue #60 第 2 刀，issue #84 加受众面收窄）。
  *
- * 这一层的价值全在「同一份逻辑被三处复用」（订阅页校验、截止提醒、将来的新公示通知）。
+ * 这一层的价值全在「同一份逻辑被三处复用」（订阅页校验、截止提醒、新公示通知）。
  * 分家的表现是「我明明订了却收不到」，而那种问题没有报错、没有日志，只能靠断言挡住。
  */
 
@@ -25,6 +27,7 @@ const rulesOf = (overrides = {}) => ({
   keywords: [],
   categories: [],
   agencies: [],
+  audiences: [],
   scope: 'rules',
   ...overrides,
 });
@@ -34,6 +37,8 @@ const noticeOf = (overrides = {}) => ({
   bodyText: '现就某办法向社会公开征求意见。',
   categoryTags: ['立法与司法'],
   agency: '测试部',
+  // 未判定（含本列上线前的 NULL）：受众面测试显式传值，其余用例走"空 = 不限"
+  audience: null,
   ...overrides,
 });
 
@@ -132,5 +137,106 @@ describe('复用同源：提醒任务与订阅页用的是同一份判定', () =
       !/subscription\.keywords\.some|\.includes\(keyword\)/.test(job),
       '任务里出现自己的关键词匹配代码 = 第二份口径，"订了收不到"从此不可解释',
     );
+  });
+});
+
+/**
+ * 受众面进订阅规则（issue #84）。这一组钉的是**它和其余三项不是同一种关系**：
+ * 关键词 / 领域 / 机关是「任一命中即相关」（OR），受众面是「这类公示是不是给我的」（AND）。
+ * 把 AND 写成 OR 的表现是订阅者**多收**一堆行业标准；把顺序写反（放在 scope='all'
+ * 之后）的表现是"订全部 + 只看公众广域"的人收到全部 —— 两种都不报错。
+ */
+describe('issue #84：受众面是收窄条件（与关键词 / 领域 / 机关是 AND）', () => {
+  it('可选项只有两档，未判定**刻意不能订**（没人会说"把没归好类的发给我"）', () => {
+    assert.deepEqual(AUDIENCE_OPTIONS.map((option) => option.value), ['public', 'sector']);
+    assert.deepEqual(AUDIENCE_OPTIONS.map((option) => option.label), ['公众广域', '行业专业']);
+    for (const option of AUDIENCE_OPTIONS) {
+      assert.ok(option.hint.length > 0, '每一档都要有一句给读者看的口径说明');
+    }
+  });
+
+  it('normalizeAudiences：白名单过滤 + 去重 + 大小写与空白不敏感', () => {
+    assert.deepEqual(normalizeAudiences(['public', 'sector']), ['public', 'sector']);
+    assert.deepEqual(normalizeAudiences(' public , SECTOR '), ['public', 'sector'], '表单交来的是大小写各异的字面量');
+    assert.deepEqual(normalizeAudiences(['unknown']), [], '未判定不是可订项，落库前就该被丢掉');
+    assert.deepEqual(normalizeAudiences(['林草', '', '  ']), [], '未知取值一律丢掉，不当成新档');
+    assert.deepEqual(normalizeAudiences(['public', 'public']), ['public'], '去重');
+  });
+
+  it('空数组 = 不限：本列上线前的订阅（以及"没有这个字段"的调用方）行为与旧版逐条一致', () => {
+    assert.equal(matchesSubscriptionRules(rulesOf({ keywords: ['噪声'] }), noticeOf({ title: '噪声污染防治法（草案）' })), true);
+    assert.equal(matchesSubscriptionRules(rulesOf(), noticeOf()), false, '仍然没有兜底成"全部"');
+    // 条目侧未判定（NULL）不影响"不限"的人：他不勾，就不该因此少收
+    assert.equal(matchesSubscriptionRules(rulesOf({ scope: 'all' }), noticeOf({ audience: 'unknown' })), true);
+  });
+
+  it('命中条件但受众面不符 ⇒ 不发（这正是 AND 与 OR 的差别）', () => {
+    const sector = noticeOf({ title: '关于某技术规程公开征求意见的公告', audience: 'sector' });
+    assert.equal(
+      matchesSubscriptionRules(rulesOf({ keywords: ['技术规程'] }), sector),
+      true,
+      '不勾受众面时关键词命中就发（旧行为）',
+    );
+    assert.equal(
+      matchesSubscriptionRules(rulesOf({ keywords: ['技术规程'], audiences: ['public'] }), sector),
+      false,
+      '勾了「公众广域」之后，行业专业的那条即使关键词命中也不该发 —— 这是收窄的全部意义',
+    );
+    assert.equal(
+      matchesSubscriptionRules(rulesOf({ keywords: ['技术规程'], audiences: ['sector'] }), sector),
+      true,
+    );
+  });
+
+  it('只勾受众面是一条完整可用的订阅（"这类公示我都要"）', () => {
+    assert.equal(hasAnyRule(rulesOf({ audiences: ['public'] })), true, '受众面单独出现也算有规则');
+    assert.equal(
+      matchesSubscriptionRules(rulesOf({ audiences: ['public'] }), noticeOf({ audience: 'public' })),
+      true,
+      '没有别的条件时，"命中受众面"本身就是命中',
+    );
+    assert.equal(
+      matchesSubscriptionRules(rulesOf({ audiences: ['public'] }), noticeOf({ audience: 'sector' })),
+      false,
+    );
+  });
+
+  it('scope=all 也受受众面收窄（"全部新公示，但我只看公众广域"必须是那个意思）', () => {
+    assert.equal(
+      matchesSubscriptionRules(rulesOf({ scope: 'all' }), noticeOf({ audience: 'sector' })),
+      true,
+      '不勾受众面时订全部照旧一律命中',
+    );
+    assert.equal(
+      matchesSubscriptionRules(rulesOf({ scope: 'all', audiences: ['public'] }), noticeOf({ audience: 'sector' })),
+      false,
+      '勾了就必须收窄：排在 scope=all 短路的后面就等于嘴上说收窄、实际发全部',
+    );
+    assert.equal(
+      matchesSubscriptionRules(rulesOf({ scope: 'all', audiences: ['public'] }), noticeOf({ audience: 'public' })),
+      true,
+    );
+  });
+
+  it('未判定与 NULL 不算任何一档（否则「公众广域」这个名字就开始撒谎）', () => {
+    for (const audience of ['unknown', null, undefined]) {
+      assert.equal(
+        matchesSubscriptionRules(rulesOf({ audiences: ['public', 'sector'] }), noticeOf({ audience })),
+        false,
+        `受众面 ${String(audience)} 不该被算进公众广域或行业专业`,
+      );
+    }
+  });
+
+  it('validateSubscriptionRules：受众面能单独撑起一条规则，未知值仍被拒', () => {
+    assert.equal(validateSubscriptionRules([], [], [], 'rules', ['public']).ok, true);
+    assert.deepEqual(validateSubscriptionRules([], [], [], 'rules', []), {
+      ok: false,
+      reason: 'no_rules',
+    });
+    assert.deepEqual(validateSubscriptionRules([], [], [], 'rules', ['林业']), {
+      ok: false,
+      reason: 'unknown_audience',
+    });
   });
 });

@@ -17,8 +17,8 @@ import { createFixtureServer } from './helpers/fixture-server.mjs';
  *   → 真实 worker 进程抓取入库（WORKER_ONCE=1，SOURCES_FIXTURE_BASE 注入 fixture 源站）
  *   → /subscribe 表单提交（校验 / 重复邮箱更新规则 / 确认邮件经 MAILER_OUTBOX_FILE 捕获）
  *   → double opt-in：未确认时触发提醒任务 → 无邮件；点击确认链接 → 订阅生效
- *   → 再触发提醒任务 → +7 一封、+3 一封，内容含标题 / 剩余天数 / 截止日期 /
- *     站内详情链接 / 官方原文链接；关键词命中标题或正文、领域命中标签均可触发
+ *   → 再触发提醒任务 → 同一轮里 +7 与 +3 **合并成一封**（issue #84：正文含每条的标题 /
+ *     剩余天数 / 截止日期 / 站内详情链接 / 官方原文链接），只有一条到档时仍是单条那封
  *   → 重跑任务不重发（reminder_sends 去重）
  *   → 匹配规则外的条目不发
  *   → 一键退订立即生效，退订后新条目也不再发送
@@ -131,6 +131,25 @@ function assertOneMail(email, subjectPart) {
     mails.length,
     1,
     `${email} 应恰好收到 1 封主题含「${subjectPart}」的邮件，实际 ${mails.length} 封：${JSON.stringify(mails.map((m) => m.subject))}`,
+  );
+  return mails[0];
+}
+
+/**
+ * 按「收件人 + 标题出现在主题**或正文**里」取那一封并断言唯一（issue #84）。
+ *
+ * 合并提醒的主题是「N 条公示即将截止（最近一条…）」，里头不再有每条的标题 ——
+ * 所以"取 alice 关于噪声法的那封"这件事不能再按主题找，否则会得到 0 封，
+ * 而那是**测试在找一个已经不存在的形状**，不是提醒没发。
+ */
+function assertMailMentioning(email, text) {
+  const mails = reminderOutbox()
+    .filter((mail) => mail.to === email)
+    .filter((mail) => mail.subject.includes(text) || mail.text.includes(text));
+  assert.equal(
+    mails.length,
+    1,
+    `${email} 应恰好收到 1 封提到「${text}」的邮件，实际 ${mails.length} 封：${JSON.stringify(mails.map((m) => m.subject))}`,
   );
   return mails[0];
 }
@@ -253,7 +272,10 @@ describe('issue #7：订阅 double opt-in → 截止提醒 → 一键退订', ()
     assert.equal(response.status, 303);
     assert.match(response.headers.get('location'), /error=no_rules/);
     const { html } = await followGet(`${app.url}/subscribe?error=no_rules`);
-    assert.match(html, /请至少填写一个关键词、选择一个领域或一个发布机关；或改选「订全部新公示」。/);
+    assert.match(
+      html,
+      /请至少填写一个关键词、选择一个领域、一个发布机关或一档受众面；或改选「订全部新公示」。/,
+    );
     assert.equal(readOutbox().length, 0);
   });
 
@@ -366,52 +388,66 @@ describe('issue #7：订阅 double opt-in → 截止提醒 → 一键退订', ()
     assert.match(bobResult.html, /订阅已确认/);
   });
 
-  it('提醒触发时机与内容：+7 一封、+3 一封；关键词命中标题 / 正文均触发', async () => {
+  it('提醒触发时机与内容：+7 / +3 合并成一封；关键词命中标题 / 正文均触发', async () => {
     const run = await runWorkerOnce();
     assert.equal(run.code, 0, `worker 应正常退出，输出：${run.output}`);
-    assert.match(run.output, /截止提醒任务完成：候选条目 3，订阅 2，发送 3 封/);
+    // alice 本轮两条同时到档 ⇒ **一封**（issue #84）；bob 只有一条 ⇒ 仍是单条那封。
+    // 旧口径是"一条公示一封"，所以这里写死的是 2 封（共 3 条）而不是 3 封。
+    assert.match(run.output, /截止提醒任务完成：候选条目 3，订阅 2，发送 2 封（共 3 条）/);
 
     const deadlineD7 = await servedDeadline('t20260910_210001');
     const deadlineD3 = await servedDeadline('t20260910_210002');
     const noiseId = noticeIdFor(officialUrlOf('t20260910_210001'));
     const idCardId = noticeIdFor(officialUrlOf('t20260910_210002'));
 
-    // alice：+7（标题命中）+ +3（正文命中「医疗保障」）
-    const aliceD7 = assertOneMail(ALICE, TITLES.noiseD7);
-    assert.match(aliceD7.subject, /剩 7 天/);
-    assert.match(aliceD7.text, new RegExp(`截止日期：${deadlineD7}（还剩 7 天`));
+    // alice：+7（标题命中）+ +3（正文命中「医疗保障」）在同一轮里，合并成一封
+    const aliceMail = assertOneMail(ALICE, '2 条公示即将截止');
+    assert.match(aliceMail.subject, /最近一条还剩 3 天/, '主题说清条数与最近的一条');
     assert.ok(
-      aliceD7.text.includes(`${app.url}/notices/${noiseId}`),
-      `提醒应含站内详情链接 ${app.url}/notices/${noiseId}：${aliceD7.text}`,
+      aliceMail.text.indexOf(TITLES.idCardD3) < aliceMail.text.indexOf(TITLES.noiseD7),
+      `最急的那条应排在前面：\n${aliceMail.text}`,
+    );
+    assert.match(aliceMail.text, new RegExp(`截止日期：${deadlineD7}（还剩 7 天）`));
+    assert.match(aliceMail.text, new RegExp(`截止日期：${deadlineD3}（还剩 3 天`));
+    assert.match(
+      aliceMail.text,
+      /还剩 3 天；本档原定在截止前 7 天发出，这次是补发/,
+      '这一条的 7 天档从没发过（它入库时就只剩 3 天）⇒ 合并之后仍要逐条照实标出补发',
     );
     assert.ok(
-      aliceD7.text.includes(officialUrlOf('t20260910_210001')),
-      '提醒应含官方原文（提意）链接',
+      aliceMail.text.includes(`${app.url}/notices/${noiseId}`)
+        && aliceMail.text.includes(`${app.url}/notices/${idCardId}`),
+      `每一条都要有自己的站内详情链接：${aliceMail.text}`,
     );
-    assert.match(aliceD7.text, /unsubscribe\?token=/);
+    assert.ok(
+      aliceMail.text.includes(officialUrlOf('t20260910_210001'))
+        && aliceMail.text.includes(officialUrlOf('t20260910_210002')),
+      '每一条都要有自己的官方原文（提意）链接 —— 合并不能把链接减掉',
+    );
+    assert.match(aliceMail.text, /unsubscribe\?token=/);
+    assert.equal(
+      reminderMailsTo(ALICE).length,
+      1,
+      `同一轮里 alice 只应收到一封（旧行为是 3 封信连发，站长就是这样退订的）：${JSON.stringify(reminderMailsTo(ALICE).map((m) => m.subject))}`,
+    );
 
-    const aliceD3 = assertOneMail(ALICE, TITLES.idCardD3);
-    assert.match(aliceD3.subject, /剩 3 天/);
-    assert.match(aliceD3.text, new RegExp(`截止日期：${deadlineD3}（还剩 3 天`));
-    assert.ok(aliceD3.text.includes(`${app.url}/notices/${idCardId}`));
-    assert.ok(
-      aliceD3.text.includes(officialUrlOf('t20260910_210002')),
-      '官方原文链接应指向该条目的详情页地址',
-    );
-
-    // bob：仅 +7 一封（其规则不含「医疗保障」，正文命中的条目不触发）
+    // bob：仅 +7 一封（其规则不含「医疗保障」，正文命中的条目不触发）⇒ 走单条模板
     const bobD7 = assertOneMail(BOB, TITLES.noiseD7);
     assert.match(bobD7.subject, /剩 7 天/);
+    assert.match(bobD7.text, new RegExp(`截止日期：${deadlineD7}（还剩 7 天）`));
     assert.equal(
       reminderMailsTo(BOB).filter((mail) => mail.subject.includes(TITLES.idCardD3)).length,
       0,
       'bob 不应收到规则外条目的提醒',
     );
 
-    // 每位订阅者每条目只 1 封（同邮箱单行，未重复建行）
+    // 每位订阅者这一轮只收到一封（同邮箱单行；重复建行会让同一封信发两遍）
     for (const email of [ALICE, BOB]) {
-      const noiseMails = reminderMailsTo(email).filter((mail) => mail.subject.includes(TITLES.noiseD7));
-      assert.equal(noiseMails.length, 1, `${email} 对同一条目只应收到 1 封提醒`);
+      assert.equal(
+        reminderMailsTo(email).length,
+        1,
+        `${email} 本轮只应收到 1 封提醒，实际 ${JSON.stringify(reminderMailsTo(email).map((m) => m.subject))}`,
+      );
     }
 
     // 匹配规则外的条目（渔业法，+7 但无人命中）不发送
@@ -430,7 +466,7 @@ describe('issue #7：订阅 double opt-in → 截止提醒 → 一键退订', ()
     const before = reminderOutbox().length;
     const run = await runWorkerOnce();
     assert.equal(run.code, 0, `worker 应正常退出，输出：${run.output}`);
-    assert.match(run.output, /发送 0 封，去重跳过 \d+ 次/, '到档且已发过的组合应全部走去重分支');
+    assert.match(run.output, /发送 0 封（共 0 条），去重跳过 \d+ 次/, '到档且已发过的组合应全部走去重分支');
     assert.equal(reminderOutbox().length, before, '重复运行不得重发提醒');
   });
 
@@ -484,7 +520,7 @@ describe('issue #7：订阅 double opt-in → 截止提醒 → 一键退订', ()
   });
 
   it('退订链接是只读确认页（issue #34）：打开不退订，点确认才退订；无效链接展示失败态', async () => {
-    const aliceMail = assertOneMail(ALICE, TITLES.noiseD7);
+    const aliceMail = assertMailMentioning(ALICE, TITLES.noiseD7);
     const unsubscribeLink = extractLink(aliceMail.text, '/unsubscribe');
 
     // ① 邮件正文里的链接指向**只读**确认页：GET 不改状态（邮件网关会预取这个链接，
@@ -529,7 +565,7 @@ describe('issue #7：订阅 double opt-in → 截止提醒 → 一键退订', ()
   });
 
   it('邮件头带 RFC 8058 一键退订（List-Unsubscribe / -Post），客户端退订按钮走 POST', async () => {
-    const aliceMail = assertOneMail(ALICE, TITLES.noiseD7);
+    const aliceMail = assertMailMentioning(ALICE, TITLES.noiseD7);
     const headers = aliceMail.headers ?? {};
     assert.match(
       headers['List-Unsubscribe'] ?? '',

@@ -172,6 +172,11 @@ export const subscriptions = pgTable('subscriptions', {
   categoriesJson: text('categories_json').notNull().default('[]'),
   /** JSON 存 TEXT：发布机关规则数组（issue #60 第 2 刀，归一后的机关名，逐个精确相等） */
   agenciesJson: text('agencies_json').notNull().default('[]'),
+  /**
+   * JSON 存 TEXT：受众面收窄条件（issue #84），与 sqlite 侧同结构、同名列。
+   * 空数组 = 不限（存量行由此与旧行为逐条一致）；非空时与其余规则是 AND 关系。
+   */
+  audiencesJson: text('audiences_json').notNull().default('[]'),
   /** 订阅范围（issue #60）：'rules' 按条件 / 'all' 全部新公示；空规则不等于「全部」 */
   scope: text('scope').notNull().default('rules'),
   /**

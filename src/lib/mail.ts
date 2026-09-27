@@ -1,6 +1,7 @@
 import type { NoticeRecord, ReminderStage, SubscriptionRules } from '../db/types.ts';
 import type { MailMessage } from './ports.ts';
 import type { RuleMatchableSubscription } from './subscription.ts';
+import { AUDIENCE_LABELS } from './audience.ts';
 // HTML 转义（issue #37 建立，issue #83 起与后台共用一份实现）：本文件原本自带一份
 // `escapeHtml`，与 `app/admin/admin-html.ts` 那份**逐字节相同** —— 两份的下场是
 // "邮件那份有安全测试、后台那份一个都没有"。现在两边都打这一份，测试各从一侧覆盖。
@@ -77,10 +78,23 @@ function manageUrl(unsubscribeToken: string): string {
 
 function rulesText(rules: RuleMatchableSubscription): string {
   const parts: string[] = [];
-  if (rules.scope === 'all') return '订阅范围：收录的全部新公示（不限关键词 / 领域 / 机关）';
+  const audiences = rules.audiences ?? [];
+  const audienceLabel = audiences.map((audience) => AUDIENCE_LABELS[audience]).join('、');
+  if (rules.scope === 'all') {
+    // 「订全部」+ 受众面是一个真实组合（"全部新公示，但我只看公众广域"）：这时
+    // 只写"收录的全部新公示"就是撒谎 —— 信里必须把收窄那半句一起说出来。
+    return audiences.length === 0
+      ? '订阅范围：收录的全部新公示（不限关键词 / 领域 / 机关）'
+      : `订阅范围：收录的全部新公示，但只发受众面属于「${audienceLabel}」的那些`;
+  }
   if (rules.keywords.length > 0) parts.push(`关键词：${rules.keywords.join('、')}`);
   if (rules.categories.length > 0) parts.push(`领域：${rules.categories.join('、')}`);
   if ((rules.agencies ?? []).length > 0) parts.push(`发布机关：${rules.agencies.join('、')}`);
+  if (audiences.length > 0) {
+    // 受众面是**收窄**条件（issue #84），与上面三项不是并列关系 —— 标出来，
+    // 免得读者把它当成"再多命中一档"。
+    parts.push(`受众面（收窄条件，只有这些才会发）：${audienceLabel}`);
+  }
   return parts.join('\n');
 }
 
@@ -175,9 +189,9 @@ function reminderStageNote(stage: ReminderStage, days: number): string {
   return days === nominal ? '' : `；本档原定在${STAGE_LABELS[stage]}发出，这次是补发`;
 }
 
-/** 订阅侧的固定承诺：两档各一封，漏跑的那天下一轮补上。 */
+/** 订阅侧的固定承诺：两档各一封，漏跑的那天下一轮补上，同轮多条合并成一封。 */
 const REMINDER_POLICY_TEXT =
-  '本提醒按你的订阅规则发送，每条公示的截止前 7 天、3 天各提醒一次；某一天任务没跑成，该档会在下一轮补发一次（不会重复发）。';
+  '本提醒按你的订阅规则发送，每条公示的截止前 7 天、3 天各提醒一次；某一天任务没跑成，该档会在下一轮补发一次（不会重复发）；同一轮里若有多条同时到档，会合并成一封发出，不按条数连发。';
 
 /**
  * 任务失败告警邮件（issue #12）：worker 任务失败时发给站长（ALERT_EMAIL）。
@@ -286,6 +300,106 @@ export function buildReminderEmail(input: {
 
 /** 一封新公示通知里最多列几条（超出部分只报数，不拆成第二封信） */
 export const MAX_NOTICES_PER_EMAIL = 20;
+
+/**
+ * 一封**合并**截止提醒里最多列几条（issue #84）。与 `MAX_NOTICES_PER_EMAIL` 取同一个
+ * 数量级、同一条理由：个人 SMTP 有日发信上限，而"今天有 8 条要截止"拆成 8 封信
+ * 正是读者退订的原因（站长 2026-09-26 退订的原话就是"订阅信息有点多"）。
+ *
+ * 刻意**不做成环境变量**：它不是运维要调的旋钮（没有"某天该多列几条"的场景），
+ * 而 #83 刚清完 7 个"文档说能调、compose 没接线"的幽灵旋钮 —— 不再新造一个。
+ */
+export const MAX_REMINDER_ITEMS_PER_EMAIL = 20;
+
+/** 合并提醒里的一条：条目 + 本轮判出的档与剩余天数。 */
+export interface ReminderDigestItem {
+  notice: NoticeRecord;
+  days: number;
+  stage: ReminderStage;
+}
+
+/**
+ * 合并截止提醒（issue #84）：**一位订阅者一轮至多一封**。
+ *
+ * 旧行为是"一条公示一封"：同一轮里同一位订阅者命中 3 条就发 3 封、命中 6 条就发 6 封
+ * （2026-09-25 那轮生产实测正好发了 6 封给同一个人）。新公示通知从 #60 起就是
+ * "一人一封汇总"，提醒这一侧一直没跟上 —— 这份模板补的就是这个缺口。
+ *
+ * 三条口径与 `buildNewNoticesEmail` 同源：
+ * 1. 按剩余天数**从少到多**排（最急的排最前，读者只看第一行也知道先处理哪条）；
+ * 2. 超出上限只列前 N 条 + 报剩余条数，**没列进去的不写去重标记**（下一轮还会带来）；
+ * 3. 每条都带站内详情与官方原文链接 —— 提醒的全部意义是让人回到官方渠道提意见。
+ *
+ * 只到档 1 条时**不走这份模板**（任务层直接用 `buildReminderEmail`）：那封已有生产样本、
+ * 文案也被单测逐字钉着，没有理由为了统一而改动一封正在正常工作的信。
+ */
+export function buildReminderDigestEmail(input: {
+  email: string;
+  items: readonly ReminderDigestItem[];
+  /** 因条数上限没列进本信的同轮条数（下一轮会再来） */
+  overflowCount: number;
+  unsubscribeToken: string;
+}): MailMessage {
+  const items = [...input.items].sort((a, b) => a.days - b.days);
+  const first = items[0];
+  const remaining = remainingDaysText(first.days);
+  const subject = `【主人翁】截止提醒：${items.length} 条公示即将截止（最近一条${remaining}）`;
+  const unsubscribe = unsubscribeUrl(input.unsubscribeToken);
+
+  const lines = items.map((item) => [
+    `· ${item.notice.title}`,
+    `  截止日期：${item.notice.deadlineAt ?? '未标注'}（${remainingDaysText(item.days)}${reminderStageNote(item.stage, item.days)}）`,
+    `  站内详情（含 AI 摘要与提意指引）：`,
+    `  ${noticeDetailUrl(item.notice.id)}`,
+    `  官方原文（请前往官方渠道提交意见）：`,
+    `  ${item.notice.url}`,
+  ].join('\n'));
+
+  const overflowNote =
+    input.overflowCount > 0
+      ? `另有 ${input.overflowCount} 条本轮未列入（每封邮件最多 ${MAX_REMINDER_ITEMS_PER_EMAIL} 条），会在下一封里发出。`
+      : '';
+
+  return {
+    to: input.email,
+    subject,
+    text: [
+      `你订阅的 ${items.length} 条公示即将截止（按剩余天数从少到多排列）：`,
+      '',
+      ...lines,
+      overflowNote === '' ? '' : overflowNote,
+      '',
+      `${REMINDER_POLICY_TEXT}`,
+      `不想再收到提醒？退订（打开页面后点确认）：`,
+      unsubscribe,
+      '',
+      `——`,
+      SITE_FOOTER,
+    ].join('\n'),
+    html: [
+      `<p>你订阅的 <strong>${items.length}</strong> 条公示即将截止（按剩余天数从少到多排列）：</p>`,
+      '<ol>',
+      items
+        .map((item) => {
+          const detail = noticeDetailUrl(item.notice.id);
+          const note = remainingDaysText(item.days) + reminderStageNote(item.stage, item.days);
+          return (
+            `<li><a href="${escapeHtml(detail)}">${escapeHtml(item.notice.title)}</a>`
+            + `<br>截止日期：<strong>${escapeHtml(item.notice.deadlineAt ?? '未标注')}</strong>（${escapeHtml(note)}）`
+            + `；<a href="${escapeHtml(item.notice.url)}">官方原文（请前往官方渠道提交意见）↗</a></li>`
+          );
+        })
+        .join('\n'),
+      '</ol>',
+      overflowNote === '' ? '' : `<p>${escapeHtml(overflowNote)}</p>`,
+      `<p>${escapeHtml(REMINDER_POLICY_TEXT)}不想再收到提醒？<a href="${escapeHtml(unsubscribe)}">退订（打开页面后点确认）</a>。</p>`,
+      `<p>——<br>${SITE_FOOTER}</p>`,
+    ]
+      .filter((part) => part !== '')
+      .join('\n'),
+    headers: unsubscribeHeaders(input.unsubscribeToken),
+  };
+}
 
 /**
  * 新公示通知（issue #60 第 3 刀）：一位订阅者一封汇总邮件。

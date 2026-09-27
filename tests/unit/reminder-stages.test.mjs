@@ -1,7 +1,11 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import { pickDueStage } from '../../worker/jobs/send-deadline-reminders.ts';
-import { buildReminderEmail } from '../../src/lib/mail.ts';
+import {
+  MAX_REMINDER_ITEMS_PER_EMAIL,
+  buildReminderDigestEmail,
+  buildReminderEmail,
+} from '../../src/lib/mail.ts';
 
 /**
  * 单元：截止提醒的选档与措辞（issue #60 第一刀）。
@@ -158,5 +162,109 @@ describe('提醒邮件的档位措辞与实际剩余一致', () => {
     });
     assert.match(mail.text, /下一轮补发一次（不会重复发）/);
     assert.match(mail.html, /下一轮补发一次（不会重复发）/);
+  });
+});
+
+/**
+ * 合并提醒（issue #84）：**一位订阅者一轮至多一封**。
+ *
+ * 旧行为"一条公示一封"在生产上真的发生过：2026-09-25 那一轮同一个人收到 6 封，
+ * 站长随后退订（原话"订阅信息有点多"）。这个模板补的就是这个缺口，所以这一组
+ * 钉的是合并之后**不能丢信息**：每条都要有自己的截止日期、剩余天数、站内详情与
+ * 官方原文链接 —— 合并成"一封里只写标题"就不是减量而是减信息了。
+ */
+describe('issue #84：多条到档时合并成一封', () => {
+  const noticeOf = (id, title, deadlineAt) => ({
+    id,
+    title,
+    deadlineAt,
+    url: `https://source.test/${id}.html`,
+  });
+
+  const digestOf = (items, overflowCount = 0) =>
+    buildReminderDigestEmail({
+      email: 'reader@example.test',
+      items,
+      overflowCount,
+      unsubscribeToken: 'tok',
+    });
+
+  it('主题说清条数与最近的一条，正文按剩余天数从少到多排（最急的排最前）', () => {
+    const mail = digestOf([
+      { notice: noticeOf('a'.repeat(16), '甲标准征求意见', '2026-10-05'), days: 7, stage: 'd7' },
+      { notice: noticeOf('b'.repeat(16), '乙条例征求意见', '2026-10-01'), days: 3, stage: 'd3' },
+    ]);
+    assert.match(mail.subject, /2 条公示即将截止/);
+    assert.match(mail.subject, /最近一条还剩 3 天/);
+    assert.ok(
+      mail.text.indexOf('乙条例征求意见') < mail.text.indexOf('甲标准征求意见'),
+      `最急的应排最前：\n${mail.text}`,
+    );
+    assert.match(mail.text, /按剩余天数从少到多排列/);
+  });
+
+  it('每条都带自己的截止日期、剩余天数、站内详情与官方原文链接（合并 ≠ 减信息）', () => {
+    const mail = digestOf([
+      { notice: noticeOf('a'.repeat(16), '甲标准征求意见', '2026-10-05'), days: 7, stage: 'd7' },
+      { notice: noticeOf('b'.repeat(16), '乙条例征求意见', '2026-10-01'), days: 3, stage: 'd3' },
+    ]);
+    for (const [id, title, deadline, days] of [
+      ['a'.repeat(16), '甲标准征求意见', '2026-10-05', 7],
+      ['b'.repeat(16), '乙条例征求意见', '2026-10-01', 3],
+    ]) {
+      assert.ok(mail.text.includes(title), `缺「${title}」`);
+      assert.ok(
+        mail.text.includes(`截止日期：${deadline}（还剩 ${days} 天）`),
+        `每天都该有自己的剩余天数：${mail.text}`,
+      );
+      assert.ok(mail.text.includes(`/notices/${id}`), `每条都要有站内详情链接（${title}）`);
+      assert.ok(mail.text.includes(`https://source.test/${id}.html`), `每条都要有官方原文链接（${title}）`);
+    }
+    assert.ok(mail.text.includes('unsubscribe?token='), '合并之后退订链接照样在');
+    assert.match(mail.text, /同一轮里若有多条同时到档，会合并成一封发出/);
+  });
+
+  it('补发仍逐条标注（剩 5 天的那条自称"原定 7 天档"就是说谎）', () => {
+    const mail = digestOf([
+      { notice: noticeOf('a'.repeat(16), '甲标准征求意见', '2026-10-05'), days: 5, stage: 'd7' },
+      { notice: noticeOf('b'.repeat(16), '乙条例征求意见', '2026-10-03'), days: 3, stage: 'd3' },
+    ]);
+    assert.match(mail.text, /还剩 5 天；本档原定在截止前 7 天发出，这次是补发/);
+    assert.ok(
+      !/还剩 3 天；本档原定/.test(mail.text),
+      '按点发出的那条不该被标成补发（档位标注逐条判，不能整封信共用一个）',
+    );
+  });
+
+  it('超出上限只列前 N 条并如实报数，没列进去的下一轮还会来', () => {
+    const items = Array.from({ length: MAX_REMINDER_ITEMS_PER_EMAIL + 3 }, (_v, i) => ({
+      notice: noticeOf(String(i).padStart(16, '0'), `批量条目 ${i}`, '2026-10-05'),
+      days: 3 + i,
+      stage: 'd3',
+    }));
+    const listed = items.slice(0, MAX_REMINDER_ITEMS_PER_EMAIL);
+    const mail = digestOf(listed, items.length - listed.length);
+    assert.match(mail.subject, new RegExp(`${MAX_REMINDER_ITEMS_PER_EMAIL} 条公示即将截止`));
+    assert.equal((mail.text.match(/^· /gm) ?? []).length, MAX_REMINDER_ITEMS_PER_EMAIL);
+    assert.match(mail.text, /另有 3 条本轮未列入/);
+    assert.match(mail.text, /会在下一封里发出/);
+  });
+
+  it('标题里的 HTML 与 href 里的引号都转义（源站数据不可信，与单条版同一条规矩）', () => {
+    const mail = digestOf([
+      {
+        notice: {
+          ...noticeOf('a'.repeat(16), '关于《A&B条例（<试行>）》征求意见', '2026-10-05'),
+          url: 'https://source.test/a"onmouseover="alert(1)',
+        },
+        days: 7,
+        stage: 'd7',
+      },
+      { notice: noticeOf('b'.repeat(16), '乙条例征求意见', '2026-10-01'), days: 3, stage: 'd3' },
+    ]);
+    assert.ok(!mail.html.includes('<试行>'), '标题里的尖括号不应成为标签');
+    assert.match(mail.html, /A&amp;B条例（&lt;试行&gt;）/);
+    assert.ok(!mail.html.includes('onmouseover="alert(1)"'), `href 里的引号不应逃出属性：${mail.html}`);
+    assert.match(mail.text, /A&B条例（<试行>）/, '纯文本保持字面');
   });
 });

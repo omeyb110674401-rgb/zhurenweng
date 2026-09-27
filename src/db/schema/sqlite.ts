@@ -201,6 +201,13 @@ export const subscriptions = sqliteTable('subscriptions', {
    */
   agenciesJson: text('agencies_json').notNull().default('[]'),
   /**
+   * JSON 存 TEXT：受众面收窄条件（issue #84），取值是 `audience.ts` 的 'public' / 'sector'。
+   * **空数组 = 不限**（本列上线前建的订阅全部落在这里，行为与旧版逐条一致）；
+   * 非空时与关键词 / 领域 / 机关是 **AND** 关系，不是"又一档命中即可"：
+   * 那三项回答"这条跟我有没有关系"，受众面回答"这类公示是不是给我看的"。
+   */
+  audiencesJson: text('audiences_json').notNull().default('[]'),
+  /**
    * 订阅范围（issue #60）：'rules' = 只收命中关键词 / 领域 / 机关的条目；
    * 'all' = 收录的全部新公示。刻意不用「规则为空即视为全部」表达后者 ——
    * 空规则更可能是漏填，把漏填解释成「订全部」会让用户事后才发现自己没设过条件。

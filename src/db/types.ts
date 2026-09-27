@@ -156,6 +156,11 @@ export interface SubscriptionRules {
   categories: string[];
   agencies: string[];
   scope: SubscriptionScope;
+  /**
+   * 受众面收窄条件（issue #84）：空数组 = 不限。取值只有 `public` / `sector` ——
+   * 「未判定」刻意不能订（那不是一个人会有的意图：没人会说"请把你们没归好类的发给我"）。
+   */
+  audiences: NoticeAudience[];
 }
 
 export interface SubscriptionRecord {
@@ -170,6 +175,12 @@ export interface SubscriptionRecord {
   agencies: string[];
   /** 订阅范围（issue #60）：'rules' 只收命中条件的；'all' 全部新公示 */
   scope: SubscriptionScope;
+  /**
+   * 受众面收窄条件（issue #84）：空数组 = 不限（本列上线前的订阅全在这里，
+   * 行为与旧版逐条一致）；非空时与上面三项是 AND，且对 `scope='all'` 同样生效 ——
+   * "全部新公示，但我只看公众广域"必须是那个意思，否则这一栏就是在骗人。
+   */
+  audiences: NoticeAudience[];
   /**
    * 待确认的规则改动（issue #60 第 4 刀）：非 null 表示"这个人提交过修改但还没确认"。
    * 确认前，提醒与通知仍按上面的正式规则发。

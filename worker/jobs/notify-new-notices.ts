@@ -51,6 +51,8 @@ export function pickNoticesForSubscription(
     keywords: string[];
     categories: string[];
     agencies: string[];
+    /** 受众面收窄条件（issue #84）：空数组 = 不限；与上面三项是 AND */
+    audiences: string[];
     scope: string;
   },
   candidates: NoticeRecord[],
