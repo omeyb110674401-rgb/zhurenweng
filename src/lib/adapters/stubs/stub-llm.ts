@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import type {
   AmendmentExplanationDraft,
+  AmendmentImpactDraft,
   LlmPort,
   LlmSummarizeInput,
   StructuredSummary,
@@ -138,6 +139,26 @@ export class StubLlm implements LlmPort {
         }
       }
       if (points.length > 0) summary.explanationPoints = points;
+    }
+    // 影响判读（issue #86 第 1 刀）：与条文要点同一套路 —— quote **逐字**取附件里的整行
+    // （挑第一行够长的，短行过不了反查的 8 字下限），于是"每条判读都要能反查到出处"
+    // 这条不变量在测试里走的是真路径。每份附件最多一条，免得 stub 硬造出一屏判读。
+    if (draft.length > 0) {
+      const impacts: AmendmentImpactDraft[] = [];
+      for (const source of draft) {
+        const line = source.text
+          .split('\n')
+          .map((item) => item.trim())
+          .find((item) => item.length >= 12);
+        if (line === undefined) continue;
+        impacts.push({
+          quote: line,
+          who: `【stub】受《${source.name.slice(0, 12)}》影响的从业者与公众（固定测试文案）`,
+          text: `【stub】这一处可能带来的影响（固定测试文案）：${line.slice(0, 16)}…`,
+          kind: impacts.length === 0 ? 'risk' : 'loophole',
+        });
+      }
+      if (impacts.length > 0) summary.impacts = impacts;
     }
     return summary;
   }

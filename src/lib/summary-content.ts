@@ -1,5 +1,11 @@
 
-import type { LlmPort, StructuredSummary, SummaryChannel, SummaryChannelKind } from './ports.ts';
+import type {
+  ImpactKind,
+  LlmPort,
+  StructuredSummary,
+  SummaryChannel,
+  SummaryChannelKind,
+} from './ports.ts';
 import type { SummaryDiagnostics } from './summary-diagnostics.ts';
 
 /**
@@ -108,6 +114,36 @@ export interface QuotedExplanationPoint {
   sourceUrl: string | null;
 }
 
+/** 影响类型的展示名（页面按它分组；`other` 是兜底桶，只为"不给判读贴错标签"而存在）。 */
+export const IMPACT_KIND_LABELS: Record<ImpactKind, string> = {
+  risk: '可能的不利后果',
+  loophole: '可能被规避或滥用',
+  burden: '新增的义务或成本',
+  other: '其他可能的影响',
+};
+
+/**
+ * 一条影响判读（issue #86 第 1 刀）—— 本站**唯一一段允许推断**的内容。
+ *
+ * 它与别的段落形状一样（都带 `quote` 与程序反查出来的 `source`），但两者的**证据地位不同**：
+ * - `quote` / `source` 是**可核对的**：逐字、由 `findDraftSourceForQuote` 反查出处，
+ *   反查不到整条不落库（与 keyPoints 同一条不变量）；
+ * - `text` / `who` / `kind` 是**推断**，不可核对。所以页面把两者排在同一行里，
+ *   绝不让推断脱离原文单独成立，并且这一段有**块级**免责声明（不只是卡片头部那行）。
+ *
+ * 引用可以在**任何一份**喂进去的附件里反查（不做段落隔离，理由见 `buildImpacts`）。
+ */
+export interface QuotedImpactPoint {
+  quote: string;
+  /** 可能受影响的具体主体；模型写不出具体主体时为空串（页面据空不渲染那半句） */
+  who: string;
+  /** 可能带来什么：一句话的推断 */
+  text: string;
+  kind: ImpactKind;
+  source: string | null;
+  sourceUrl: string | null;
+}
+
 /**
  * ai_summary_json 的落库形状。
  */
@@ -122,6 +158,8 @@ export interface QuotedSummary {
   keyPoints: QuotedDraftPoint[];
   /** 编制说明要点（issue #76 第 3 刀）：引用只能来自说明类附件 */
   explanationPoints: QuotedExplanationPoint[];
+  /** 可能的影响（issue #86 第 1 刀）：唯一允许推断的一段，每条都挂着可核对的原文 */
+  impacts: QuotedImpactPoint[];
   /** 说明全文里检测到的小节数（覆盖度那行的分母，带"约"）；null = 没喂说明 */
   explanationSections: number | null;
   /** deadline.text 为 ISO 日期（YYYY-MM-DD）或 null */
@@ -222,16 +260,57 @@ function quoteFingerprint(text: string): string {
  */
 const MIN_VERIFIABLE_QUOTE_CHARS = 8;
 
-/** 在给出的条文里反查这条引用的出处；找不到（或太短不可核对）返回 null。 */
+/**
+ * 引用里的省略号（issue #86 第 1 刀）。
+ *
+ * **为什么必须容忍它**：2026-09-27 的实验（`scripts/probe-amendment-changes.mjs`，
+ * 用旧提示词重跑《公路法（修正草案）》）量到 —— 模型一次吐 10 条改动点，**2 条因为
+ * 引用中间带省略号被丢掉**，也就是白白损失 20% 的产出。而省略号是**我们自己教它的**：
+ * 提示词的字段示例里就写着「第三条修改为：……」。
+ *
+ * **容忍的边界**：只容忍"引用中间有省略"，不容忍"引用对不上"。做法是按省略号切成若干段，
+ * **每一段都必须在原文里逐字出现、且按先后顺序**（见 `containsInOrder`）——
+ * 而**展示时那个缺口照原样留着**（落库的是模型给的原文，不是拼回来的），
+ * 否则页面上那句「本站从附件逐字提取，未做改写」就变成了假话。
+ */
+const QUOTE_ELLIPSIS_RE = /…+|\.{2,}/;
+
+/** 把一条引用按省略号切成若干段（去空、去空白）。没有省略号时就是它自己一段。 */
+export function quoteSegments(quote: string): string[] {
+  return quote
+    .split(QUOTE_ELLIPSIS_RE)
+    .map((segment) => segment.trim())
+    .filter((segment) => segment.length > 0);
+}
+
+/** 若干段是否在 haystack 里**按顺序**逐字出现（各段不重叠）。 */
+function containsInOrder(haystack: string, needles: string[]): boolean {
+  let from = 0;
+  for (const needle of needles) {
+    const at = haystack.indexOf(needle, from);
+    if (at === -1) return false;
+    from = at + needle.length;
+  }
+  return true;
+}
+
+/**
+ * 在给出的条文里反查这条引用的出处；找不到（或不可核对）返回 null。
+ *
+ * 判据（issue #86 第 1 刀起）：把引用按省略号切段，**每一段都要够长（≥8 字）**、
+ * 且各段按顺序在原文里逐字出现。三段都够长的要求是有意的 —— 只判"总长"的话，
+ * 「第一条…第二条…第三条」这种全是短碎片的引用就能蒙中任何公文。
+ */
 export function findDraftSourceForQuote<T extends { name: string; url: string; text: string }>(
   quote: string | null,
   sources: T[] | undefined,
 ): T | null {
   if (!quote) return null;
-  const normalized = quoteFingerprint(quote);
-  if (normalized.length < MIN_VERIFIABLE_QUOTE_CHARS) return null;
+  const segments = quoteSegments(quote).map(quoteFingerprint);
+  if (segments.length === 0) return null;
+  if (segments.some((segment) => segment.length < MIN_VERIFIABLE_QUOTE_CHARS)) return null;
   for (const source of sources ?? []) {
-    if (quoteFingerprint(source.text).includes(normalized)) return source;
+    if (containsInOrder(quoteFingerprint(source.text), segments)) return source;
   }
   return null;
 }
@@ -308,6 +387,7 @@ export function buildQuotedSummaryWithTally(
   });
 
   const explanationPoints = buildExplanationPoints(summary, explanationSide, tally);
+  const impacts = buildImpacts(summary, draftSources ?? [], tally);
 
   return {
     summary: {
@@ -317,6 +397,7 @@ export function buildQuotedSummaryWithTally(
       afterDeadline: { text: text(summary.afterDeadline), quote: cleanQuote(quotes?.afterDeadline) },
       keyPoints,
       explanationPoints,
+      impacts,
       explanationSections: explanationSections ?? null,
       deadline: {
         text:
@@ -364,6 +445,52 @@ function buildExplanationPoints(
   return out;
 }
 
+/**
+ * 影响判读：引用可以在**任何一份**喂进去的附件里反查（issue #86 第 1 刀）。
+ *
+ * 与 `buildExplanationPoints` 的**段落隔离**不同，这里刻意不隔离。那两栏的标题
+ * （「草案条文要点」「编制说明要点」）对读者承诺了"这是哪一种文字"，串了必须丢；
+ * 而「可能的争议点」承诺的是"**这一条原文** + 本站据此的推断"—— 原文出自哪一份附件
+ * 不影响可核对性，页面本来就把出处写成「出处：附件《X》」。
+ * 这条不是想当然：2026-09-27 的实测（86 号文档第九节）显示，**法律修正草案的对照句
+ * 在正文附件里**（10 条引用全部命中条文侧），而住建部那批的对照句在编制说明里 ——
+ * 两边都是官方原文，只认一侧就会白丢一半。
+ */
+function buildImpacts(
+  summary: StructuredSummary,
+  sources: { name: string; url: string; text: string; role?: 'draft' | 'explanation' | 'other' }[],
+  tally: VerifyTally,
+): QuotedImpactPoint[] {
+  const raw = Array.isArray(summary.impacts) ? summary.impacts : [];
+  const out: QuotedImpactPoint[] = [];
+  for (const item of raw) {
+    if (typeof item !== 'object' || item === null) continue;
+    const impact = item as unknown as Record<string, unknown>;
+    const quote = cleanQuote(typeof impact.quote === 'string' ? impact.quote : '');
+    const text = typeof impact.text === 'string' ? impact.text.trim() : '';
+    // 与说明要点一样：缺引用或缺正文的在这里跳过（那属于归一化阶段的 emptyOrInvalid），
+    // 只有"反查失败"才计入 tally —— 两种原因的处置完全不同
+    if (quote === null || text === '') continue;
+    const source = findDraftSourceForQuote(quote, sources);
+    if (source === null) {
+      tally.quoteNotFound += 1;
+      continue;
+    }
+    const declared = typeof impact.kind === 'string' ? impact.kind : '';
+    out.push({
+      quote,
+      text,
+      who: typeof impact.who === 'string' ? impact.who.trim() : '',
+      kind: (['risk', 'loophole', 'burden', 'other'] as string[]).includes(declared)
+        ? (declared as ImpactKind)
+        : 'other',
+      source: source.name,
+      sourceUrl: source.url,
+    });
+  }
+  return out;
+}
+
 /** 落库的说明要点数组 → 内存形状（旧行没这个字段 ⇒ 空数组，不算形状异常） */
 function parseStoredExplanationPoints(value: unknown): QuotedExplanationPoint[] {
   if (!Array.isArray(value)) return [];
@@ -378,6 +505,40 @@ function parseStoredExplanationPoints(value: unknown): QuotedExplanationPoint[] 
     const source = typeof point.source === 'string' && point.source !== '' ? point.source : null;
     const sourceUrl = typeof point.sourceUrl === 'string' && point.sourceUrl !== '' ? point.sourceUrl : null;
     out.push({ heading, text, quote, source, sourceUrl });
+  }
+  return out;
+}
+
+/**
+ * 落库的影响判读数组 → 内存形状（issue #86 第 1 刀）。
+ *
+ * 与说明要点同样的宽容口径：**旧行没有这个字段 ⇒ 空数组，不算形状异常**。
+ * 这一条不是形式主义：`impacts` 是本轮新增的键，而存量 84 条摘要全都没有它；
+ * 解析若把它当必填，存量条目会从「有摘要」掉回「待人工复核」占位（#85 第三节的教训）。
+ */
+function parseStoredImpacts(value: unknown): QuotedImpactPoint[] {
+  if (!Array.isArray(value)) return [];
+  const out: QuotedImpactPoint[] = [];
+  for (const item of value) {
+    if (typeof item !== 'object' || item === null) continue;
+    const impact = item as Record<string, unknown>;
+    const quote = typeof impact.quote === 'string' ? impact.quote.trim() : '';
+    const text = typeof impact.text === 'string' ? impact.text.trim() : '';
+    if (quote === '' || text === '') continue;
+    const declared = typeof impact.kind === 'string' ? impact.kind : '';
+    const source = typeof impact.source === 'string' && impact.source !== '' ? impact.source : null;
+    const sourceUrl =
+      typeof impact.sourceUrl === 'string' && impact.sourceUrl !== '' ? impact.sourceUrl : null;
+    out.push({
+      quote,
+      text,
+      who: typeof impact.who === 'string' ? impact.who.trim() : '',
+      kind: (['risk', 'loophole', 'burden', 'other'] as string[]).includes(declared)
+        ? (declared as ImpactKind)
+        : 'other',
+      source,
+      sourceUrl,
+    });
   }
   return out;
 }
@@ -454,6 +615,8 @@ export function parseQuotedSummary(value: unknown): QuotedSummary | null {
     // 说明要点与它的小节数都是后加的字段：旧行没有 ⇒ 按"空 + 没数过"解析，
     // 不算形状异常（否则摘要重刷那段时间，存量条目会从"有摘要"掉回占位）。
     explanationPoints: parseStoredExplanationPoints(record.explanationPoints),
+    // 影响判读是本轮新增的键：旧行没有 ⇒ 空数组（理由见 parseStoredImpacts）
+    impacts: parseStoredImpacts(record.impacts),
     explanationSections: typeof record.explanationSections === 'number' ? record.explanationSections : null,
     deadline,
     howToComment,

@@ -504,6 +504,7 @@ describe('issue #86：摘要调用的诊断随摘要落库', () => {
       keyPoints: json.keyPoints.length,
       explanationPoints: json.explanationPoints.length,
       channels: json.channels.length,
+      impacts: json.impacts.length,
     });
   });
 
@@ -538,5 +539,38 @@ describe('issue #86：摘要调用的诊断随摘要落库', () => {
     const after = readSummary(FRESH_ID);
     assert.equal(after.status, 'done');
     assert.equal(after.diagnostics, null, '人写的摘要不该挂着一份模型调用的诊断');
+  });
+});
+
+/**
+ * issue #86 第 1 刀：影响判读（全站唯一允许推断的一段）走完真实链路。
+ *
+ * 这里钉的是**落库这一侧**：模型（stub）吐出的判读必须逐条挂上程序反查出来的出处，
+ * 且诊断要能说清吐了几条、留下几条。渲染侧（含受众面门控）在
+ * `notice-genre-badge.test.mjs` 里钉 —— 那条路要真取页面。
+ */
+describe('issue #86：影响判读落库时每条都挂着可核对的原文', () => {
+  it('判读落库了，每条都有逐字引用与程序反查出来的出处', () => {
+    const { json } = readSummary(AMENDED_ID);
+    assert.ok(json.impacts.length > 0, '给了附件条文就该有判读（stub 的回响与模型同一条路径）');
+    for (const impact of json.impacts) {
+      assert.ok(impact.quote.length >= 8, '引用要够长才构成可核对的出处');
+      assert.ok(
+        containsVerbatim(`${AMENDED_TEXT}\n${EXPLANATION_TEXT}`, impact.quote),
+        `判读的引用必须逐字来自喂进去的附件：${impact.quote}`,
+      );
+      assert.ok(impact.source, '出处是程序反查出来的，不许为空');
+      assert.ok(impact.text.length > 0);
+      assert.ok(['risk', 'loophole', 'burden', 'other'].includes(impact.kind));
+    }
+  });
+
+  it('诊断里数得出"吐了几条、留下几条"（判读也一样过逐字反查）', () => {
+    const { json, diagnostics } = readSummary(AMENDED_ID);
+    const parsed = parseSummaryDiagnostics(diagnostics);
+    assert.equal(parsed.kept.impacts, json.impacts.length, '诊断说的落库条数要与摘要本体一致');
+    if (parsed.instrumented) {
+      assert.ok(parsed.emitted.impacts >= parsed.kept.impacts, '吐出的条数不可能少于落库的条数');
+    }
   });
 });

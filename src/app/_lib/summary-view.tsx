@@ -3,6 +3,7 @@ import { explanationCoverageVerdict } from '@/lib/explanation-coverage';
 
 import { safeParseJson, type NoticeRecord } from '@/db/types';
 import {
+  IMPACT_KIND_LABELS,
   parseQuotedSummary,
   SUMMARY_STATUS_LABELS,
   type QuotedSummary,
@@ -10,6 +11,7 @@ import {
   type SummaryStatus,
 } from '@/lib/summary-content';
 import { draftAvailability, type DraftAvailabilityInput } from '@/lib/summary-display';
+import { shouldRenderImpacts } from '@/lib/impact-display';
 import { summaryProvenance, summaryTemplateOf } from '@/lib/summary-basis';
 
 /**
@@ -137,8 +139,11 @@ export function SummaryView({
    * `read-and-used` 就写"上方「草案条文要点」摘自…"，而名单 / 打包清单类的条目
    * 读了附件也产不出条文要点 —— 那行字于是指着一段不存在的栏位说话。
    */
-  const hasAttachmentPoints =
+  const hasClausePoints =
     summary.keyPoints.length > 0 || summary.explanationPoints.length > 0;
+  /** 影响判读只对「公众广域」渲染（门控理由见上面那一块），底部那句说明要与它同源 */
+  const hasImpacts = summary.impacts.length > 0 && notice.audience === 'public';
+  const hasAttachmentPoints = hasClausePoints || hasImpacts;
   const provenance = summaryProvenance({
     attachment: attachmentReport ?? null,
     hasAttachmentPoints,
@@ -200,15 +205,76 @@ export function SummaryView({
          *
          * 这一段曾经是修正案的正面回答：读者要知道"改了哪几处"，页面就列出条款、类型、
          * 一句话说明与逐字原文，并在上面给一行覆盖度（"正文里检测到 N 处，本页列出 M 处"）。
-         * 删掉它的判据不是"我觉得没用"，而是**它从来没有产出过**：生产全库 `changes` 非空的
-         * 条目 **0 条**；连"体裁=修正案且证据=附件正文"那 5 条最该产出它的候选，在按新案模板
-         * 点名重跑之后也仍然是 0 条（5 次境外调用换回同一个页面）。一个从不渲染的功能留着，
-         * 代价是每个读者路径都要维护一个永不出现的分支，以及每个后来者都要重新问一遍
-         * "它为什么不出现"。同源的计数词表（`CHANGE_TEXT_MARKERS`）与体裁门控一并删除。
          *
-         * 编制说明要点**留着**（下面那一块）：它在生产上真的渲染出来过（金丝雀 2 条），
-         * 而且与"改动点"不同，它不依赖模型产出一种我们从未见过它产出的形状。
+         * **⚠️ 2026-09-27 更正：删它的判据是错的，见 `86-*.md` 第九节。** 当时写的是
+         * "它从来没有产出过（5 条候选点名重跑后仍是 0 条）"，而实测是：那 5 条候选**从来没有
+         * 被带这段代码的版本重跑过**（它们的摘要里连 `explanationPoints` 键都没有），
+         * 用旧提示词重跑金丝雀**一次就吐出 10 条、8 条通过逐字反查** —— 两批不同的"5 条"
+         * 被当成了一批。**是否恢复成单独一节由用户定**；本轮（#86 第 1 刀）先补的是
+         * 它真正缺的那一半：影响判读（下面那一块）。
+         *
+         * 编制说明要点**留着**（下面那一块）：它在生产上真的渲染出来过（金丝雀 2 条）。
          */}
+
+        {/*
+         * 可能的争议点（issue #86 第 1 刀）—— 全站**唯一一段推断**内容。
+         *
+         * 为什么单独一块、为什么措辞这么小心：上面每一句都要求逐字对得上原文，而这里写的是
+         * "这一条可能带来什么" —— 那是推断，**不可能逐字核对**。用户要的正是这个
+         * （"吸毒修正案、留学生 Z 签都是事后曝光才有人参与"），所以不能不做，只能把它做成
+         * 读者能自己判断的样子。三条硬规矩：
+         * ① 每条挂一条**逐字原文**（反查不到整条不落库，出处由程序算，不由模型自报）；
+         * ② **块级**免责声明 —— 卡片头部那行「AI 生成」说的是整张卡，而这一段是卡里唯一
+         *    需要读者额外警惕的部分，它在自己的块里再讲一遍；
+         * ③ **一行都没有时整块不渲染**（连标题都不出现）——#85 的教训：空壳比没有更坏。
+         *
+         * 位置：放在「草案条文要点」（短的、直接的证据）之后、「编制说明要点」（长尾）之前。
+         * 这是有意的取舍 —— 证据先于推断（本站的立身之本），但又不能让读者翻过一整列说明
+         * 才看到唯一会让他想提意见的东西。
+         *
+         * **受众面门控**：只给「公众广域」渲染（用户 2026-09-27 拍板："先只上公众广域 +
+         * 人工过一遍"）。门放在**渲染侧**而不是生成侧：这一段与其余字段共用同一次模型调用，
+         * 多写一份不额外花钱，而这批数据正是将来放宽档位时要用的原样原料。
+         */}
+        {(() => {
+          const impacts = summary.impacts;
+          // 判据在 lib/impact-display.ts（纯函数，能进单测也就能进自证框架 —— 页面 .tsx 两样都进不去）
+          if (!shouldRenderImpacts({ audience: notice.audience, impacts })) return null;
+          return (
+            <div className="summary-section" data-testid="summary-impacts">
+              <h2 className="summary-section-title">可能的争议点</h2>
+              <p className="summary-section-note" data-testid="summary-impacts-note">
+                以下是本站 AI 依据公开原文作出的<b>推断</b>，不是官方表述，也不构成法律意见；
+                每条都附了它依据的那句原文，请自己判断。
+              </p>
+              <ul className="summary-points">
+                {impacts.map((impact, index) => (
+                  <li key={index}>
+                    <p className="impact-kind" data-testid="summary-impact-kind">
+                      {IMPACT_KIND_LABELS[impact.kind]}
+                    </p>
+                    <p className="summary-section-text">{impact.text}</p>
+                    {impact.who ? (
+                      <p className="impact-who" data-testid="summary-impact-who">
+                        可能受影响：{impact.who}
+                      </p>
+                    ) : null}
+                    <SectionQuote
+                      notice={notice}
+                      quote={impact.quote}
+                      href={impact.sourceUrl ?? undefined}
+                    />
+                    <p className="draft-point-source" data-testid="summary-impact-source">
+                      {impact.source
+                        ? `出处：附件《${impact.source}》（本站从附件逐字提取，未做改写）`
+                        : '出处：未标注（这条的引用没能反查到本轮喂入的附件）'}
+                    </p>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          );
+        })()}
 
         {(() => {
           /*
@@ -279,10 +345,16 @@ export function SummaryView({
           摘要依据：{provenance.label}
         </span>
         {draft.kind === 'read-and-used' ? (
-          hasAttachmentPoints ? (
+          hasClausePoints ? (
             <>
               上方「草案条文要点」摘自<b>本站从随文附件里逐字读取的条文</b>（{draft.files} 份 /
               约 {draft.chars} 字），条文本身以下方附件与官方原文为准。
+            </>
+          ) : hasImpacts ? (
+            <>
+              上方「可能的争议点」所依据的原文，摘自<b>本站从随文附件里逐字读取的正文</b>
+              （{draft.files} 份 / 约 {draft.chars} 字）；那一段是本站的推断，
+              条文本身以下方附件与官方原文为准。
             </>
           ) : (
             <>

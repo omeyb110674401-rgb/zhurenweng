@@ -84,6 +84,8 @@ const TARGETS = {
   // 而下一轮改提示词的人会拿着一个说谎的量具去做决定。
   summaryDiagnostics: 'src/lib/summary-diagnostics.ts',
   llmAdapter: 'src/lib/adapters/openai-compatible-llm.ts',
+  // issue #86 第 1 刀：影响判读的展示判据（页面 .tsx 进不了单测，所以判据抽在 .ts 里）
+  impactDisplay: 'src/lib/impact-display.ts',
   // issue #83 补的三个"从没被自证覆盖过"的关键面：SSRF 防护、北极星计数的门口、
   // 后台 HTML 转义。它们此前要么只有 e2e 覆盖（而 e2e 跑的是构建产物，撤源码不红），
   // 要么一个测试都没有 —— 正是最该"撤掉实现必须变红"的三处。
@@ -1276,6 +1278,56 @@ const CASES = [
     to: '  if (true) {',
     pattern: '端口没上报时不写分母',
     test: 'tests/unit/summary-diagnostics.test.mjs',
+  },
+  {
+    // issue #86 第 1 刀：省略号容忍是 2026-09-27 实验量出来的真实损失（10 条里丢 2 条 = 20%），
+    // 而省略号是提示词自己教模型写的（字段示例里就写着「……」）。
+    label: '引用带省略号就一律丢弃（白丢 20% 的产出，而那形状是本站在提示词里教的）',
+    file: 'summaryContent',
+    from: '  const segments = quoteSegments(quote).map(quoteFingerprint);',
+    to: '  const segments = [quoteFingerprint(quote)];',
+    pattern: '中间带中文省略号 ⇒ 命中（每一截都逐字）',
+    test: 'tests/unit/summary-impacts.test.mjs',
+  },
+  {
+    label: '省略号切出来的短碎片也算数（「第一条…第二条」能蒙中任何公文，出处成了盖章）',
+    file: 'summaryContent',
+    from: '  if (segments.some((segment) => segment.length < MIN_VERIFIABLE_QUOTE_CHARS)) return null;',
+    to: '  if (false) return null;',
+    pattern: '有一截短于 8 字 ⇒ 不命中',
+    test: 'tests/unit/summary-impacts.test.mjs',
+  },
+  {
+    label: '影响判读的出处不再反查（反查不到也照登，随便挂一份附件当出处）',
+    file: 'summaryContent',
+    from: '    const source = findDraftSourceForQuote(quote, sources);',
+    to: '    const source = sources[0] ?? null;',
+    pattern: '整条不落库，且计数',
+    test: 'tests/unit/summary-impacts.test.mjs',
+  },
+  {
+    label: '影响判读不再看受众面（行业专业条目也把"可能的争议点"推给读者）',
+    file: 'impactDisplay',
+    from: "  return input.audience === 'public' && input.impacts.length > 0;",
+    to: '  return input.impacts.length > 0;',
+    pattern: '行业专业条目不渲染',
+    test: 'tests/unit/summary-impacts.test.mjs',
+  },
+  {
+    label: '影响判读一条都没有也渲染（页面上留下一个只有标题的空壳）',
+    file: 'impactDisplay',
+    from: "  return input.audience === 'public' && input.impacts.length > 0;",
+    to: "  return input.audience === 'public';",
+    pattern: '一条判读都没有时不渲染',
+    test: 'tests/unit/summary-impacts.test.mjs',
+  },
+  {
+    label: '诊断不数影响判读的条数（"模型吐了几条判读"这件事又变得查不到）',
+    file: 'summarize',
+    from: '          impacts: quoted.impacts.length,',
+    to: '          impacts: 0,',
+    pattern: '诊断里数得出',
+    test: 'tests/e2e/summary-genre-and-explanations.test.mjs',
   },
 ];
 

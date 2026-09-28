@@ -1,6 +1,8 @@
 import type {
   AmendmentExplanationDraft,
+  AmendmentImpactDraft,
   DraftSource,
+  ImpactKind,
   LlmPort,
   LlmSummarizeInput,
   SummaryChannel,
@@ -81,7 +83,7 @@ const SYSTEM_PROMPT = [
   '重要背景：网页正文通常只是公告本身；草案条文、标准文本、名单在**附件**里，只有给了「附件条文」段落时你才真的看得到它们。',
   '因此：没有「附件条文」段落时，不要编写、推测或概括任何「条款内容」，只回答公告里真实存在的参与信息。',
   '请只输出一个 JSON 对象（不要输出任何解释、markdown 代码围栏或其他文字），字段如下：',
-  '{"what":"这是什么：一句话概括这份公示在做什么，40 字以内","who":"影响谁：只有原文明确写出受这份文件影响的主体时才写（如运输机场运营人、医疗器械注册人、标准起草单位）；原文只写「社会公众」「有关单位和个人」这类泛称时**留空字符串** —— 那是「谁能提」，不是「影响谁」。这类页面的正文通常不含受影响主体（它在附件的草案里），宁可留空也不要推断","whoCanSubmit":"谁能提：原文写明的可提出意见的主体或范围；原文未提及则留空字符串","afterDeadline":"逾期会怎样：原文写明超过截止日期后如何处理（如逾期视为无意见、不再受理）；原文未提及则留空字符串","keyPoints":["草案条文要点：仅当给出「附件条文」时填写，2-4 条从条文中读到的实质规定，每条一句话、40 字以内；没有附件条文段落时必须为空数组"],"explanationPoints":[{"heading":"照抄说明里的小节标题（如 一、项目概况）","text":"这一节说了什么：一句话，60 字以内","quote":"这一节的逐字原文，200 字以内"}],"deadline":"截止日期：YYYY-MM-DD，原文未明确则为 null","howToComment":"如何提意见：一句话概述提交途径，40 字以内","channels":[{"kind":"email|phone|mail|online|other","value":"可直接使用的具体值"}],"quotes":{"what":"what 对应的原文引用片段（逐字摘录，不超过100字）","who":"who 对应的原文引用片段，留空时空字符串","whoCanSubmit":"谁能提对应的原文片段，没有则空字符串","afterDeadline":"逾期会怎样对应的原文片段，没有则空字符串","keyPoints":["与 keyPoints 一一对应的逐字条文原文，顺序严格一致，没有则为 null"],"deadline":"截止日期对应的原文引用片段","howToComment":"如何提意见对应的原文引用片段","channels":["每条渠道对应的原文片段，顺序与 channels 严格一致"]}}',
+  '{"what":"这是什么：一句话概括这份公示在做什么，40 字以内","who":"影响谁：只有原文明确写出受这份文件影响的主体时才写（如运输机场运营人、医疗器械注册人、标准起草单位）；原文只写「社会公众」「有关单位和个人」这类泛称时**留空字符串** —— 那是「谁能提」，不是「影响谁」。这类页面的正文通常不含受影响主体（它在附件的草案里），宁可留空也不要推断","whoCanSubmit":"谁能提：原文写明的可提出意见的主体或范围；原文未提及则留空字符串","afterDeadline":"逾期会怎样：原文写明超过截止日期后如何处理（如逾期视为无意见、不再受理）；原文未提及则留空字符串","keyPoints":["草案条文要点：仅当给出「附件条文」时填写，2-4 条从条文中读到的实质规定，每条一句话、40 字以内；没有附件条文段落时必须为空数组"],"explanationPoints":[{"heading":"照抄说明里的小节标题（如 一、项目概况）","text":"这一节说了什么：一句话，60 字以内","quote":"这一节的逐字原文，200 字以内"}],"impacts":[{"quote":"这一条/这一处的逐字原文（中间可以省略，但每一截都要逐字对得上）","who":"具体可能受影响的主体，写不出就留空字符串","text":"可能带来什么：一句话，60 字以内","kind":"risk|loophole|burden"}],"deadline":"截止日期：YYYY-MM-DD，原文未明确则为 null","howToComment":"如何提意见：一句话概述提交途径，40 字以内","channels":[{"kind":"email|phone|mail|online|other","value":"可直接使用的具体值"}],"quotes":{"what":"what 对应的原文引用片段（逐字摘录，不超过100字）","who":"who 对应的原文引用片段，留空时空字符串","whoCanSubmit":"谁能提对应的原文片段，没有则空字符串","afterDeadline":"逾期会怎样对应的原文片段，没有则空字符串","keyPoints":["与 keyPoints 一一对应的逐字条文原文，顺序严格一致，没有则为 null"],"deadline":"截止日期对应的原文引用片段","howToComment":"如何提意见对应的原文引用片段","channels":["每条渠道对应的原文片段，顺序与 channels 严格一致"]}}',
   '要求：',
   '1. 只依据给定原文，不编造、不猜测；原文没有的字段留空字符串或 null，宁可留空也不要凑。',
   '2. 引用必须是原文中的逐字连续片段。',
@@ -92,6 +94,13 @@ const SYSTEM_PROMPT = [
   '   - 附件条文可能只是草案的一部分（本站按字数预算截取），因此只写你确实在文本里读到的规定，不要用「规定了」「明确了」去概括看不到的部分；',
   '   - 受影响主体（who）往往写在条文里（如「中华人民共和国境内的某某企业从事下列活动…」），给了条文时 who 可以据实填写，其引用取自条文。',
   '6. explanationPoints 只依据「编制说明」段落（说明讲为什么制定、依据什么、主要改了什么、向谁征求意见，不是规定本身）：heading 照抄该小节自己的标题，引用只能取自说明段落；keyPoints 的引用只能取自条文段落 —— 本站按段落分别反查，串了整条丢弃。说明里没有分层小标题时输出空数组，不要自己造小节名。',
+  '7. impacts 是**唯一允许推断**的一段，其余各段只许照抄。用户要的正是它："让读者发现对自己和社会有影响的条例，识别修订后的不利影响和可能的漏洞"。所以它的口径比别处严：',
+  '   - 每项都要带 quote，且 quote 必须是给定原文里的**逐字片段**（中间可以省略，但每一截都要逐字对得上）：本站拿它反查出处，反查不到的整项丢弃；',
+  '   - who 写**具体可能受影响的主体**（如「需要无犯罪记录证明的用人单位」「以车辆通行费筹集养护资金的地方政府」）；写不出具体主体就留空字符串，不要写「社会公众」「人民群众」；',
+  '   - text 只写这一条**可能**带来什么，一句话、60 字以内。**不做定性、不指控、不预测结果**：不写「违法」「违宪」「必将」「必然导致」，也不点名任何机关或个人；',
+  '   - kind 三选一：risk 可能的不利后果 / loophole 可能被规避、滥用或执行不到的地方 / burden 新增的义务、成本或门槛；',
+  '   - **看不出影响就输出空数组**。把条文复述一遍（「规定了…」「明确了…」）不算影响，宁可空着；',
+  '   - 这一段不要求你下结论，只要求你把「哪条原文 + 谁可能受影响 + 可能是什么」如实摆出来，让读者自己判断。',
 ].join('\n');
 
 /** 已解析并校验通过的模型配置（工厂与门控共用）。 */
@@ -244,6 +253,7 @@ export function countModelOutput(raw: unknown): SummaryFieldCounts {
     keyPoints: lengthOf('keyPoints'),
     explanationPoints: lengthOf('explanationPoints'),
     channels: lengthOf('channels'),
+    impacts: lengthOf('impacts'),
   };
 }
 
@@ -322,6 +332,10 @@ export function normalizeModelSummary(raw: unknown, tally?: NormalizeTally): Quo
   // 逐字反查不到出处由 buildQuotedSummary 负责丢弃。
   const explanationPoints = normalizeExplanationPoints(record.explanationPoints, tally);
 
+  // 影响判读（issue #86 第 1 刀）：与说明要点一样，形状不对的在这里丢掉，
+  // 逐字反查不到出处由 buildQuotedSummaryWithTally 负责丢弃。
+  const impacts = normalizeImpacts(record.impacts, tally);
+
   const rawQuotes = readQuotes(record.quotes);
   // keyPoints 与它的引用必须**先按原始下标配好、再过滤空项** —— 这是 normalizeChannels
   // 的同一条教训（issue #56）：先 filter 再取引用，第 3 条要点就会挂上第 2 条的原句，
@@ -355,6 +369,7 @@ export function normalizeModelSummary(raw: unknown, tally?: NormalizeTally): Quo
     afterDeadline: optionalText('afterDeadline'),
     ...(keyPoints.length > 0 ? { keyPoints } : {}),
     ...(explanationPoints.length > 0 ? { explanationPoints } : {}),
+    ...(impacts.length > 0 ? { impacts } : {}),
     deadline,
     howToComment,
     channels,
@@ -389,6 +404,57 @@ function normalizeExplanationPoints(value: unknown, tally?: NormalizeTally): Ame
       continue;
     }
     out.push({ heading, text, quote });
+  }
+  return out;
+}
+
+/**
+ * 一次摘要最多列几处影响（issue #86 第 1 刀）。
+ *
+ * 12 是"给人看的清单"的量级：这一段是读者要逐条判断的东西，列到二三十条就等于把条文
+ * 重排了一遍；而每条都要求挂原文引用，数量一上去模型就开始凑数（`emitted` 与
+ * `dropped.emptyOrInvalid` 里看得见那股凑数的形状）。
+ */
+const MAX_IMPACTS = 12;
+
+/** 影响类型白名单。`other` 只作为**兜底桶**存在（模型给了认不出的值时用它），提示词里不要求。 */
+const IMPACT_KINDS: readonly ImpactKind[] = ['risk', 'loophole', 'burden', 'other'];
+
+/**
+ * 模型给的影响判读 → 端口形状。
+ *
+ * `quote` 与 `text` 缺一即丢：**没有引用的推断在本站不许落库** —— 这正是这一段与其余各段的
+ * 区别所在（别处明令禁止推断，这里允许推断但**必须挂依据**，由程序反查出处在哪一份附件）。
+ * `who` 允许为空：与顶层 `who` 同一规矩，写不出具体主体时宁可空着也不要填「社会公众」。
+ */
+function normalizeImpacts(value: unknown, tally?: NormalizeTally): AmendmentImpactDraft[] {
+  if (!Array.isArray(value)) return [];
+  const out: AmendmentImpactDraft[] = [];
+  for (const item of value) {
+    if (out.length >= MAX_IMPACTS) {
+      if (tally) tally.overLimit += 1;
+      continue;
+    }
+    if (typeof item !== 'object' || item === null) {
+      if (tally) tally.emptyOrInvalid += 1;
+      continue;
+    }
+    const impact = item as Record<string, unknown>;
+    const quote = typeof impact.quote === 'string' ? impact.quote.trim() : '';
+    const text = typeof impact.text === 'string' ? impact.text.trim() : '';
+    if (quote === '' || text === '') {
+      if (tally) tally.emptyOrInvalid += 1;
+      continue;
+    }
+    const declared = typeof impact.kind === 'string' ? impact.kind.trim() : '';
+    out.push({
+      quote,
+      text,
+      who: typeof impact.who === 'string' ? impact.who.trim() : '',
+      // 认不出的值落进 other 而**不是** risk：给一条判读贴上错的类型标签，
+      // 比老实说"其他"更坏（读者按标签理解这一条是"不利后果"还是"负担"）
+      kind: (IMPACT_KINDS as readonly string[]).includes(declared) ? (declared as ImpactKind) : 'other',
+    });
   }
   return out;
 }
@@ -620,6 +686,7 @@ export class OpenAiCompatibleLlm implements LlmPort {
       keyPoints: summary.keyPoints?.length ?? 0,
       explanationPoints: summary.explanationPoints?.length ?? 0,
       channels: summary.channels.length,
+      impacts: summary.impacts?.length ?? 0,
     };
     return {
       ...summary,

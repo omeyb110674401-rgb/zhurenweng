@@ -157,3 +157,79 @@ describe('issue #76：详情页体裁角标', () => {
     assert.ok(!html.includes('第二条修改为'), '那一行的逐字原文同样不该被渲染出来');
   });
 });
+
+/**
+ * issue #86 第 1 刀：详情页的「可能的争议点」—— 全站唯一一段**推断**内容，以及它的受众面门控。
+ *
+ * 为什么这里**注入**而不是"跑一轮生成"：这一段要测的是**渲染与门控**（生成侧那条链在
+ * `summary-genre-and-explanations.test.mjs` 里钉）。而且注入的那一条刻意带齐了类型、主体、
+ * 推断与出处 —— 页面上"哪句是原文、哪句是本站的推断"必须一眼分得开，那正是这块内容的全部风险。
+ *
+ * 门控用的是两条**真实 fixture**（不是造的）：交通运输部那条判「公众广域」（法律修正草案），
+ * 工信部那条判「行业专业」（无线电频率划分规定）—— 后者是用户拍板的"先不上"那一档。
+ */
+describe('issue #86：详情页「可能的争议点」与受众面门控', () => {
+  const IMPACTS = [
+    {
+      quote: '收费公路在收费偿债或者收费经营期间的管理养护费用，在车辆通行费中列支。',
+      who: '以车辆通行费筹集养护资金的地方政府',
+      text: '期限届满后若继续收费，通行费负担可能长期化。',
+      kind: 'risk',
+      source: '关于《中华人民共和国公路法（修正草案征求意见稿）》的起草说明.wps',
+      sourceUrl: 'https://attachments.test/explanation.wps',
+    },
+  ];
+
+  function injectImpacts(title, impacts) {
+    const db = new Database(dbFile);
+    try {
+      const original = db
+        .prepare('select ai_summary_json as json from notices where title = ?')
+        .get(title)?.json;
+      assert.ok(original, `前提：${title} 要有摘要，否则下面测的是"没有摘要"那条路`);
+      const summary = JSON.parse(original);
+      summary.impacts = impacts;
+      db.prepare('update notices set ai_summary_json = ? where title = ?').run(
+        JSON.stringify(summary),
+        title,
+      );
+    } finally {
+      db.close();
+    }
+  }
+
+  it('公众广域条目：推断渲染出来了，且带着块级免责声明、类型、主体与出处', async () => {
+    injectImpacts(AMENDMENT_TITLE, IMPACTS);
+    const html = await detailOf(AMENDMENT_TITLE);
+    assert.match(html, /data-testid="ai-summary"/);
+    assert.match(html, /data-testid="summary-impacts"/);
+    assert.ok(html.includes('可能的争议点'), '块标题（用户 2026-09-27 选定的措辞）');
+    assert.match(html, /data-testid="summary-impacts-note"/);
+    assert.ok(html.includes('推断'), '块级免责声明必须写清"这是推断、不是官方表述"');
+    assert.ok(html.includes('可能的不利后果'), '类型标签照 IMPACT_KIND_LABELS 渲染');
+    assert.ok(html.includes('可能受影响：以车辆通行费筹集养护资金的地方政府'));
+    assert.ok(html.includes('期限届满后若继续收费'), '推断的正文');
+    assert.ok(html.includes('出处：附件《'), '出处是程序反查出来的那一份，不是模型自报的');
+    assert.ok(
+      html.includes('收费公路在收费偿债或者收费经营期间的管理养护费用'),
+      '引用的逐字原文要与推断同屏 —— 绝不让推断脱离原文单独成立',
+    );
+  });
+
+  it('行业专业条目：库里同样有判读，页面上一个字都不出现（受众面门控）', async () => {
+    injectImpacts(NEW_DRAFT_TITLE, IMPACTS);
+    const html = await detailOf(NEW_DRAFT_TITLE);
+    assert.match(html, /data-testid="ai-summary"/, '摘要卡片本身要在，排除"整页没渲染"这种假通过');
+    assert.ok(!html.includes('data-testid="summary-impacts"'), '这一档先不给读者看');
+    assert.ok(!html.includes('可能的争议点'), '连标题都不出现');
+    assert.ok(!html.includes('期限届满后若继续收费'), '推断的正文也不出现');
+  });
+
+  it('一条判读都没有时整块不渲染（连标题都不出现）', async () => {
+    injectImpacts(AMENDMENT_TITLE, []);
+    const html = await detailOf(AMENDMENT_TITLE);
+    assert.match(html, /data-testid="ai-summary"/);
+    assert.ok(!html.includes('data-testid="summary-impacts"'));
+    assert.ok(!html.includes('可能的争议点'), '空壳比没有更坏 —— #85 的教训');
+  });
+});

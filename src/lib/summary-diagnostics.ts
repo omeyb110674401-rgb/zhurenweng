@@ -35,11 +35,13 @@ export const SUMMARY_DIAGNOSTICS_VERSION = 1;
  */
 export const RAW_OUTPUT_KEEP_CHARS = 20_000;
 
-/** 三类数组字段的条数（模型吐出 / 归一化 / 真的落库，三个阶段各记一次）。 */
+/** 四类数组字段的条数（模型吐出 / 归一化 / 真的落库，三个阶段各记一次）。 */
 export interface SummaryFieldCounts {
   keyPoints: number;
   explanationPoints: number;
   channels: number;
+  /** 可能的影响（issue #86 第 1 刀）：与两个要点字段一样要过逐字反查，所以它也满足那条等式 */
+  impacts: number;
 }
 
 /**
@@ -53,7 +55,8 @@ export interface SummaryFieldCounts {
  * 前两类在归一化阶段产生（`normalizeModelSummary`），第三类在反查阶段产生
  * （`buildQuotedSummaryWithTally`）—— 分类与产生位置一一对应，不合并成一句"丢了几条"。
  *
- * **一条可核对的等式**（两个要点字段成立，渠道不成立）：
+ * **一条可核对的等式**（三个"要过逐字反查"的字段都成立：keyPoints / explanationPoints / impacts；
+ * 渠道不成立）：
  * `emitted - normalized === emptyOrInvalid + overLimit`，`normalized - kept === quoteNotFound`。
  * 渠道的差额是**去重与条数截断**（`normalizeChannels`），那是设计行为、不是丢内容，
  * 所以刻意不为它编一个"丢弃"计数 —— 一条不成立的等式比没有等式更坏。
@@ -109,7 +112,7 @@ export interface SummaryDiagnostics {
 }
 
 export function emptyFieldCounts(): SummaryFieldCounts {
-  return { keyPoints: 0, explanationPoints: 0, channels: 0 };
+  return { keyPoints: 0, explanationPoints: 0, channels: 0, impacts: 0 };
 }
 
 export function emptyDroppedCounts(): SummaryDroppedCounts {
@@ -167,6 +170,7 @@ function fieldCountsOr(value: unknown): SummaryFieldCounts {
     keyPoints: countOr(record.keyPoints),
     explanationPoints: countOr(record.explanationPoints),
     channels: countOr(record.channels),
+    impacts: countOr(record.impacts),
   };
 }
 
@@ -279,10 +283,15 @@ export function describeDiagnostics(diagnostics: SummaryDiagnostics): string {
   if (diagnostics.instrumented) {
     parts.push(`条文要点 ${kept.keyPoints}/${emitted.keyPoints}`);
     parts.push(`说明要点 ${kept.explanationPoints}/${emitted.explanationPoints}`);
+    // 影响判读只在真有的时候才占位置（多数条目没有它，常态下这一行不该变长）
+    if (emitted.impacts > 0 || kept.impacts > 0) {
+      parts.push(`影响判读 ${kept.impacts}/${emitted.impacts}`);
+    }
   } else {
     // 端口没上报时**不写分母**：那个数现在谁都不知道，写成 `3/0` 会被读成"模型吐了 0 条"，
     // 而这两个事实处置相反（一个是模型的问题，一个是没量具）
     parts.push(`落库条文要点 ${kept.keyPoints} 条 / 说明要点 ${kept.explanationPoints} 条`);
+    if (kept.impacts > 0) parts.push(`影响判读 ${kept.impacts} 条`);
     parts.push('端口未上报响应细节（只有落库条数可信）');
   }
   if (lost > 0) {

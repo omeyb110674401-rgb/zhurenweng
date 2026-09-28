@@ -324,7 +324,7 @@ describe('issue #86：worker 侧合成诊断时不编造', () => {
     model: 'stub',
     provider: 'stub',
     attempts: 1,
-    kept: { keyPoints: 2, explanationPoints: 0, channels: 1 },
+    kept: { keyPoints: 2, explanationPoints: 0, channels: 1, impacts: 0 },
     quoteNotFound: 3,
   };
 
@@ -383,7 +383,7 @@ describe('issue #86：读侧容错、截断与一句话摘要', () => {
     assert.equal(d.model, 'flash-x');
     assert.equal(d.instrumented, false);
     assert.equal(d.elapsedMs, null);
-    assert.deepEqual(d.kept, { keyPoints: 0, explanationPoints: 0, channels: 0 });
+    assert.deepEqual(d.kept, { keyPoints: 0, explanationPoints: 0, channels: 0, impacts: 0 });
     assert.deepEqual(d.dropped, { emptyOrInvalid: 0, overLimit: 0, quoteNotFound: 0 });
   });
 
@@ -392,7 +392,7 @@ describe('issue #86：读侧容错、截断与一句话摘要', () => {
       model: 'flash-x',
       provider: 'openai',
       attempts: 2,
-      kept: { keyPoints: 1, explanationPoints: 2, channels: 3 },
+      kept: { keyPoints: 1, explanationPoints: 2, channels: 3, impacts: 1 },
       quoteNotFound: 4,
     });
     assert.deepEqual(parseSummaryDiagnostics(JSON.parse(JSON.stringify(d))), d);
@@ -413,7 +413,7 @@ describe('issue #86：读侧容错、截断与一句话摘要', () => {
       model: 'flash-x',
       provider: 'openai',
       attempts: 1,
-      kept: { keyPoints: 1, explanationPoints: 0, channels: 0 },
+      kept: { keyPoints: 1, explanationPoints: 0, channels: 0, impacts: 0 },
       quoteNotFound: 2,
     });
     const line = describeDiagnostics({ ...d, instrumented: true, emitted: { keyPoints: 4, explanationPoints: 0, channels: 0 } });
@@ -426,7 +426,7 @@ describe('issue #86：读侧容错、截断与一句话摘要', () => {
       model: 'stub',
       provider: 'stub',
       attempts: 1,
-      kept: { keyPoints: 3, explanationPoints: 2, channels: 0 },
+      kept: { keyPoints: 3, explanationPoints: 2, channels: 0, impacts: 0 },
       quoteNotFound: 0,
     });
     const line = describeDiagnostics(d);

@@ -201,6 +201,7 @@ export const summarizeNoticesJob: Job = {
           keyPoints: quoted.keyPoints.length,
           explanationPoints: quoted.explanationPoints.length,
           channels: quoted.channels.length,
+          impacts: quoted.impacts.length,
         };
         // 诊断与摘要**一起**落库：它描述的就是这一列摘要是哪一次调用产出的
         const diagnostics = buildSummaryDiagnostics(summary.diagnostics, {

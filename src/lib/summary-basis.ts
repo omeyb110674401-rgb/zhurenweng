@@ -109,7 +109,7 @@ export interface SummaryProvenance {
 export function summaryProvenance(input: {
   /** 附件报告；null = 没探测过 */
   attachment: DraftAvailabilityInput | null;
-  /** 摘要里是否有附件条文要点（keyPoints / explanationPoints 任一非空） */
+  /** 摘要里是否有反查到附件的内容（keyPoints / explanationPoints / impacts 任一非空） */
   hasAttachmentPoints: boolean;
   /** 摘要是哪个模板生成的（见 summaryTemplateOf） */
   template: SummaryTemplate;
