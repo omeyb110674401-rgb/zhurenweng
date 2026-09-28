@@ -81,6 +81,23 @@ export interface SourceFetchOptions {
    * 等于让其余九个源的每一轮都多等那么久 —— 慢是这一个站的属性，不该由全站买单。
    */
   timeoutMs?: number;
+  /**
+   * 附件预算（可选，按源）：个别源的附件与其余源不是一个量级时在此声明。
+   *
+   * 为什么字节与时间必须**成对**声明：只抬 `maxBytes` 而不抬超时，下载仍然会在全局
+   * 抓取超时（缺省 15s）上被掐断 —— 结局是一条 `error`（"下载失败"），重试三次后停住，
+   * 事后看起来像"这个文件坏了"，而不是"这个文件的预算没配对"。
+   *
+   * 为什么不直接抬全局：`ATTACHMENT_MAX_BYTES`（缺省 4 MB）与 `CRAWL_TIMEOUT_MS`
+   * 是所有源共同的预算，为一个站把上限抬到 64 MB，等于让另外九个源也能拉 64 MB ——
+   * 与上面 `timeoutMs` 是同一条道理。实测依据见 `src/sources/adapters/npc.ts`。
+   */
+  attachmentBudget?: {
+    /** 单个附件的下载上限（字节），未声明时用 `ATTACHMENT_MAX_BYTES` */
+    maxBytes?: number;
+    /** 单个附件的下载超时（毫秒），未声明时用 `CRAWL_TIMEOUT_MS` */
+    timeoutMs?: number;
+  };
 }
 
 export interface SourceAdapter {
@@ -129,6 +146,27 @@ export interface SourceAdapter {
    * 这样生产环境落在真实站点、E2E 里落在 fixture 目录内，同一份代码两条路都通。
    */
   resolveDetailUrl?(body: string, pageUrl: string): Promise<string | null> | string | null;
+  /**
+   * 附件清单接口（可选，issue #86 第十八节）：附件地址与**文件名**要另调一次接口才拿得到时，
+   * 适配器在此返回该接口地址；抓取层取完详情内容后请求它，把响应交给 `parseAttachmentList`
+   * 解析成附件清单并合并进条目。返回 null = 本源没有这种接口（或本轮的开关是关的）。
+   *
+   * 与 `detailContentUrl` 同一套路数：**请求由抓取层发**（源级传输处置 / UA / 超时 /
+   * fixture 地址重写集中在一处，ADR-0001 也要求适配器不自己出网），适配器只做
+   * 「给出地址」与「解析响应」这两件纯计算的事。
+   *
+   * 实现约定：地址应**相对 notice.url 推导**（见 npc.ts 的 fjxxUrlFor），这样生产环境落在
+   * 真实站点、E2E 里落在 fixture 目录内，同一份代码两条路都通。
+   */
+  attachmentListUrl?(notice: NormalizedNotice): string | null;
+  /**
+   * 解析附件清单接口的响应（与 `attachmentListUrl` 成对出现）。返回空数组 = 这一轮没有
+   * 声明任何附件（例如接口里没有文件名）—— **不要臆造文件名**，那正是本源当年不抓的理由。
+   */
+  parseAttachmentList?(
+    payload: string,
+    pageUrl: string,
+  ): NoticeAttachment[] | Promise<NoticeAttachment[]>;
 }
 
 /**

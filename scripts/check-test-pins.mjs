@@ -92,6 +92,12 @@ const TARGETS = {
   // 档位判错就是"还是老样子"（回到标准档，页面照常出摘要），喂少了只是模型看到的东西变少，
   // 而那正是这一刀要消灭的静默失败，所以它必须有"撤掉实现必须变红"的钉子。
   attachmentFeed: 'src/lib/attachment-feed.ts',
+  // issue #86 第十八节：人大网法律草案电子文档（开关 → 声明附件 → 按源预算放行）。
+  // 三处都属于"撤掉之后什么都不报错"：开关失效只是"没有附件"（而请求也没发出去，
+  // 源站日志里看不见）；文件名判据放宽只是页面上多一个猜出来的名字；按源预算失效则
+  // 让那份 41 MB 的草案以 too_large 收场，看起来像"这个文件本来就不让下"。
+  npcAdapter: 'src/sources/adapters/npc.ts',
+  attachmentBudget: 'src/sources/attachment-budget.ts',
   // issue #83 补的三个"从没被自证覆盖过"的关键面：SSRF 防护、北极星计数的门口、
   // 后台 HTML 转义。它们此前要么只有 e2e 覆盖（而 e2e 跑的是构建产物，撤源码不红），
   // 要么一个测试都没有 —— 正是最该"撤掉实现必须变红"的三处。
@@ -1511,6 +1517,69 @@ const CASES = [
     to: '  return false',
     pattern: '出处那一行按来路分开写',
     test: 'tests/unit/summary-display.test.mjs',
+  },
+  {
+    // issue #86 第十八节。撤掉这一行 = 开关关着也去问 /fjxx/ 并声明附件，
+    // 而后果是"每轮多打几十 MB 的请求"——**恰恰是**"部署"与"开始拉文件"要分开的那件事。
+    label: 'npc 草案电子文档：开关关着也照样声明（部署即开始拉文件）',
+    file: 'npcAdapter',
+    from: '    if (!npcDraftAttachmentsEnabled()) return null;',
+    to: '    if (false) return null;',
+    pattern: '缺省关：一个请求都不发',
+    test: 'tests/unit/npc-draft-attachments.test.mjs',
+  },
+  {
+    // 撤掉文件名判据 = 接口给个空名字也照样声明，页面的「出处」那一行会出现一个空书名号，
+    // 或者一个从标题猜出来的名字（#14 当初拒绝的正是这个）。
+    label: 'npc 草案电子文档：没有文件名也照样声明（页面上出现猜出来的出处）',
+    file: 'npcAdapter',
+    from: '    if (name.length === 0) return [];',
+    to: '    if (false) return [];',
+    pattern: '没有文件名',
+    test: 'tests/unit/npc-draft-attachments.test.mjs',
+  },
+  {
+    // 按源预算塌回全局：那份 41 MB 的草案会以 too_large 收场，而页面上看不出区别
+    // （附件照旧列出，只是我们从来没读过它）。
+    label: 'npc 草案电子文档：附件上限塌回全站值（41 MB 那份永远读不到）',
+    file: 'attachmentBudget',
+    from: '    maxBytes: declared?.maxBytes ?? input.globalMaxBytes,',
+    to: '    maxBytes: input.globalMaxBytes,',
+    pattern: '41 MB 草案',
+    test: 'tests/unit/attachment-budget.test.mjs',
+  },
+  {
+    label: 'npc 草案电子文档：下载超时不按源放宽（41 MB 会在 15 秒上被掐断，像"文件坏了"）',
+    file: 'attachmentBudget',
+    from: '    timeoutMs: declared?.timeoutMs ?? input.globalTimeoutMs,',
+    to: '    timeoutMs: input.globalTimeoutMs,',
+    pattern: '两条预算成对出现',
+    test: 'tests/unit/attachment-budget.test.mjs',
+  },
+  {
+    // 抽取任务真的用了按源预算（而不是解析出来放着不用）。靶点是**下载那一处**，不是上面
+    // 那句"声明大小超限"的判断 —— 后者在 e2e 里够不着：fixture 源站是 chunked、没有
+    // content-length，`declaredTotalBytes` 返回 null，那条分支根本不执行。**2026-09-28
+    // 实测踩到**：第一版就钉在那里，撤掉实现**照样绿**（假绿灯），真正被证伪的是"这条断言
+    // 钉住了按源上限"这个说法本身。这一版把**全站**上限收到 4 KB（夹具 133 KB）：
+    // 撤掉按源取值，正文会被截成 4 KB，解析必然落 error / no_draft_text ⇒ 断言当场红。
+    label: '抽取任务不按源取上限（解析出来的预算没人用）',
+    file: 'extract',
+    from: '    body = await readCappedBuffer(full, budget.maxBytes);',
+    to: '    body = await readCappedBuffer(full, MAX_BYTES);',
+    pattern: '抽取任务把那份 PDF 下下来',
+    test: 'tests/e2e/npc-draft-attachments.test.mjs',
+  },
+  {
+    // 附件清单那一跳失败时沿用已入库的清单。撤掉它，`syncAttachmentManifest` 会把行删掉
+    // （连带抽出来的条文正文），于是"源站今天抖了一下"变成"这份草案我们从来没读过"。
+    // 按 describe 名匹配（三个 describe 共用前缀），让三轮单轮运行按顺序跑完。
+    label: '附件清单取不到就把已抽到的条文清掉（一次抖动 = 这份草案白读了）',
+    file: 'crawl',
+    from: '            enriched.detailLoaded && !enriched.attachmentListFailed',
+    to: '            enriched.detailLoaded,',
+    pattern: 'npc 草案电子文档',
+    test: 'tests/e2e/npc-draft-attachments.test.mjs',
   },
 ];
 

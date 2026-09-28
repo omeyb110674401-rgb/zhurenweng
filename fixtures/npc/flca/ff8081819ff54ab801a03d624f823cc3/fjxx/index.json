@@ -1,0 +1,32 @@
+{
+  "_snapshot": {
+    "source": "http://www.npc.gov.cn/flcaw/flca/ff8081819ff54ab801a03d624f823cc3/fjxx/",
+    "capturedAt": "2026-09-28",
+    "note": "服务器实抓的附件接口响应，**逐字节照抄**（618 字节，未改写、未裁剪）。这道接口每个条目一个对象，带真文件名与声明大小；`path`（/flca/<hash>.PDF）实测对我们机房 IP 一律 404，而同目录的 attachment.pdf 五条全 200 且字节数与这里的 size 逐条相同 —— 所以适配器只取 fileName，地址用 attachment.pdf。"
+  },
+  "authorId": "",
+  "authorName": "",
+  "busiId": "ff8081819ff54ab801a03d624f823cc3",
+  "busiTable": "T_LF_FL_FLXXB",
+  "busiType": "npc-flca",
+  "busiTypeName": "",
+  "deptId": "",
+  "deptName": "",
+  "fileAddrId": "ff8081819ff54ab801a03d6bde7a3d89",
+  "fileCode": "1",
+  "fileDesc": "",
+  "fileFormat": "PDF",
+  "fileId": "ff8081819ff54ab801a03d6bd93c3d85",
+  "fileName": "道路交通安全法（修订草案）.PDF",
+  "fileTitle": "道路交通安全法（修订草案）",
+  "finishDate": "",
+  "isSecure": "",
+  "keyWord": "",
+  "path": "/flca/f13d65c9a30a4fa5bd0a140932d9e26d.PDF",
+  "pubDate": "",
+  "pubDeptId": "",
+  "pubDeptName": "",
+  "secureLevel": "",
+  "size": "43254307",
+  "storeCode": "npc-flca"
+}

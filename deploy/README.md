@@ -12,6 +12,13 @@ bash deploy/sync-files-local.sh src/app/page.tsx src/lib/dates.ts
 # 然后在服务器上重建镜像并重启 web（脚本头部注释给了命令）
 ```
 
+**⚠️ 大文件要分块传**（2026-09-28 实测）：整份 base64 塞进一条 `workbench exec -c` 命令时，
+Windows 的命令行长度上限会拦下来，报的是 **`程序"workbench.exe"无法运行: The filename or
+extension is too long`** —— 这句错误消息与"文件内容太大"看不出任何关系，很容易读成路径写错。
+实测第 21 个文件（`scripts/check-test-pins.mjs`，约 90 KB）就撞上了。做法：把 base64 切片、
+逐片 `printf '%s' >> /tmp/x.b64` 追加，最后一次性 `base64 -d | gzip -d` 并核对 sha256
+（本地辅助脚本在 `.git/zw-sync-big.ps1`，与 `sync-files-local.sh` 同一契约）。
+
 ### 传上去 ≠ 容器里跑的是它
 
 `sync-files-local.sh` 只写宿主机的 `/opt/zhurenweng`，而 `docker compose run/exec/up`
@@ -62,7 +69,12 @@ docker compose up -d worker          # 让常驻容器也换到新镜像，否�
 - `sync-list-86.txt` —— **2026-09-27 那一批的同步清单**（46 个文件），不是估的：把本地 deploy 面的
   272 个文件算成 sha256 与 `/opt/zhurenweng` 逐文件对拍得出（same=226 / diff=26 / missing=20）。
   **清单要现算**（第十六节落地后就从 39 个变成 46 个）。下次要用同一手法时，
-  `git ls-files` 出清单 → 本地算 sha → 在服务器上比一遍即可
+  `git ls-files` 出清单 → 本地算 sha → 在服务器上比一遍即可。
+  **2026-09-28 已按这份清单部署完毕**（第十八节）：46/46 sha256 对拍通过、journal 19→20、
+  `summary_diagnostics_json` 落库、4 条公众广域摘要按新管线重跑。
+  同一天还有第二批（npc 草案附件开关，见 `docs/pending-issues/86-*.md` §18.4）：现算下来是
+  **9 个文件**（7 改 2 新），**新文件不在 `git ls-files` 里，现算清单时要先 `git add`**
+  —— 否则它们既不在清单里、也不会被同步，而表现是"代码改了、服务器上还是旧的"
 - `run-probe-public-impacts.sh` —— **只读实验的启动器**（issue #86 第十三节）：把**未部署**的源码
   （`src/lib/attachment-feed.ts`、适配器、worker 等）从 `/tmp/zw-probe` **只读挂进**一次性 worker
   容器，跑 `scripts/probe-public-impacts.mjs` —— 它用生产那份适配器与反查实现，在真实的

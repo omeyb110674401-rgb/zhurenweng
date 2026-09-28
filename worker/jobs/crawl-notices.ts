@@ -64,8 +64,12 @@ import type { Job, JobContext } from '../registry.ts';
  * 单次请求的超时预算（毫秒）。全局缺省 15s，个别源按 `SourceFetchOptions.timeoutMs`
  * 单独放宽 —— 放大全局值会让九个源为最慢那一个买单（每轮每跳都多等），所以放大的是
  * 单个源的声明而不是全站常量。用 envInt：写错立刻在启动时抛，而不是带着 NaN 的节奏跑一天。
+ *
+ * **导出**是给附件抽取任务用的（issue #86 第十八节）：附件下载的缺省超时与抓取共用
+ * 这一个旋钮，两处各读一次 env 会得到两个"缺省值"（改了一处、另一处照旧）。
  */
-const DEFAULT_CRAWL_TIMEOUT_MS = envInt('CRAWL_TIMEOUT_MS', 15_000, { min: 1_000 });
+export const DEFAULT_CRAWL_TIMEOUT_MS = envInt('CRAWL_TIMEOUT_MS', 15_000, { min: 1_000 });
+
 /**
  * 重定向的最大跟随跳数（防异常站点造成无限跟随）。**所有源**共用 —— 从前只有
  * cookieChallenge 源手动跟随，其余交给 fetch 自动跟（≤20 跳、且不看目标），
@@ -424,6 +428,52 @@ async function fetchDetailBody(adapter: SourceAdapter, firstUrl: string): Promis
 interface DetailEnrichment {
   notice: NormalizedNotice;
   detailLoaded: boolean;
+  /**
+   * 适配器声明了附件清单接口，而这一轮**没取到或没解析出**（issue #86 第十八节）。
+   *
+   * 与 `detailLoaded` 分开：正文拿到与否和附件清单拿到与否是两件事，各自降级。
+   * 但后果一样要用 `preserveStoredDetail` 兜住 —— 清单为空会让 `syncAttachmentManifest`
+   * 把上一轮的行**删掉**（连带已抽出的条文正文），于是"源站今天抖了一下"就退化成
+   * "这份草案我们从来没读过"，而且下一轮还要重新下一遍几十 MB。
+   */
+  attachmentListFailed: boolean;
+}
+
+/**
+ * 附件清单接口那一步（issue #86 第十八节）：适配器给出地址 → 抓取层请求 → 适配器解析。
+ *
+ * 三种结局分开对待，因为它们该做的事不一样：
+ * 1. 适配器没这个方法 / 返回 null（开关关着）⇒ 什么都不做，**一个请求都不发**；
+ * 2. 取到并解析出清单 ⇒ 与既有附件按 URL 合并（去重，既有顺序在前）；
+ * 3. 请求失败或解析落空 ⇒ 打一行日志、回报 `failed=true`，由调用方沿用已入库的清单。
+ *
+ * ⚠️ `attachmentListUrl` 的调用**刻意放在 try 之外**：那个函数里含开关的合法性判定，
+ * 写错档位时要让错误冒到源级（整轮失败 + 一条说得清的日志），而不是被这里降级成
+ * "这一条今天没有附件" —— 后者正是 §17.5 说的那种「没发请求，哪儿都看不见」。
+ */
+async function enrichWithDeclaredAttachments(
+  adapter: SourceAdapter,
+  notice: NormalizedNotice,
+  ctx: JobContext,
+): Promise<{ notice: NormalizedNotice; failed: boolean }> {
+  if (!adapter.attachmentListUrl || !adapter.parseAttachmentList) {
+    return { notice, failed: false };
+  }
+  const listUrl = adapter.attachmentListUrl(notice);
+  if (listUrl === null) return { notice, failed: false };
+  try {
+    const payload = await fetchText(listUrl, adapter.fetch);
+    const declared = await adapter.parseAttachmentList(payload, notice.url);
+    if (declared.length === 0) return { notice, failed: true };
+    const merged = [...notice.attachments];
+    for (const attachment of declared) {
+      if (!merged.some((item) => item.url === attachment.url)) merged.push(attachment);
+    }
+    return { notice: { ...notice, attachments: merged }, failed: false };
+  } catch (error) {
+    ctx.logger(`附件清单获取失败（本轮沿用已入库的清单）url=${listUrl}：${errorMessage(error)}`);
+    return { notice, failed: true };
+  }
 }
 
 /** 抓取并解析详情页；单条详情失败只降级、不中断整轮抓取。 */
@@ -433,20 +483,32 @@ async function enrichWithDetail(
   ctx: JobContext,
 ): Promise<DetailEnrichment> {
   // 没有详情解析器的源没有「详情层」，列表层就是全部（不涉及沿用旧值）
-  if (!adapter.parseDetail) return { notice, detailLoaded: true };
+  if (!adapter.parseDetail) {
+    const declared = await enrichWithDeclaredAttachments(adapter, notice, ctx);
+    return { notice: declared.notice, detailLoaded: true, attachmentListFailed: declared.failed };
+  }
   // 详情内容默认取原文 URL；前端渲染型详情页由适配器指向数据接口（见 SourceAdapter）
   const contentUrl = adapter.detailContentUrl?.(notice) ?? notice.url;
+  let enriched: NormalizedNotice = notice;
+  let detailLoaded = false;
   try {
     const detailBody = await fetchDetailBody(adapter, contentUrl);
     // 第二参始终传人工页 URL：详情解析器用它解析相对链接（附件等）
     const detail = await adapter.parseDetail(detailBody, notice.url);
-    return { notice: detail ? mergeDetail(notice, detail) : notice, detailLoaded: detail !== null };
+    if (detail) enriched = mergeDetail(notice, detail);
+    detailLoaded = detail !== null;
   } catch (error) {
     ctx.logger(
       `详情页抓取失败（本轮沿用已入库的详情数据）url=${contentUrl}：${errorMessage(error)}`,
     );
-    return { notice, detailLoaded: false };
   }
+  // 附件清单是详情之后的**独立一步**：正文那一跳失败也照样去问附件清单，反之亦然
+  const declared = await enrichWithDeclaredAttachments(adapter, enriched, ctx);
+  return {
+    notice: declared.notice,
+    detailLoaded,
+    attachmentListFailed: declared.failed,
+  };
 }
 
 /**
@@ -514,15 +576,21 @@ export const crawlNoticesJob: Job = {
         // 没解决「没人知道」）。这两个计数用于本轮的完成日志与源健康判定。
         let detailFailed = 0;
         let upsertFailed = 0;
+        /** 附件清单接口没取到 / 没解析出的条数（issue #86 第十八节），只进日志不进健康判定 */
+        let attachmentListFailed = 0;
         // 本轮新增 / 更新的条目 id：入库与更新时同步检索索引（issue #8）
         const changedNoticeIds: string[] = [];
         for (const notice of listItems) {
           const enriched = await enrichWithDetail(adapter, notice, ctx);
           if (!enriched.detailLoaded) detailFailed += 1;
-          // 详情没抓到（失败或解析落空）时沿用已入库的详情层字段，避免偶发失败抹掉常态数据
-          const normalized = enriched.detailLoaded
-            ? enriched.notice
-            : await preserveStoredDetail(noticeIdForUrl(enriched.notice.url), enriched.notice);
+          if (enriched.attachmentListFailed) attachmentListFailed += 1;
+          // 详情没抓到（失败或解析落空）时沿用已入库的详情层字段，避免偶发失败抹掉常态数据；
+          // 附件清单那一跳没取到同理（第十八节）—— 清单为空会把 notice_attachments 里的行
+          // 删掉，连带已抽出的条文正文，比正文丢失更难恢复（要重下几十 MB）。
+          const normalized =
+            enriched.detailLoaded && !enriched.attachmentListFailed
+              ? enriched.notice
+              : await preserveStoredDetail(noticeIdForUrl(enriched.notice.url), enriched.notice);
           // 对源站礼貌、避免触发限流（issue #14）：三源都是政府站点，串行连发
           // 上百个详情请求容易被 WAF 判定为爬虫而封 IP，整条数据管线会直接断掉。
           // 取值依据：单轮最大约 100 条 × 400ms ≈ 40s 额外耗时（可接受），
@@ -598,7 +666,11 @@ export const crawlNoticesJob: Job = {
         }
         ctx.logger(
           `源 ${adapter.id} 抓取完成：列表 ${listItems.length} 条，新增 ${inserted}，更新 ${updated}` +
-            (failedCount > 0 ? `，详情失败 ${detailFailed}，入库失败 ${upsertFailed}` : ''),
+            (failedCount > 0 ? `，详情失败 ${detailFailed}，入库失败 ${upsertFailed}` : '') +
+            // 附件清单那一跳单独计数（issue #86 第十八节）：它不参与源健康判定（正文照旧
+            // 抓得到，源没坏），但"清单一直拿不到"必须留在这行日志里 —— 否则这一个
+            // 静默的 404 会让"开关打开了"变成假话，且没有任何地方看得出来
+            (attachmentListFailed > 0 ? `，附件清单失败 ${attachmentListFailed}` : ''),
         );
         // 索引同步钩子（issue #8）：同步失败只降级记日志，由重建任务兜底，不中断抓取
         try {

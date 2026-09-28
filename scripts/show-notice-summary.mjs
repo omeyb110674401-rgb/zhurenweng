@@ -8,6 +8,10 @@
  *
  * 与页面同源的三处判据一律 import，脚本里不重写：
  *   - `shouldRenderImpacts`（给谁看 / 空则不渲染）
+ *   - `draftProvenanceLine`（「出处」那一行按来路分开写。**2026-09-28 补**：脚本原先自己
+ *     拼 `附件《<来源>》`，于是"正文就是条文"那类条目在这里被印成
+ *     `附件《本页正文（公告里直接给出的条文）》` —— 页面是对的、量具在说谎，
+ *     正是 #82/#85/#86 反复出现的那一族，第六次）
  *   - `changeCoverageVerdict`（"还差多少"那三句话）
  *   - `parseQuotedSummary`（读侧容错：`impacts` / `changes` / `changeMarkers` 三个键都由它
  *     按旧落库形状兜底，判形状异常会让存量条目白屏 —— #85 第三节的教训）
@@ -26,6 +30,7 @@ import {
 } from '../src/lib/summary-content.ts';
 import { shouldRenderImpacts } from '../src/lib/impact-display.ts';
 import { changeCoverageVerdict } from '../src/lib/change-coverage.ts';
+import { draftProvenanceLine } from '../src/lib/summary-display.ts';
 import { parseSummaryDiagnostics, describeDiagnostics } from '../src/lib/summary-diagnostics.ts';
 import { AUDIENCE_LABELS } from '../src/lib/audience.ts';
 import { safeParseJson } from '../src/db/types.ts';
@@ -81,7 +86,7 @@ for (const row of rows) {
     for (const item of impacts) {
       console.log(`   • [${IMPACT_KIND_LABELS[item.kind] ?? item.kind}] ${item.who || '（未写明影响谁）'}：${item.text}`);
       console.log(`     引用：${item.quote}`);
-      console.log(`     出处：${item.source ? `附件《${item.source}》` : '（无出处）'}`);
+      console.log(`     ${draftProvenanceLine(item.source, '出处：（无出处）')}`);
     }
   } else if (impacts.length > 0) {
     console.log(`\n  ── 可能的争议点：本页不渲染（受众面 ${row.audience ?? '未判定'}，只给公众广域） ──`);
@@ -100,7 +105,7 @@ for (const row of rows) {
     for (const item of changes) {
       console.log(`   • ${item.clause || '—'} ｜ ${item.kind} ｜ ${item.text}`);
       console.log(`     原文：${item.quote}`);
-      console.log(`     出处：${item.source ? `附件《${item.source}》` : '（无出处）'}`);
+      console.log(`     ${draftProvenanceLine(item.source, '出处：（无出处）')}`);
     }
   } else {
     console.log('\n  ── 改了哪几处：整块不渲染（一行都没有） ──');

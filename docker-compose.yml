@@ -155,7 +155,12 @@ services:
       # tests/unit/deploy-env-contract.test.mjs 守）。
       # on = 摘要把附件条文当第二路输入（第 5 步已接线）；要退回「只解析不喂摘要」填 shadow。
       ATTACHMENT_TEXT: ${ATTACHMENT_TEXT:-on}
-      ATTACHMENT_EXCLUDE_SOURCES: ${ATTACHMENT_EXCLUDE_SOURCES:-npc}
+      # 缺省为空 = 谁都不排除（曾经缺省排 npc，第十八节把那个前提翻掉了：npc 在下面的
+      # 开关打开时会声明草案 PDF；留着它会造出"声明了却整轮跳过、日志只有处理 0 条"的假象）
+      ATTACHMENT_EXCLUDE_SOURCES: ${ATTACHMENT_EXCLUDE_SOURCES:-}
+      # 人大网法律草案 PDF 的抓取开关（缺省关）。打开前先确认按源预算在生效
+      # （npc.ts 的 ATTACHMENT_BUDGET：64 MB / 120 秒）—— 全局 4 MB / 15 秒挡不住它。
+      NPC_DRAFT_ATTACHMENTS: ${NPC_DRAFT_ATTACHMENTS:-off}
       ATTACHMENT_MAX_FILES_PER_ROUND: ${ATTACHMENT_MAX_FILES_PER_ROUND:-}
       ATTACHMENT_ROUND_BUDGET_MS: ${ATTACHMENT_ROUND_BUDGET_MS:-}
       ATTACHMENT_HOST_INTERVAL_MS: ${ATTACHMENT_HOST_INTERVAL_MS:-}

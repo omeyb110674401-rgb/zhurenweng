@@ -8,6 +8,7 @@ import { llmReady } from '../../src/lib/llm-availability.ts';
 import { mailerReady } from '../../src/lib/mailer-availability.ts';
 import { resolveSmtpOptions } from '../../src/lib/adapters/smtp-mailer.ts';
 import { attachmentMode } from '../../src/lib/attachment-mode.ts';
+import { npcDraftAttachmentsEnabled } from '../../src/sources/adapters/npc.ts';
 
 /**
  * 单元：部署环境变量契约（compose ↔ .env.example ↔ docs ↔ 代码）。
@@ -259,6 +260,10 @@ describe('部署环境变量契约（compose ↔ .env.example ↔ docs ↔ 代�
         'ATTACHMENT_MAX_ATTEMPTS',
         'ATTACHMENT_NOTICES_PER_ROUND',
         'ATTACHMENT_PROBE_BYTES',
+        // issue #86 第十八节：npc 草案 PDF 的开关。只进 worker —— 读它的是抓取任务
+        // （适配器的 attachmentListUrl），web 侧一行都不读；转发给 web 是幽灵旋钮的另一种形态。
+        'NPC_DRAFT_ATTACHMENTS',
+        'ATTACHMENT_EXCLUDE_SOURCES',
       ],
     };
     for (const [service, keys] of Object.entries(expected)) {
@@ -556,8 +561,39 @@ describe('构建与部署卫生', () => {
     assert.equal(composeDefault, codeDefault, 'compose 的 :- 回退值与代码缺省不一致');
   });
 
-  it('每日备份的安装片段带 CRON_TZ=UTC（脚本头注 ↔ docs）（issue #68）', () => {
-    // 为什么钉这一行：宿主机时区是 Asia/Shanghai，而 cron 的时间字段按**宿主机时区**解释。
+  it('npc 草案电子文档开关的三处缺省一致，且写错当场抛错（issue #86 第十八节）', () => {
+    // 这一个开关决定"要不要按几十 MB 一档去拉人大网的草案 PDF"，而它同样是"改了没反应
+    // 也看不出来"的那一类：关着的时候适配器连请求都不发，源站日志与我们的日志里都没有痕迹。
+    // 三处缺省（代码 / .env.example / compose 回退值）任何一处单独写成 on，都等于**偷偷开始拉文件**。
+    const exampleValue = /^NPC_DRAFT_ATTACHMENTS=(\S*)$/m.exec(envExampleText)?.[1];
+    const composeDefault = /NPC_DRAFT_ATTACHMENTS: \$\{NPC_DRAFT_ATTACHMENTS:-([^}]*)\}/.exec(
+      composeText,
+    )?.[1];
+    const saved = process.env.NPC_DRAFT_ATTACHMENTS;
+    const withSaved = (value, fn) => {
+      try {
+        if (value === undefined) delete process.env.NPC_DRAFT_ATTACHMENTS;
+        else process.env.NPC_DRAFT_ATTACHMENTS = value;
+        return fn();
+      } finally {
+        if (saved === undefined) delete process.env.NPC_DRAFT_ATTACHMENTS;
+        else process.env.NPC_DRAFT_ATTACHMENTS = saved;
+      }
+    };
+    const codeDefault = withSaved(undefined, () => (npcDraftAttachmentsEnabled() ? 'on' : 'off'));
+    assert.ok(exampleValue !== undefined, '.env.example 应声明 NPC_DRAFT_ATTACHMENTS');
+    assert.ok(composeDefault !== undefined, 'compose 应给 NPC_DRAFT_ATTACHMENTS 一个 :- 回退值');
+    assert.equal(exampleValue, codeDefault, '.env.example 写的档位与代码缺省不一致');
+    assert.equal(composeDefault, codeDefault, 'compose 的 :- 回退值与代码缺省不一致');
+    assert.equal(codeDefault, 'off', '缺省必须是关：打开它意味着开始按几十 MB 一档拉文件');
+    // 写错不许静默当成关（否则"开关打开了"这句话没有任何办法证伪）
+    assert.throws(
+      () => withSaved('yes', () => npcDraftAttachmentsEnabled()),
+      /NPC_DRAFT_ATTACHMENTS 不是合法档位/,
+    );
+  });
+
+  it('每日备份的安装片段带 CRON_TZ=UTC（脚本头注 ↔ docs）（issue #68）', () => {    // 为什么钉这一行：宿主机时区是 Asia/Shanghai，而 cron 的时间字段按**宿主机时区**解释。
     // 2026-09-24 装 cron 时片段里没有 CRON_TZ，注释却写着「19:30 UTC」，于是 `30 19` 实际是
     // 19:30 北京时间 —— "每天自动备份"装了之后一整天一次都没触发，而 `systemctl is-active crond`
     // 显示 active、crontab -l 看得到那一行，什么都"正常"。这一条不防运行期错误（cron 不报错就是

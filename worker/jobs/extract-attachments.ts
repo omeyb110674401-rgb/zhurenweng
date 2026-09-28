@@ -23,7 +23,9 @@ import {
 import { envInt } from '../../src/lib/env-int.ts';
 import { errorMessage } from '../../src/lib/errors.ts';
 import { attachmentUrlCandidates } from '../../src/lib/attachment-url.ts';
-import { crawlFetch, readCappedBuffer } from './crawl-notices.ts';
+import { attachmentBudgetFor, type AttachmentBudget } from '../../src/sources/attachment-budget.ts';
+import { sourceAdapters } from '../../src/sources/registry.ts';
+import { crawlFetch, readCappedBuffer, DEFAULT_CRAWL_TIMEOUT_MS } from './crawl-notices.ts';
 import type { Job, JobContext } from '../registry.ts';
 
 /**
@@ -46,7 +48,12 @@ import type { Job, JobContext } from '../registry.ts';
 const MAX_FILES_PER_ROUND = envInt('ATTACHMENT_MAX_FILES_PER_ROUND', 120, { min: 1 });
 /** 单轮墙钟预算：超过就收尾，未处理的行留在 pending 等下一轮。 */
 const ROUND_BUDGET_MS = envInt('ATTACHMENT_ROUND_BUDGET_MS', 20 * 60_000, { min: 1000 });
-/** 单个文件的下载上限（真实分布里 mee 的标准文本有几十 MB，靠这条诚实降级）。 */
+/**
+ * 单个文件的下载上限（全站缺省；真实分布里 mee 的标准文本有几十 MB，靠这条诚实降级）。
+ *
+ * 按源放宽的落点是 `SourceFetchOptions.attachmentBudget`（issue #86 第十八节）：
+ * 那是"某一个源的属性"，不该由全站买单 —— 人大网的草案 PDF 实测有一条 43,254,307 字节。
+ */
 const MAX_BYTES = envInt('ATTACHMENT_MAX_BYTES', 4 * 1024 * 1024, { min: 1024 });
 /** 探测只读前这么多字节就够判类型与总大小。 */
 const PROBE_BYTES = envInt('ATTACHMENT_PROBE_BYTES', 64 * 1024, { min: 16 });
@@ -66,10 +73,15 @@ const MAX_ATTEMPTS = envInt('ATTACHMENT_MAX_ATTEMPTS', 3, { min: 1 });
 /** 一轮扫多少条公示（通常文件数上限先到）。 */
 const NOTICES_PER_ROUND = envInt('ATTACHMENT_NOTICES_PER_ROUND', 60, { min: 1 });
 /**
- * 逗号分隔的源 ID 黑名单。缺省排 npc：它的详情是 JSON 接口、根本不产附件
- * （README「数据源清单」那行），所以这更多是把「不服务 npc」这件事写明而不是过滤掉什么。
+ * 逗号分隔的源 ID 黑名单；**缺省为空 = 谁都不排除**。
+ *
+ * 这里曾经写着 `'npc'`，理由是"它的详情是 JSON 接口、根本不产附件"。issue #86 第十八节
+ * 把这个前提翻掉了：npc 在开关打开时会声明草案 PDF。留着那条缺省会造出最难查的一种假象 ——
+ * 清单声明了、开关也开了，抽取任务却整轮跳过它（日志上只有"处理 0 条"）。现在管这件事的
+ * 开关只有一个（`NPC_DRAFT_ATTACHMENTS`）：关着时适配器什么都不声明，抽取任务自然没活干。
+ * 这份黑名单留给"某个源声明了、但我们确实不想拉"的场合。
  */
-const EXCLUDED_SOURCES = (process.env.ATTACHMENT_EXCLUDE_SOURCES ?? 'npc')
+const EXCLUDED_SOURCES = (process.env.ATTACHMENT_EXCLUDE_SOURCES ?? '')
   .split(',')
   .map((id) => id.trim())
   .filter((id) => id !== '');
@@ -234,6 +246,7 @@ async function probeAttachment(
   noticeUrl: string,
   policy: HostPolicy,
   logger: (message: string) => void,
+  timeoutMs: number,
 ): Promise<ProbeResult> {
   let refusal: string | null = null;
   for (const url of urls) {
@@ -245,6 +258,7 @@ async function probeAttachment(
       response = await crawlFetch(url, {
         headers: attachmentHeaders(noticeUrl, `bytes=0-${PROBE_BYTES - 1}`),
         returnForStatus: isRefusal,
+        timeoutMs,
       });
     } catch (error) {
       // 守卫拒绝 / 超时 / 重定向环：这些是「还不知道结论」，留 error 让下轮重试
@@ -291,6 +305,7 @@ async function extractOne(
   policy: HostPolicy,
   tally: RoundTally,
   logger: (message: string) => void,
+  budget: AttachmentBudget,
 ): Promise<void> {
   /**
    * 刷新失败时**保留上一轮已经抽到的条文**。
@@ -335,6 +350,7 @@ async function extractOne(
     notice.url,
     policy,
     logger,
+    budget.timeoutMs,
   );
   if (!probed.probed) {
     await settle(probed.outcome);
@@ -373,12 +389,14 @@ async function extractOne(
     });
     return;
   }
-  if (total !== null && total > MAX_BYTES) {
+  if (total !== null && total > budget.maxBytes) {
     await settle({
       status: 'too_large',
       kind,
       bytes: total,
-      error: `声明 ${total} 字节，超过单个附件 ${MAX_BYTES} 字节上限`,
+      // 说准是哪个上限：按源放宽之后，"超过 4194304 字节"这句话不够用 —— 看日志的人
+      // 得知道该去改按源声明还是全站旋钮（改错了地方就是白改）
+      error: `声明 ${total} 字节，超过${budget.maxBytesPerSource ? '本源的' : '单个附件'} ${budget.maxBytes} 字节上限`,
       fetchedAt: new Date(),
     });
     return;
@@ -389,6 +407,7 @@ async function extractOne(
     const full = await crawlFetch(servedUrl, {
       headers: attachmentHeaders(notice.url),
       returnForStatus: isRefusal,
+      timeoutMs: budget.timeoutMs,
     });
     if (!full.ok) {
       const tripped = policy.record(host, true);
@@ -401,7 +420,7 @@ async function extractOne(
       });
       return;
     }
-    body = await readCappedBuffer(full, MAX_BYTES);
+    body = await readCappedBuffer(full, budget.maxBytes);
     tally.downloaded += 1;
   } catch (error) {
     policy.record(host, false);
@@ -526,6 +545,15 @@ export const extractAttachmentsJob: Job = {
             policy,
             tally,
             ctx.logger,
+            // 按源取预算（第十八节）：41 MB 的草案 PDF 是 npc 的属性，不该抬全站上限。
+            // 每轮每条都算一次是刻意的 —— manifest 的源在库里是可变的，缓存会把
+            // "改了声明没生效"变成下一轮才看得见的事。
+            attachmentBudgetFor({
+              sourceId: manifest.sourceId,
+              adapters: sourceAdapters,
+              globalMaxBytes: MAX_BYTES,
+              globalTimeoutMs: DEFAULT_CRAWL_TIMEOUT_MS,
+            }),
           );
         } catch (error) {
           /**
