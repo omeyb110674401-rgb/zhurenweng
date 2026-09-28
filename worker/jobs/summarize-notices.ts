@@ -22,10 +22,16 @@ import { llmReady, llmUnavailableReason } from '../../src/lib/llm-availability.t
 import { sendTaskFailureAlert } from '../../src/lib/alerts.ts';
 import { syncNoticesToSearchIndex } from '../../src/lib/search/sync.ts';
 import {
-  buildQuotedSummary,
+  buildQuotedSummaryWithTally,
   llmModelName,
   type QuotedStructuredSummary,
 } from '../../src/lib/summary-content.ts';
+import {
+  buildSummaryDiagnostics,
+  describeDiagnostics,
+  diagnosticsOfError,
+  type SummaryFieldCounts,
+} from '../../src/lib/summary-diagnostics.ts';
 import {
   listNoticesForSummary,
   markNoticeSummaryForReview,
@@ -96,13 +102,17 @@ function sleep(ms: number): Promise<void> {
 /**
  * 带重试的 LLM 调用：全部尝试耗尽仍失败时抛出最后一次错误。
  * 首调 + SUMMARY_MAX_RETRIES 次重试（如 3 → 共 4 次尝试）。
+ *
+ * 返回 `attempts`（第几次调用成功，1 基）：它此前只出现在 stdout 的日志行里，
+ * 事后查不到 —— 而"这条试了 4 次才成功"与"一次就成"在诊断上不是同一件事
+ * （前者说明通道不稳，重跑策略要另算）。
  */
 async function summarizeWithRetry(
   llm: LlmPort,
   target: PendingSummaryTarget,
   ctx: JobContext,
   draftSources: DraftSource[],
-): Promise<QuotedStructuredSummary> {
+): Promise<{ summary: QuotedStructuredSummary; attempts: number }> {
   const input: LlmSummarizeInput = {
     title: target.title,
     bodyText: target.bodyText ?? '',
@@ -117,7 +127,8 @@ async function summarizeWithRetry(
       await sleep(delayMs);
     }
     try {
-      return (await llm.summarize(input)) as QuotedStructuredSummary;
+      const summary = (await llm.summarize(input)) as QuotedStructuredSummary;
+      return { summary, attempts: attempt + 1 };
     } catch (error) {
       lastError = error;
       ctx.logger(
@@ -176,18 +187,34 @@ export const summarizeNoticesJob: Job = {
           )
         : null;
       try {
-        const summary = await summarizeWithRetry(llm, target, ctx, draftSources);
-        // draftSources 一并交给归一化：条文要点必须能反查到出处才落库（issue #57 第 6 步）
-        const quoted = buildQuotedSummary(
+        const { summary, attempts } = await summarizeWithRetry(llm, target, ctx, draftSources);
+        // draftSources 一并交给归一化：条文要点必须能反查到出处才落库（issue #57 第 6 步）；
+        // tally 是这一次反查丢掉了多少条（issue #86 第 0 刀）—— 这两个出口走的是同一份实现，
+        // 所以"诊断说没丢"与"实际没丢"不可能分家。
+        const { summary: quoted, tally } = buildQuotedSummaryWithTally(
           summary,
           summary.quotes,
           draftSources,
           explanationSections,
         );
+        const kept: SummaryFieldCounts = {
+          keyPoints: quoted.keyPoints.length,
+          explanationPoints: quoted.explanationPoints.length,
+          channels: quoted.channels.length,
+        };
+        // 诊断与摘要**一起**落库：它描述的就是这一列摘要是哪一次调用产出的
+        const diagnostics = buildSummaryDiagnostics(summary.diagnostics, {
+          model,
+          provider: llm.provider,
+          attempts,
+          kept,
+          quoteNotFound: tally.quoteNotFound,
+        });
         await saveNoticeSummary({
           id: target.id,
           summaryJson: JSON.stringify(quoted),
           summaryModel: model,
+          diagnosticsJson: JSON.stringify(diagnostics),
         });
         // 只有**摘要真的用了**才标记（失败重试耗尽的条目不能留下「条文已接入」的痕迹，
         // 否则详情页会宣布一件没发生过的事）
@@ -196,7 +223,7 @@ export const summarizeNoticesJob: Job = {
         }
         succeeded += 1;
         ctx.logger(
-          `条目 ${target.id} 摘要完成（model=${model}${draftChars > 0 ? `，附件条文 ${draftSources.length} 份 / ${draftChars} 字` : ''}）`,
+          `条目 ${target.id} 摘要完成（${describeDiagnostics(diagnostics)}${draftChars > 0 ? `，附件条文 ${draftSources.length} 份 / ${draftChars} 字` : ''}）`,
         );
         // 索引同步钩子（issue #8）：摘要落库后重刷该条目，摘要文本即刻可被检索；
         // 失败只降级记日志，由重建任务兜底，不影响摘要主管线
@@ -209,7 +236,14 @@ export const summarizeNoticesJob: Job = {
         }
       } catch (error) {
         const message = errorMessage(error);
-        await markNoticeSummaryForReview(target.id);
+        // 拿到响应之后才失败的调用，错误上带着诊断（issue #86）：那正是最需要原始输出的
+        // 场合（"模型输出不是合法 JSON"、"必填段不合格"此前只留下一句 200 字以内的摘要）。
+        // 请求根本没发出去时没有响应可诊断，此时**不写**（undefined ⇒ 不碰那一列）。
+        const failedDiagnostics = diagnosticsOfError(error);
+        await markNoticeSummaryForReview(
+          target.id,
+          failedDiagnostics === null ? undefined : JSON.stringify(failedDiagnostics),
+        );
         sentToReview += 1;
         // 摘要失败告警（issue #12）：转人工复核的同时通知站长，同日 × 任务 × 源去重
         await sendTaskFailureAlert({

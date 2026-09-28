@@ -11,6 +11,17 @@ import {
   type QuotedStructuredSummary,
   type SummaryQuotes,
 } from '../summary-content.ts';
+import {
+  LlmResponseError,
+  SUMMARY_DIAGNOSTICS_VERSION,
+  capRawOutput,
+  emptyDroppedCounts,
+  emptyFieldCounts,
+  type SummaryDiagnostics,
+  type SummaryDroppedCounts,
+  type SummaryFieldCounts,
+  type SummaryTokenUsage,
+} from '../summary-diagnostics.ts';
 
 /**
  * OpenAI 兼容 chat/completions 适配器（issue #25）—— LlmPort 的生产实现。
@@ -208,6 +219,35 @@ export function parseModelJson(content: string): unknown {
 }
 
 /**
+ * 归一化阶段"丢在哪一关"的计数（issue #86 第 0 刀）。
+ *
+ * 做成一个**可选的可变入参**而不是改返回值，是为了把计数写在丢弃发生的那一行旁边 ——
+ * 另写一个函数去"数一遍模型输出会丢几条"就是把条数上限和空值判据实现第二遍，
+ * 而两份实现漂移的表现是：诊断说没丢，实际丢了（那正是这个功能要消灭的那类静默）。
+ */
+export interface NormalizeTally {
+  /** 条目缺必填文本 / 类型不对 */
+  emptyOrInvalid: number;
+  /** 超过条数上限被挡掉 */
+  overLimit: number;
+}
+
+/**
+ * 模型原始 JSON 里三类数组的条数（未受任何上限影响）。
+ * 与 `normalized` 的差额就是"上限与空值"吃掉的量，所以它必须从**解析后的原始对象**上数，
+ * 不能从归一化结果上数（那是自证）。
+ */
+export function countModelOutput(raw: unknown): SummaryFieldCounts {
+  const record = (typeof raw === 'object' && raw !== null ? raw : {}) as Record<string, unknown>;
+  const lengthOf = (key: string): number => (Array.isArray(record[key]) ? (record[key] as unknown[]).length : 0);
+  return {
+    keyPoints: lengthOf('keyPoints'),
+    explanationPoints: lengthOf('explanationPoints'),
+    channels: lengthOf('channels'),
+  };
+}
+
+/**
  * 校验并归一化模型输出的摘要 JSON；形状不合法抛错（由摘要任务的重试策略兜底）。
  *
  * 三条有意的规则：
@@ -223,7 +263,7 @@ export function parseModelJson(content: string): unknown {
  *    就会让后面的渠道挂上前面的引用。去空 / 去重 / 截断统一由 buildQuotedSummary
  *    里的 normalizeChannels 在配好引用之后做。
  */
-export function normalizeModelSummary(raw: unknown): QuotedStructuredSummary {
+export function normalizeModelSummary(raw: unknown, tally?: NormalizeTally): QuotedStructuredSummary {
   if (typeof raw !== 'object' || raw === null) {
     throw new Error('摘要输出不是 JSON 对象');
   }
@@ -280,7 +320,7 @@ export function normalizeModelSummary(raw: unknown): QuotedStructuredSummary {
 
   // 说明要点（issue #76 第 3 步）：形状不对的条目这里就丢掉，
   // 逐字反查不到出处由 buildQuotedSummary 负责丢弃。
-  const explanationPoints = normalizeExplanationPoints(record.explanationPoints);
+  const explanationPoints = normalizeExplanationPoints(record.explanationPoints, tally);
 
   const rawQuotes = readQuotes(record.quotes);
   // keyPoints 与它的引用必须**先按原始下标配好、再过滤空项** —— 这是 normalizeChannels
@@ -291,9 +331,15 @@ export function normalizeModelSummary(raw: unknown): QuotedStructuredSummary {
   const keyPoints: string[] = [];
   const keyPointQuotes: (string | null)[] = [];
   rawKeyPoints.forEach((raw, index) => {
-    if (keyPoints.length >= MAX_KEY_POINTS) return;
+    if (keyPoints.length >= MAX_KEY_POINTS) {
+      if (tally) tally.overLimit += 1;
+      return;
+    }
     const point = typeof raw === 'string' ? raw.trim() : '';
-    if (point === '') return;
+    if (point === '') {
+      if (tally) tally.emptyOrInvalid += 1;
+      return;
+    }
     const quote = rawKeyPointQuotes[index];
     keyPoints.push(point);
     keyPointQuotes.push(typeof quote === 'string' && quote.trim() !== '' ? quote.trim() : null);
@@ -320,17 +366,28 @@ export function normalizeModelSummary(raw: unknown): QuotedStructuredSummary {
 const MAX_EXPLANATION_POINTS = 24;
 
 /** 模型的说明小节 → 端口形状。缺 quote 或缺说明的一律不要（后面还要按说明段落反查）。 */
-function normalizeExplanationPoints(value: unknown): AmendmentExplanationDraft[] {
+function normalizeExplanationPoints(value: unknown, tally?: NormalizeTally): AmendmentExplanationDraft[] {
   if (!Array.isArray(value)) return [];
   const out: AmendmentExplanationDraft[] = [];
   for (const item of value) {
-    if (out.length >= MAX_EXPLANATION_POINTS) break;
-    if (typeof item !== 'object' || item === null) continue;
+    if (out.length >= MAX_EXPLANATION_POINTS) {
+      // 到顶后继续数（而不是 break）：计数要的是"被上限挡掉几条"，
+      // 提前退出会让这个数永远等于 0，而成品与 continue 完全一致。
+      if (tally) tally.overLimit += 1;
+      continue;
+    }
+    if (typeof item !== 'object' || item === null) {
+      if (tally) tally.emptyOrInvalid += 1;
+      continue;
+    }
     const point = item as Record<string, unknown>;
     const quote = typeof point.quote === 'string' ? point.quote.trim() : '';
     const text = typeof point.text === 'string' ? point.text.trim() : '';
     const heading = typeof point.heading === 'string' ? point.heading.trim() : '';
-    if (quote === '' || text === '') continue;
+    if (quote === '' || text === '') {
+      if (tally) tally.emptyOrInvalid += 1;
+      continue;
+    }
     out.push({ heading, text, quote });
   }
   return out;
@@ -475,6 +532,7 @@ export class OpenAiCompatibleLlm implements LlmPort {
   }
 
   async summarize(input: LlmSummarizeInput): Promise<QuotedStructuredSummary> {
+    const startedAt = Date.now();
     let response: Response;
     try {
       response = await this.fetchImpl(`${this.apiBase}/chat/completions`, {
@@ -495,23 +553,152 @@ export class OpenAiCompatibleLlm implements LlmPort {
         signal: AbortSignal.timeout(this.timeoutMs),
       });
     } catch (error) {
+      // 请求没发出去 / 没回来 ⇒ **没有响应可诊断**。这里刻意不编一份空诊断：
+      // 诊断的全部价值在"模型说了什么"，而此刻什么都没说过；凭空写一条会让人
+      // 以为调用发生过（与 #64 那条"空态占比 0/192"同一种诚实要求）。
       throw new Error(
         `${this.provider} API 请求失败：${error instanceof Error ? error.message : String(error)}`,
       );
     }
+    const elapsedMs = Date.now() - startedAt;
 
     if (!response.ok) {
       const body = await response.text().catch(() => '');
-      throw new Error(`${this.provider} API HTTP ${response.status}：${body.slice(0, 200)}`);
+      throw new LlmResponseError(
+        `${this.provider} API HTTP ${response.status}：${body.slice(0, 200)}`,
+        this.diagnosticsFor({ raw: body, elapsedMs, finishReason: null, usage: null }),
+      );
     }
 
     const payload = (await response.json().catch(() => null)) as {
-      choices?: Array<{ message?: { content?: unknown } }>;
+      choices?: Array<{ message?: { content?: unknown }; finish_reason?: unknown }>;
+      usage?: unknown;
     } | null;
-    const content = payload?.choices?.[0]?.message?.content;
+    const choice = payload?.choices?.[0];
+    const content = choice?.message?.content;
+    const finishReason = typeof choice?.finish_reason === 'string' ? choice.finish_reason : null;
+    const usage = readTokenUsage(payload?.usage);
+
     if (typeof content !== 'string' || content.length === 0) {
-      throw new Error(`${this.provider} API 响应缺少 choices[0].message.content 文本`);
+      throw new LlmResponseError(
+        `${this.provider} API 响应缺少 choices[0].message.content 文本`,
+        this.diagnosticsFor({ raw: '', elapsedMs, finishReason, usage }),
+      );
     }
-    return normalizeModelSummary(parseModelJson(content));
+
+    let parsed: unknown;
+    try {
+      parsed = parseModelJson(content);
+    } catch (error) {
+      throw new LlmResponseError(
+        error instanceof Error ? error.message : String(error),
+        this.diagnosticsFor({ raw: content, elapsedMs, finishReason, usage }),
+      );
+    }
+
+    // 丢弃计数写在丢弃发生的那一行旁边（见 NormalizeTally 的注释）
+    const tally: NormalizeTally = { emptyOrInvalid: 0, overLimit: 0 };
+    const emitted = countModelOutput(parsed);
+    let summary: QuotedStructuredSummary;
+    try {
+      summary = normalizeModelSummary(parsed, tally);
+    } catch (error) {
+      throw new LlmResponseError(
+        error instanceof Error ? error.message : String(error),
+        this.diagnosticsFor({
+          raw: content,
+          elapsedMs,
+          finishReason,
+          usage,
+          emitted,
+          dropped: { ...tally, quoteNotFound: 0 },
+        }),
+      );
+    }
+
+    const normalized: SummaryFieldCounts = {
+      keyPoints: summary.keyPoints?.length ?? 0,
+      explanationPoints: summary.explanationPoints?.length ?? 0,
+      channels: summary.channels.length,
+    };
+    return {
+      ...summary,
+      diagnostics: this.diagnosticsFor({
+        raw: content,
+        elapsedMs,
+        finishReason,
+        usage,
+        emitted,
+        normalized,
+        // kept 要等逐字反查之后才知道（buildQuotedSummaryWithTally）；这里先与 normalized 同值，
+        // 由 worker 用真正的落库条数覆盖 —— 宁可给一个"还没算"的值，也不留一个 undefined
+        // 让读的人以为适配器不知道。
+        kept: normalized,
+        dropped: { ...tally, quoteNotFound: 0 },
+      }),
+    };
   }
+
+  /**
+   * 组装一次调用的诊断。
+   *
+   * `attempts` 先写 1：它属于**重试循环**，而适配器看不到自己是被第几次调用的 ——
+   * 由 worker 覆盖（它是唯一知道"这条试了几次"的地方）。
+   */
+  private diagnosticsFor(parts: {
+    raw: string;
+    elapsedMs: number;
+    finishReason: string | null;
+    usage: SummaryTokenUsage | null;
+    emitted?: SummaryFieldCounts;
+    normalized?: SummaryFieldCounts;
+    kept?: SummaryFieldCounts;
+    dropped?: SummaryDroppedCounts;
+  }): SummaryDiagnostics {
+    const capped = capRawOutput(parts.raw);
+    return {
+      v: SUMMARY_DIAGNOSTICS_VERSION,
+      model: this.model,
+      provider: this.provider,
+      elapsedMs: parts.elapsedMs,
+      attempts: 1,
+      // 走到这里就说明响应回来了（连 `!response.ok` 那条也带着响应体），
+      // 所以"有人看过"这件事是真的 —— 见 SummaryDiagnostics.instrumented 的注释
+      instrumented: true,
+      finishReason: parts.finishReason,
+      usage: parts.usage,
+      rawChars: parts.raw.length,
+      raw: capped.raw,
+      rawTruncated: capped.rawTruncated,
+      emitted: parts.emitted ?? emptyFieldCounts(),
+      normalized: parts.normalized ?? emptyFieldCounts(),
+      kept: parts.kept ?? emptyFieldCounts(),
+      dropped: parts.dropped ?? emptyDroppedCounts(),
+    };
+  }
+}
+
+/**
+ * 读 OpenAI 兼容响应里的 usage（issue #86）。字段名各家略有出入，三种写法都认；
+ * 给不出就是 null —— 不把"没上报"写成 0（那会让人以为这次调用没花 token）。
+ */
+function readTokenUsage(raw: unknown): SummaryTokenUsage | null {
+  if (typeof raw !== 'object' || raw === null) return null;
+  const record = raw as Record<string, unknown>;
+  const pick = (...keys: string[]): number | null => {
+    for (const key of keys) {
+      const value = record[key];
+      if (typeof value === 'number' && Number.isFinite(value)) return value;
+    }
+    return null;
+  };
+  const usage: SummaryTokenUsage = {
+    promptTokens: pick('prompt_tokens', 'promptTokens', 'input_tokens'),
+    completionTokens: pick('completion_tokens', 'completionTokens', 'output_tokens'),
+    totalTokens: pick('total_tokens', 'totalTokens'),
+  };
+  if (usage.promptTokens === null && usage.completionTokens === null && usage.totalTokens === null) {
+    return null;
+  }
+  return usage;
 }

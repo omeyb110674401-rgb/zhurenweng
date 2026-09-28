@@ -109,6 +109,9 @@ export async function POST(request: Request): Promise<Response> {
       id: noticeId,
       summaryJson: JSON.stringify(quoted),
       summaryModel: MANUAL_SUMMARY_MODEL,
+      // 人工录入没有调用可描述（issue #86）：显式写 null，而不是把上一次失败留下的诊断
+      // 留在那一列里 —— 否则"这份摘要是哪一次调用产出的"这个问题的答案会是一份假证据。
+      diagnosticsJson: null,
     });
     // 索引同步钩子：人工摘要即刻可被检索；失败只降级记日志，由重建任务兜底
     try {

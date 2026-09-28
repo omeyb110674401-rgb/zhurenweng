@@ -134,7 +134,15 @@ export async function resetNoticeSummaryForRetry(id: string): Promise<boolean> {
  */
 export async function clearSummaryForRedraft(
   ids: string[],
-): Promise<{ id: string; previousSummaryJson: string | null; previousModel: string | null }[]> {
+): Promise<
+  {
+    id: string;
+    previousSummaryJson: string | null;
+    previousModel: string | null;
+    /** 清空前的诊断（issue #86）：重跑会把这一列一起清掉，所以旧值必须交出去，备份才不丢 */
+    previousDiagnosticsJson: string | null;
+  }[]
+> {
   if (ids.length === 0) return [];
   const db = await getDb();
   const before = await db
@@ -142,12 +150,21 @@ export async function clearSummaryForRedraft(
       id: notices.id,
       previousSummaryJson: notices.aiSummaryJson,
       previousModel: notices.summaryModel,
+      previousDiagnosticsJson: notices.summaryDiagnosticsJson,
     })
     .from(notices)
     .where(inArray(notices.id, ids));
   await db
     .update(notices)
-    .set({ aiSummaryJson: null, summaryModel: null, summaryStatus: 'pending' })
+    .set({
+      aiSummaryJson: null,
+      summaryModel: null,
+      // 诊断描述的是**产出那份摘要的那次调用**（issue #86）：摘要都清了还留着它，
+      // 就会配出一对"没有摘要、却有诊断"的行，而下一轮无论成功失败都会再写一份新的。
+      // 一起清掉，返回给调用方存备份。
+      summaryDiagnosticsJson: null,
+      summaryStatus: 'pending',
+    })
     .where(inArray(notices.id, ids));
   return before;
 }
@@ -184,6 +201,14 @@ export async function saveNoticeSummary(input: {
   id: string;
   summaryJson: string;
   summaryModel: string;
+  /**
+   * 产出这份摘要的那一次调用的诊断（issue #86 第 0 刀）。
+   *
+   * **必填、可为 null**：人工复核那条路是手写的摘要、没有调用可描述，必须**显式**写 null。
+   * 让它必填而不是可选，是拿类型系统守一条不变式 ——「这一列摘要是哪一次调用产出的」
+   * 必须有答案；写成可选的话，"忘了传"与"确实没有调用"在库里长得一模一样。
+   */
+  diagnosticsJson: string | null;
 }): Promise<void> {
   const db = await getDb();
   await db
@@ -191,16 +216,30 @@ export async function saveNoticeSummary(input: {
     .set({
       aiSummaryJson: input.summaryJson,
       summaryModel: input.summaryModel,
+      summaryDiagnosticsJson: input.diagnosticsJson,
       summaryStatus: 'done',
     })
     .where(eq(notices.id, input.id));
 }
 
-/** 重试耗尽后转人工复核：状态置为 failed_review，worker 不再自动重试。 */
-export async function markNoticeSummaryForReview(id: string): Promise<void> {
+/**
+ * 重试耗尽后转人工复核：状态置为 failed_review，worker 不再自动重试。
+ *
+ * `diagnosticsJson` 可选（issue #86）：拿到响应之后才失败的调用能带上原始输出与结束原因，
+ * 而那恰恰是最需要原始输出的场合（"模型输出不是合法 JSON"、"必填段不合格"今天只留下一句
+ * 200 字符以内的错误摘要）。**没给就不碰这一列** —— "这次失败没有响应可诊断"与
+ * "把上一次的诊断抹掉"是两回事。
+ */
+export async function markNoticeSummaryForReview(
+  id: string,
+  diagnosticsJson?: string | null,
+): Promise<void> {
   const db = await getDb();
   await db
     .update(notices)
-    .set({ summaryStatus: 'failed_review' })
+    .set({
+      summaryStatus: 'failed_review',
+      ...(diagnosticsJson ? { summaryDiagnosticsJson: diagnosticsJson } : {}),
+    })
     .where(eq(notices.id, id));
 }

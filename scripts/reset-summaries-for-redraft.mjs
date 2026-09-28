@@ -208,6 +208,9 @@ const lines = before.map((row) =>
     id: row.id,
     previousSummaryJson: row.previousSummaryJson,
     previousModel: row.previousModel,
+    // 诊断也一起备份（issue #86）：清空会把那一列一起抹掉，而"上一次调用到底怎么了"
+    // 恰恰是重跑之后最想回头对比的东西（重跑前后的 emitted/kept/丢弃数就在这两份里）
+    previousDiagnosticsJson: row.previousDiagnosticsJson,
     backedUpAt: new Date().toISOString(),
   }),
 );
@@ -252,6 +255,7 @@ async function peekSummaries(ids) {
       id: notices.id,
       previousSummaryJson: notices.aiSummaryJson,
       previousModel: notices.summaryModel,
+      previousDiagnosticsJson: notices.summaryDiagnosticsJson,
     })
     .from(notices)
     .where(inArray(notices.id, ids));

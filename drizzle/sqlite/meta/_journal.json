@@ -134,6 +134,13 @@
       "when": 1791072010000,
       "tag": "0018_add_subscription_audiences",
       "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "6",
+      "when": 1791072011000,
+      "tag": "0019_add_summary_diagnostics",
+      "breakpoints": true
     }
   ]
 }

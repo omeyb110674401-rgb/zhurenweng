@@ -67,7 +67,16 @@ export const notices = pgTable('notices', {
    * 抓取 upsert 不触碰本列（属摘要管线，与 ai_summary_json / summary_model 一致）。
    */
   summaryStatus: text('summary_status').notNull().default('pending'),
-  /** 抓取时间，ISO 8601 */
+  /**
+   * 摘要调用的诊断（issue #86 第 0 刀）：产出当前这列摘要的那一次调用里，模型吐了什么、
+   * 我们丢了什么、丢在哪一关。形状与理由见 src/lib/summary-diagnostics.ts。
+   *
+   * 为什么是独立的列：`ai_summary_json` 是**渲染契约**，往里加键就要同时改读侧，而读侧
+   * 一旦判形状异常，存量条目会从「有摘要」掉回「待人工复核」占位（#85 的教训）。这一列
+   * 只给审计脚本与后台看，能独立清空/裁剪而不牵动任何页面。
+   * NULL = 本列上线前的存量，或那份摘要是人工复核手工录入的（没有调用可描述）。
+   */
+  summaryDiagnosticsJson: text('summary_diagnostics_json'),
   /** 抓取时间，ISO 8601。**每轮 upsert 都会覆盖**，所以它不是"首次收录"。 */
   fetchedAt: text('fetched_at').notNull(),
   /**

@@ -5,6 +5,8 @@ import path from 'node:path';
 import { after, before, describe, it } from 'node:test';
 import Database from 'better-sqlite3';
 
+import { describeDiagnostics, parseSummaryDiagnostics } from '../../src/lib/summary-diagnostics.ts';
+
 /**
  * 端到端（issue #76 起步，issue #85 起只剩"体裁 + 编制说明要点"这两半）：
  * 一条决议体裁的公告，摘要该长成什么样。
@@ -157,9 +159,16 @@ function readSummary(id) {
   const db = new Database(dbFile, { readonly: true });
   try {
     const row = db
-      .prepare('select summary_status as status, ai_summary_json as json from notices where id = ?')
+      .prepare(
+        'select summary_status as status, ai_summary_json as json, ' +
+          'summary_diagnostics_json as diagnostics from notices where id = ?',
+      )
       .get(id);
-    return { status: row?.status ?? null, json: row?.json ? JSON.parse(row.json) : null };
+    return {
+      status: row?.status ?? null,
+      json: row?.json ? JSON.parse(row.json) : null,
+      diagnostics: row?.diagnostics ? JSON.parse(row.diagnostics) : null,
+    };
   } finally {
     db.close();
   }
@@ -467,5 +476,67 @@ describe('issue #79：改词表后的存量回填', () => {
       !again.samples.some((row) => row.id === STALE_ID),
       'force 也要幂等：第二次跑它不该再出现在改写名单里',
     );
+  });
+});
+
+/**
+ * issue #86 第 0 刀：**这一次调用的诊断跟着摘要一起落库**。
+ *
+ * 为什么值得一条端到端：删掉的「改动点」连续两轮零产出，而事后没有任何人能回答它是
+ * "模型返回了空数组"还是"引用反查不过被丢掉"（#79）。这条测试钉的是那条信息**真的
+ * 走完了全链路**：worker 合成 → 写库 → 读回来能解析 → 与摘要本体的条数对得上。
+ *
+ * 顺带它也覆盖了迁移 0019：这个库是迁移建出来的，列不存在时 `saveNoticeSummary` 会抛，
+ * 于是本文件所有摘要断言一起变红 —— 不需要为"列加上了没有"单写一条。
+ */
+describe('issue #86：摘要调用的诊断随摘要落库', () => {
+  it('诊断写下来了，且与摘要本体的条数逐项对得上', () => {
+    const { json, diagnostics } = readSummary(AMENDED_ID);
+    assert.ok(json, '前置：这一条应当已经有摘要');
+    assert.ok(diagnostics, '摘要落库时必须同时写下这一次调用的诊断');
+    const parsed = parseSummaryDiagnostics(diagnostics);
+    assert.ok(parsed, '落库的诊断要能被读侧解析');
+    assert.equal(parsed.model, 'stub', '模型名与端口名来自 worker 当轮算出来的那一个');
+    assert.equal(parsed.provider, 'stub');
+    assert.equal(parsed.attempts, 1, '一次就成 —— 重试次数此前只写在 stdout 里');
+    // 最要紧的一条：诊断说的"落库几条"必须与摘要本体一致，否则诊断是在自说自话
+    assert.deepEqual(parsed.kept, {
+      keyPoints: json.keyPoints.length,
+      explanationPoints: json.explanationPoints.length,
+      channels: json.channels.length,
+    });
+  });
+
+  it('端口没上报响应细节 ⇒ 明说"没人看过"，不把未上报写成"模型什么都没说"', () => {
+    const { diagnostics } = readSummary(AMENDED_ID);
+    const parsed = parseSummaryDiagnostics(diagnostics);
+    // stub 不产出诊断，所以响应类字段一律为空 —— 但**落库条数**仍然是真的
+    assert.equal(parsed.instrumented, false);
+    assert.equal(parsed.elapsedMs, null, '"没测"不能写成"0 毫秒"');
+    assert.equal(parsed.finishReason, null);
+    assert.equal(parsed.rawChars, 0);
+    assert.equal(parsed.raw, '');
+    assert.match(
+      describeDiagnostics(parsed),
+      /端口未上报响应细节/,
+      '读的人必须一眼看出"没人看过"，而不是以为模型什么都没说',
+    );
+  });
+
+  it('人工录入的摘要没有调用可描述 ⇒ 清空这一列，不留上一轮的假证据', async () => {
+    const { saveNoticeSummary } = await import('../../src/db/repo/summaries.ts');
+    const before = readSummary(FRESH_ID);
+    assert.ok(before.diagnostics, '前置：这条原本带着诊断');
+
+    await saveNoticeSummary({
+      id: FRESH_ID,
+      summaryJson: JSON.stringify(before.json),
+      summaryModel: 'manual',
+      diagnosticsJson: null,
+    });
+
+    const after = readSummary(FRESH_ID);
+    assert.equal(after.status, 'done');
+    assert.equal(after.diagnostics, null, '人写的摘要不该挂着一份模型调用的诊断');
   });
 });

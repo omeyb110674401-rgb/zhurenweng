@@ -37,6 +37,11 @@
  *    第一个匹配。这条在把脚本自己也当靶子时特别容易破 —— 用例里写着要撤的那行代码，于是
  *    第一次命中的是 CASES 里那行"引用"，撤完什么也没变、用例永远为绿。同一天的第二发
  *    （issue #67 的自愈用例），靠"撤掉修复必须当场真会红"这条自查出来。
+ * 5. **`pattern` 是正则，不是字面串**（issue #86 第 0 刀实测踩到第二次）：`计数 +1` 里的 `+`
+ *    被当成量词，整个模式一条用例都选不中。而这**不会报错**：模式选不中任何用例时
+ *    `ℹ tests` 仍然是 1（那是测试文件本身那一条），只判 `tests ≥ 1` 会把"模式写错了"
+ *    读成"撤掉实现仍然通过"⇒ 假绿灯。写 pattern 时避开 `+ * ? ( ) [ ] { } . ^ $ |`，
+ *    或用 `\+` 转义。选中的判据见下面 `realResults` 那段注释（两版错判据都在那儿记着）。
  */
 import { readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
@@ -74,6 +79,11 @@ const TARGETS = {
   alertBackup: 'scripts/alert-backup-failure.mjs',
   pipelineHealth: 'src/lib/pipeline-health.ts',
   noticeGenre: 'src/lib/notice-genre.ts',
+  // issue #86 第 0 刀：诊断的形状与合成、以及适配器上报响应细节的那一段。
+  // 这两处都是"撤掉之后没人看得出来"的典型 —— 诊断少写一个计数，页面一个字都不变，
+  // 而下一轮改提示词的人会拿着一个说谎的量具去做决定。
+  summaryDiagnostics: 'src/lib/summary-diagnostics.ts',
+  llmAdapter: 'src/lib/adapters/openai-compatible-llm.ts',
   // issue #83 补的三个"从没被自证覆盖过"的关键面：SSRF 防护、北极星计数的门口、
   // 后台 HTML 转义。它们此前要么只有 e2e 覆盖（而 e2e 跑的是构建产物，撤源码不红），
   // 要么一个测试都没有 —— 正是最该"撤掉实现必须变红"的三处。
@@ -400,8 +410,10 @@ const CASES = [
   {
     label: '核对不上出处的条文要点不再丢弃（模型编的条文直接上页面）',
     file: 'summaryContent',
-    from: '    if (source === null) return;',
-    to: '    if (false) return;',
+    // issue #86：这一行原本是 `if (source === null) return;` 的裸返回，
+    // 现在同一个判断里多了一句丢弃计数（诊断用），所以靶点改成条件本身。
+    from: '    if (source === null) {',
+    to: '    if (false) {',
     pattern: '核对不上出处的条文要点不落库',
     test: 'tests/unit/summary-draft-points.test.mjs',
   },
@@ -814,16 +826,18 @@ const CASES = [
   {
     label: '置换时不置回 pending（清空了摘要却永远不再被生成）',
     file: 'summariesRepo',
-    from: "    .set({ aiSummaryJson: null, summaryModel: null, summaryStatus: 'pending' })",
-    to: '    .set({ aiSummaryJson: null, summaryModel: null })',
+    // issue #86：`clearSummaryForRedraft` 的 `.set({…})` 从一行改成了多行（多了诊断列），
+    // 靶点随之落到具体属性行上 —— 撤掉这一行，条目就留在 done 里再也排不到摘要任务。
+    from: "      summaryStatus: 'pending',",
+    to: '      // 撤掉实现：不置回 pending',
     pattern: 'issue #67：clearSummaryForRedraft',
     test: 'tests/e2e/summary-redraft.test.mjs',
   },
   {
     label: '放回队列时漏清模型名（恢复核对时对不上旧值）',
     file: 'summariesRepo',
-    from: "    .set({ aiSummaryJson: null, summaryModel: null, summaryStatus: 'pending' })",
-    to: "    .set({ aiSummaryJson: null, summaryStatus: 'pending' })",
+    from: '      summaryModel: null,',
+    to: '      // 撤掉实现：不清模型名',
     pattern: 'issue #67：clearSummaryForRedraft',
     test: 'tests/e2e/summary-redraft.test.mjs',
   },
@@ -1213,6 +1227,56 @@ const CASES = [
     pattern: '构建期参数按服务逐条转发',
     test: 'tests/unit/deploy-env-contract.test.mjs',
   },
+  {
+    // issue #86 第 0 刀：五处各钉一个 —— 落库 / 反查计数 / 归一化计数 / 失败路径 /
+    // "没人看过"与"什么都没说"分得开。
+    label: '诊断不落库（摘要照常写，但"这一次调用怎么了"永远查不到）',
+    file: 'summarize',
+    from: '          diagnosticsJson: JSON.stringify(diagnostics),',
+    to: '          diagnosticsJson: null,',
+    pattern: 'issue #86：摘要调用的诊断随摘要落库',
+    test: 'tests/e2e/summary-genre-and-explanations.test.mjs',
+  },
+  {
+    label: '反查失败不计数（丢掉的行从此不留痕迹 —— 改动点当年就是这么死的）',
+    file: 'summaryContent',
+    from: '      tally.quoteNotFound += 1;',
+    to: '      ;',
+    pattern: '且那一条不落库',
+    test: 'tests/unit/summary-diagnostics.test.mjs',
+  },
+  {
+    label: '超条数上限丢掉的点不计数（诊断说"一条没丢"，实际丢了 3 条）',
+    file: 'llmAdapter',
+    from: '      if (tally) tally.overLimit += 1;',
+    to: '      if (false) tally.overLimit += 1;',
+    pattern: '条文要点超过上限 ⇒ 超上限计数 = 多出来的条数',
+    test: 'tests/unit/summary-diagnostics.test.mjs',
+  },
+  {
+    label: '端口没上报却写成"有人看过"（把"没人看过"读成"模型什么都没说"）',
+    file: 'summaryDiagnostics',
+    from: '    instrumented: false,',
+    to: '    instrumented: true,',
+    pattern: '端口未上报 ⇒ 说清"没人看过"，但落库条数与丢弃数照样写',
+    test: 'tests/unit/summary-diagnostics.test.mjs',
+  },
+  {
+    label: '失败路径不挂诊断（"模型输出不是合法 JSON"时又只剩一句 200 字以内的摘要）',
+    file: 'llmAdapter',
+    from: '        this.diagnosticsFor({ raw: content, elapsedMs, finishReason, usage }),',
+    to: '        undefined,',
+    pattern: '模型输出不是合法 JSON ⇒ 诊断里留着那段原始输出',
+    test: 'tests/unit/summary-diagnostics.test.mjs',
+  },
+  {
+    label: '端口没上报也写出分母（`3/0` 被读成"模型吐了 0 条"，而这两件事处置相反）',
+    file: 'summaryDiagnostics',
+    from: '  if (diagnostics.instrumented) {',
+    to: '  if (true) {',
+    pattern: '端口没上报时不写分母',
+    test: 'tests/unit/summary-diagnostics.test.mjs',
+  },
 ];
 
 let red = 0;
@@ -1368,8 +1432,32 @@ for (const testCase of selected) {
     restorePending();
   }
 
-  if (!/\nℹ tests ([1-9]\d*)/.test(out)) {
-    problems.push(`${testCase.label} —— 名字模式没匹配到任何测试，这条用例本身是空的`);
+  /**
+   * 判据：**有没有一条"非文件路径"的用例结果行**。
+   *
+   * 这一条是 2026-09-27（issue #86 第 0 刀）实测补上的，两版错判据都踩过：
+   * - `ℹ tests ≥ 1`（原判据）**恒真**：名字模式一条都没选中时，Node 会把**测试文件本身**
+   *   当成一条通过的用例打出来（`✔ tests\unit\xx.test.mjs (141ms)`）且 `ℹ tests` 仍是 1
+   *   ⇒ "模式写错了"被读成"撤掉实现后仍然通过"，报出来的是一条**假绿灯**。当天就抓到一条
+   *   真的（我的 pattern 里 `计数 +1` 的 `+` 被当正则量词，0 条用例被选中）。
+   * - `ℹ suites ≥ 1`（我当时的第一版修法）**会误报**：全仓 e2e 里有整个文件都是顶层
+   *   `test()` 的（`migrations-integrity.test.mjs` 七个用例全顶层），它们配对成功时
+   *   `ℹ suites` 就是 0 ⇒ 把两条**活着**的用例报成"空的"。同一天第二次踩到，这次是假警。
+   * 真正的区别在结果行的**名字**：没选中时那唯一一行就是文件路径本身。
+   */
+  const realResults = out
+    .split('\n')
+    .filter((line) => /^\s*[✔✖]\s/.test(line))
+    .filter((line) => !/^\s*[✔✖]\s+\S*\.mjs\s*\(/.test(line));
+  const fileLevelFailure = /^\s*✖\s+\S*\.mjs\s*\(/m.test(out);
+  if (fileLevelFailure) {
+    problems.push(
+      `${testCase.label} —— 撤掉实现后测试文件本身跑不起来（多半是撤出了语法错误），这条用例不成立`,
+    );
+  } else if (realResults.length === 0) {
+    problems.push(
+      `${testCase.label} —— 名字模式没匹配到任何测试（只跑到了测试文件本身），这条用例本身是空的`,
+    );
   } else if (/\nℹ fail ([1-9]\d*)/.test(out)) {
     red += 1;
     console.log(`红 ✓ ${testCase.label}`);

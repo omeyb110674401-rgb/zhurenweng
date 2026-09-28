@@ -1,5 +1,6 @@
 
 import type { LlmPort, StructuredSummary, SummaryChannel, SummaryChannelKind } from './ports.ts';
+import type { SummaryDiagnostics } from './summary-diagnostics.ts';
 
 /**
  * AI 摘要的领域形状（issue #4 建立，issue #55 重构为「参与导引」口径）——
@@ -145,6 +146,11 @@ export interface SummaryQuotes {
 /** LLM 适配器可返回的扩展形状：在 StructuredSummary 之上附带原文引用 */
 export interface QuotedStructuredSummary extends StructuredSummary {
   quotes?: SummaryQuotes;
+  /**
+   * 这次调用的诊断（issue #86 第 0 刀）：模型吐了什么、丢了什么、丢在哪一关。
+   * 与 `quotes` 同一种扩展手法 —— 端口形状（ports.ts）是并行切片共享的接缝，不动它。
+   */
+  diagnostics?: SummaryDiagnostics;
 }
 
 /** 单段引用片段的长度上限：超过视为异常输出，丢弃（引用应是短摘录）。 */
@@ -239,12 +245,40 @@ export function findDraftSourceForQuote<T extends { name: string; url: string; t
  * 也会全部丢弃 —— 于是「页面上出现了条文要点」这件事，只有在附件正文真的进了
  * 提示词时才成立，这条不变量不依赖提示词措辞是否被模型遵守。
  */
+/**
+ * 反查阶段"丢在哪一关"的计数（issue #86 第 0 刀）。
+ *
+ * 只记一类，因为这一关只做一件事：把引用拿到本轮**真的喂进去**的文本里去找。
+ * 找不到就丢（那是 `findDraftSourceForQuote` 返回 null 的唯一含义），所以只有一种原因，
+ * 不需要编第二个类别 —— 而"丢在哪一关"这个信息本身，正是 #79 当初缺的那个。
+ */
+export interface VerifyTally {
+  /** 引用在本轮喂进去的条文 / 说明里反查不到出处，整条被丢弃 */
+  quoteNotFound: number;
+}
+
 export function buildQuotedSummary(
   summary: StructuredSummary,
   quotes?: SummaryQuotes,
   draftSources?: { name: string; url: string; text: string; role?: 'draft' | 'explanation' | 'other' }[],
   explanationSections?: number | null,
 ): QuotedSummary {
+  return buildQuotedSummaryWithTally(summary, quotes, draftSources, explanationSections).summary;
+}
+
+/**
+ * 与 `buildQuotedSummary` 同一份实现，额外把"反查掉了多少条"交出来（issue #86 第 0 刀）。
+ *
+ * 为什么是"同一份实现 + 多一个出口"而不是另写一个计数函数：另写一遍就是让条数上限与
+ * 反查判据存在第二份实现，而两份实现漂移的表现是**诊断说没丢、实际丢了** ——
+ * 那恰好是这个功能要消灭的那类静默（#79 的整个教训）。
+ */
+export function buildQuotedSummaryWithTally(
+  summary: StructuredSummary,
+  quotes?: SummaryQuotes,
+  draftSources?: { name: string; url: string; text: string; role?: 'draft' | 'explanation' | 'other' }[],
+  explanationSections?: number | null,
+): { summary: QuotedSummary; tally: VerifyTally } {
   // 段落隔离（issue #76 第 3 刀）：条文侧的引用只在条文里反查，说明侧只在说明里。
   // 不这么做，"摘自官方原文"这句话就会被一句其实来自编制说明的话撑起 ——
   // 那是对规定的解释，不是规定本身，读者按"条文"去读会读错。
@@ -254,6 +288,7 @@ export function buildQuotedSummary(
   const quotePoints = Array.isArray(quotes?.keyPoints) ? (quotes.keyPoints as (string | null)[]) : [];
   const text = (value: unknown): string =>
     typeof value === 'string' ? value.trim() : '';
+  const tally: VerifyTally = { quoteNotFound: 0 };
 
   const keyPoints: QuotedDraftPoint[] = [];
   rawPoints.forEach((point, index) => {
@@ -263,35 +298,52 @@ export function buildQuotedSummary(
     const source = findDraftSourceForQuote(quote, draftSide);
     // 反查不到 ⇒ 这条要点没有可核对的出处（模型改写了原文，或从公告壳里"提炼"出条文）。
     // 丢弃而不是照登：详情页那句「摘自官方原文」不该为一条核对不上的话背书。
-    if (source === null) return;
+    if (source === null) {
+      // 空文本条目在上一步就返回了，没走到这里 —— 所以这一计数只统计"反查失败"，
+      // 不会把"模型给了个空要点"混进来（那是归一化阶段的 emptyOrInvalid）
+      tally.quoteNotFound += 1;
+      return;
+    }
     keyPoints.push({ text: pointText, quote, source: source.name, sourceUrl: source.url });
   });
 
+  const explanationPoints = buildExplanationPoints(summary, explanationSide, tally);
+
   return {
-    what: { text: text(summary.what), quote: cleanQuote(quotes?.what) },
-    who: { text: text(summary.who), quote: cleanQuote(quotes?.who) },
-    whoCanSubmit: { text: text(summary.whoCanSubmit), quote: cleanQuote(quotes?.whoCanSubmit) },
-    afterDeadline: { text: text(summary.afterDeadline), quote: cleanQuote(quotes?.afterDeadline) },
-    keyPoints,
-    explanationPoints: buildExplanationPoints(summary, explanationSide),
-    explanationSections: explanationSections ?? null,
-    deadline: {
-      text:
-        summary.deadline === null || summary.deadline === undefined
-          ? null
-          : text(summary.deadline) || null,
-      quote: cleanQuote(quotes?.deadline),
+    summary: {
+      what: { text: text(summary.what), quote: cleanQuote(quotes?.what) },
+      who: { text: text(summary.who), quote: cleanQuote(quotes?.who) },
+      whoCanSubmit: { text: text(summary.whoCanSubmit), quote: cleanQuote(quotes?.whoCanSubmit) },
+      afterDeadline: { text: text(summary.afterDeadline), quote: cleanQuote(quotes?.afterDeadline) },
+      keyPoints,
+      explanationPoints,
+      explanationSections: explanationSections ?? null,
+      deadline: {
+        text:
+          summary.deadline === null || summary.deadline === undefined
+            ? null
+            : text(summary.deadline) || null,
+        quote: cleanQuote(quotes?.deadline),
+      },
+      howToComment: { text: text(summary.howToComment), quote: cleanQuote(quotes?.howToComment) },
+      channels: normalizeChannels(summary.channels, quotes?.channels),
     },
-    howToComment: { text: text(summary.howToComment), quote: cleanQuote(quotes?.howToComment) },
-    channels: normalizeChannels(summary.channels, quotes?.channels),
+    tally,
   };
 }
 
 /**
- * 说明要点：引用必须落在说明类附件里；小节标题没抄对也保留（不影响可核对性）。 */
+ * 说明要点：引用必须落在说明类附件里；小节标题没抄对也保留（不影响可核对性）。
+ *
+ * `tally` 只统计**反查失败**（`quoteNotFound`）。上面那两处 `continue`（缺引用 / 缺正文）
+ * 刻意不记在这里：它们属于归一化阶段的 `emptyOrInvalid`，而这个函数在人工录入那条路上
+ * 也会被调用 —— 把两种原因混进同一个计数器，就会让"模型改写了原文"和"模型给了个空条目"
+ * 变得无法区分，而这两件事的处置完全不同。
+ */
 function buildExplanationPoints(
   summary: StructuredSummary,
   explanationSources: { name: string; url: string; text: string; role?: 'draft' | 'explanation' | 'other' }[],
+  tally: VerifyTally,
 ): QuotedExplanationPoint[] {
   const raw = Array.isArray(summary.explanationPoints) ? summary.explanationPoints : [];
   const out: QuotedExplanationPoint[] = [];
@@ -303,7 +355,10 @@ function buildExplanationPoints(
     const heading = typeof point.heading === 'string' ? point.heading.trim() : '';
     if (quote === null || text === '') continue;
     const source = findDraftSourceForQuote(quote, explanationSources);
-    if (source === null) continue;
+    if (source === null) {
+      tally.quoteNotFound += 1;
+      continue;
+    }
     out.push({ heading, text, quote, source: source.name, sourceUrl: source.url });
   }
   return out;
