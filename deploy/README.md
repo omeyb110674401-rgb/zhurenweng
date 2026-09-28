@@ -57,6 +57,14 @@ docker compose up -d worker          # 让常驻容器也换到新镜像，否�
 
 ## 其他文件
 
+- `run-probe-public-impacts.sh` —— **只读实验的启动器**（issue #86 第十三节）：把**未部署**的源码
+  （`src/lib/attachment-feed.ts`、适配器、worker 等）从 `/tmp/zw-probe` **只读挂进**一次性 worker
+  容器，跑 `scripts/probe-public-impacts.mjs` —— 它用生产那份适配器与反查实现，在真实的
+  公众广域条目上打印"如果现在部署，读者会看到什么"，**一条都不写库**。
+  用法：先把文件推到 `/tmp/zw-probe`（`sha256` 逐个核对），再 `sh /tmp/zw-probe/deploy/run-probe-public-impacts.sh [--id <前缀> | --limit N]`，
+  输出在 `/tmp/zw-probe/out.txt`（后台跑，`tail` 它）。
+  **不要把它挂进 `/opt/zhurenweng`** —— 那个目录是下一次 `build` 会捡起来的位置，
+  往那儿放没复核过的代码等于悄悄部署
 - `Caddyfile` —— 反向代理与证书（见 `docs/deploy.md` 第 5 节）
 - `daily-backup.sh` —— **每日备份 + 恢复校验**（服务器上由 root crontab 触发）：导出 `-Fc`
   归档后把它**真的恢复进临时库**并比对 6 项计数，对不上非零退出；保留 7 份。
