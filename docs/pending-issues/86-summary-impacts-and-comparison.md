@@ -839,3 +839,43 @@ tsc / eslint 干净。
    我先把它写成**单独一条用例**，于是 pin 的 `pattern` 只选中了老的那条（措辞不同），
    撤掉实现照样不红 ⇒ 最终把它**并进同一条用例**。**"指对了文件、指错了用例"这一族到此第四次**
    （#83 pattern 当量词、#86 第 0 刀判据恒真、第 2 刀靶点不在同一路径、这次 pattern 只选中一半）。
+
+---
+
+## 十五、部署清单（**待授权执行**，2026-09-27 现算）
+
+这一批要上的是第 0 / 1 / 2 / 3 刀与第十四节两处修正。**清单不是估的**：
+把本地 deploy 面的 265 个跟踪文件算成 sha256 清单，与生产 `/opt/zhurenweng` 逐文件对拍
+（只读、只算哈希），结果是 **same=229 / diff=23 / missing=13** ⇒ 要同步的就是那 36 个，
+落在 [`deploy/sync-list-86.txt`](../../deploy/sync-list-86.txt)。
+
+几个当场看出来的事实：
+
+- **`package.json` / `package-lock.json` 不在差异里** ⇒ 依赖没动，构建能命中缓存（#84 那次
+  `npm ci` 半小时的坑不会重演）。
+- **`drizzle/{postgres,sqlite}/0019_add_summary_diagnostics.sql` 是 missing** ⇒ 第 0 刀那条迁移
+  **一次都没上过线**，`notices.summary_diagnostics_json` 这一列在生产上还不存在。
+- **`src/lib/summary-diagnostics.ts`、`change-coverage.ts`、`impact-display.ts`、`attachment-feed.ts`
+  都是 missing** ⇒ 前三刀与第十四节的代码确实一条都没进过镜像（`src/app/admin/review/route.ts`
+  与 `src/lib/summary-basis.ts` 的差异来自更早的轮次，一并带上）。
+
+**顺序**（第 5 步与第 6 步的先后是有理由的，见 14.1）：
+
+| # | 动作 | 判据 / 备注 |
+| --- | --- | --- |
+| 0 | 备份：`deploy/daily-backup.sh`（或手动 dump）并记下当前镜像 ID | 恢复校验 6 项计数全过才算备份成功 |
+| 1 | 同步 36 个文件（`deploy/sync-files-local.sh` 或 `zw-sync.ps1`，逐个 sha256 对拍） | 36/36 OK；对拍用的清单就是上面那份 |
+| 2 | `docker compose build worker web` | **依赖没动** ⇒ 只重建代码层（上一次那 30 分钟的 `npm ci` 不会再发生） |
+| 3 | `docker compose up -d` | 迁移 **在应用首连时自动应用**（README 第 234 行），所以这一步就会把 0019 落库。判据两条：journal 从 19 项变 **20 项**（新增 idx 19），且 `\d notices` 里**看得到 `summary_diagnostics_json`** —— 这一列在生产上还不存在（第 0 刀从未上线） |
+| 4 | **回填受众面**：`docker compose run --rm worker node scripts/tag-notice-audience.mjs --apply` | 预期"拟写入 9"，其中 **3 条 `public → sector`**（那三份方法标准），分桶 public 42→39 |
+| 5 | **重跑未截止的公众广域摘要**：`scripts/reset-summaries-for-redraft.mjs --ids 41f2e22edef76d7e,954dcc1763249045,9bd5718592f32ab6,39a2f5f2e4ed3e34 --apply` | 先备份（脚本会把旧摘要连模型名一起打到 stdout）。这一批的产出有第十三节的样本可对照（判读 1–3 条、改动 0–8 行）。**4 必须早于 5**，否则那三份方法标准会按重档白跑一遍 |
+| 6 | 人工过一遍：`docker compose run --rm worker node scripts/show-notice-summary.mjs` | 这是用户拍板的验收门（"只公众广域 + 人工过一遍"）。它读的是**已落库**的产物（不是探针那种预演），并按页面的渲染判据打印「可能的争议点」与「改了哪几处」。**必须在第 3 步之后跑** —— 它 select 的 `summary_diagnostics_json` 由迁移 0019 建立 |
+
+第 5 步那四个 id 是**现算的**（`deploy/audit-review-selection.sql` 只读跑了一遍）：
+"有摘要 + 未截止 + 公众广域"恰好 4 条（`--all-open` 时 63 条）。同一次查询还独立确认了
+**`summary_diagnostics_json` 在生产上确实不存在**（`column does not exist`）——
+与第 1 步那份哈希对拍互相印证：第 0 刀那条迁移一次都没上过线。
+
+**回滚**：代码侧 `git` 回到上一批（宿主机树 + 重新 `build` + `up -d`）；数据侧这一批**不删任何列**，
+新增的 `summary_diagnostics_json` 只是多一列可空；重跑摘要前脚本已把旧摘要打出来（stdout 的
+`#BACKUP` 行是权威，#67 那次 `compose run` 把文件删了，所以别指望文件）。
