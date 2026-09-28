@@ -6,6 +6,7 @@ import { after, before, describe, it } from 'node:test';
 import Database from 'better-sqlite3';
 
 import { describeDiagnostics, parseSummaryDiagnostics } from '../../src/lib/summary-diagnostics.ts';
+import { countChangeMarkers } from '../../src/lib/change-coverage.ts';
 
 /**
  * 端到端（issue #76 起步，issue #85 起只剩"体裁 + 编制说明要点"这两半）：
@@ -505,6 +506,7 @@ describe('issue #86：摘要调用的诊断随摘要落库', () => {
       explanationPoints: json.explanationPoints.length,
       channels: json.channels.length,
       impacts: json.impacts.length,
+      changes: json.changes.length,
     });
   });
 
@@ -572,5 +574,51 @@ describe('issue #86：影响判读落库时每条都挂着可核对的原文', (
     if (parsed.instrumented) {
       assert.ok(parsed.emitted.impacts >= parsed.kept.impacts, '吐出的条数不可能少于落库的条数');
     }
+  });
+});
+
+/**
+ * issue #86 第 2 刀：「改了哪几处」走完真实链路。
+ *
+ * 这一段是**重建**（#85 删过、#86 按实测装回来），所以这里钉的不只是"能产出"，
+ * 还有**与旧实现不同的那几处地基**：引用池是全部附件（不含 role 过滤）、
+ * 不再有体裁门控、覆盖度分母从全文算。
+ */
+describe('issue #86：改动点落库（引用池与覆盖度分母）', () => {
+  it('改动点落库了，每行都有逐字引用与程序反查出来的出处', () => {
+    const { json } = readSummary(AMENDED_ID);
+    assert.ok(json.changes.length > 0, '给了带改动词的正文就该有改动点');
+    for (const change of json.changes) {
+      assert.ok(
+        containsVerbatim(`${AMENDED_TEXT}\n${EXPLANATION_TEXT}`, change.quote),
+        `改动点的引用必须逐字来自喂进去的附件：${change.quote}`,
+      );
+      assert.ok(change.source, '出处由程序反查，不许为空');
+      assert.ok(change.text.length > 0);
+    }
+  });
+
+  it('覆盖度分母数的是全文，不是喂进去的那一截（且不小过表里的行数）', () => {
+    const { json } = readSummary(AMENDED_ID);
+    const expected = countChangeMarkers(`${AMENDED_TEXT} ${EXPLANATION_TEXT}`);
+    assert.ok(json.changeMarkers, '分母要落库，否则页面那行覆盖度说不了话');
+    assert.equal(json.changeMarkers.total, expected.total, '与 countChangeMarkers 同一判据');
+    assert.ok(
+      json.changes.length <= json.changeMarkers.total,
+      '表里的行数不可能多过正文里数得到的表述数（多了就是模型在编）',
+    );
+  });
+
+  it('体裁不门控产品形状：打包清单同样能产出改动点（#79 那个空栏的成因已移除）', () => {
+    const { json } = readSummary(PACKAGE_ID);
+    // 这条是**为这件事专门造的夹具**：体裁 package_plan，而附件是一份标准的修订对照文本。
+    // 旧的 `genre !== 'amendment'` 那道门会把它的改动点全部清空（随之而来的就是 #79 那个
+    // "标题写着改动点、正文说没检测到"的空栏）。今天的判据是"有没有可核对的依据"。
+    assert.equal(readGenre(PACKAGE_ID).genre, 'package_plan', '前提：它确实不是修正案');
+    assert.ok(
+      json.changes.length > 0,
+      '判据是"有没有可核对的依据"，不是"体裁标签等不等于修正案"',
+    );
+    assert.ok(json.changes[0].source, '每行仍要由程序反查出出处');
   });
 });

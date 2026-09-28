@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react';
 import { explanationCoverageVerdict } from '@/lib/explanation-coverage';
+import { CHANGE_KIND_LABELS, changeCoverageVerdict } from '@/lib/change-coverage';
 
 import { safeParseJson, type NoticeRecord } from '@/db/types';
 import {
@@ -143,7 +144,9 @@ export function SummaryView({
     summary.keyPoints.length > 0 || summary.explanationPoints.length > 0;
   /** 影响判读只对「公众广域」渲染（门控理由见上面那一块），底部那句说明要与它同源 */
   const hasImpacts = summary.impacts.length > 0 && notice.audience === 'public';
-  const hasAttachmentPoints = hasClausePoints || hasImpacts;
+  /** 「改了哪几处」不设受众面门控：它是**事实**（每行都挂着可核对的原文），不是推断 */
+  const hasChanges = summary.changes.length > 0;
+  const hasAttachmentPoints = hasClausePoints || hasImpacts || hasChanges;
   const provenance = summaryProvenance({
     attachment: attachmentReport ?? null,
     hasAttachmentPoints,
@@ -201,20 +204,71 @@ export function SummaryView({
         ) : null}
 
         {/*
-         * 「改动点」表格已于 2026-09-27 删除（issue #85）。
+         * 「改了哪几处」（issue #86 第 2 刀）—— 这一段是**重建**，不是新功能。
          *
-         * 这一段曾经是修正案的正面回答：读者要知道"改了哪几处"，页面就列出条款、类型、
-         * 一句话说明与逐字原文，并在上面给一行覆盖度（"正文里检测到 N 处，本页列出 M 处"）。
+         * 同样的内容 #76 实现过、上过线，2026-09-27 被整体删除（issue #85），判据是
+         * "它从来没有产出过"。**那个判据是错的**（86-*.md 第九节）：那 5 条候选从来没有被带
+         * 这段代码的版本重跑过（两批不同的"5 条"被当成了一批），用旧提示词重跑金丝雀**一次
+         * 就吐出 10 条、8 条通过逐字反查**。所以它回来了，但**地基换了三处**：
+         * ① 引用可以在**任何一份**喂进去的附件里反查（旧实现只认条文侧，而实测显示法律修正
+         *    草案的对照句在正文、住建部那批在编制说明 —— 只认一侧白丢一半）；
+         * ② **不再按体裁门控**（`genre !== 'amendment'` 那道门是 #79 那个空栏的成因之一），
+         *    改判据为"有没有可核对的依据"：一行都没反查到就整块不渲染；
+         * ③ 校验器容忍省略号（实验量到 20% 的产出丢在那儿）。
          *
-         * **⚠️ 2026-09-27 更正：删它的判据是错的，见 `86-*.md` 第九节。** 当时写的是
-         * "它从来没有产出过（5 条候选点名重跑后仍是 0 条）"，而实测是：那 5 条候选**从来没有
-         * 被带这段代码的版本重跑过**（它们的摘要里连 `explanationPoints` 键都没有），
-         * 用旧提示词重跑金丝雀**一次就吐出 10 条、8 条通过逐字反查** —— 两批不同的"5 条"
-         * 被当成了一批。**是否恢复成单独一节由用户定**；本轮（#86 第 1 刀）先补的是
-         * 它真正缺的那一半：影响判读（下面那一块）。
-         *
-         * 编制说明要点**留着**（下面那一块）：它在生产上真的渲染出来过（金丝雀 2 条）。
+         * 最后一列是**逐字原文**，与左边的说明同屏 —— 说明本身不可核对（那是模型对着原句
+         * 写的一句话），所以绝不让它脱离原文单独成立。覆盖度那行说清"检测到 N 处、本页列出
+         * M 处"，那个差值是本站读得不够，不是读者看错了。
          */}
+        {(() => {
+          const changes = summary.changes;
+          if (changes.length === 0) return null;
+          return (
+            <div className="summary-section" data-testid="summary-changes">
+              <h2 className="summary-section-title">改了哪几处</h2>
+              {summary.changeMarkers ? (
+                <p className="summary-section-note" data-testid="summary-change-coverage">
+                  {changeCoverageVerdict(changes.length, summary.changeMarkers).detail}
+                </p>
+              ) : null}
+              <div
+                className="stat-table-wrap"
+                role="region"
+                tabIndex={0}
+                aria-label="改动点表（窄屏可横向滚动）"
+              >
+                <table className="stat-table" data-testid="summary-change-table">
+                  <thead>
+                    <tr>
+                      <th scope="col">条款</th>
+                      <th scope="col">类型</th>
+                      <th scope="col">改了什么</th>
+                      <th scope="col">原文（本站逐字摘录）</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {changes.map((change, index) => (
+                      <tr key={index}>
+                        {/* 原文没写条号时留一个破折号，而不是空着 —— 空格子看起来像渲染坏了 */}
+                        <th scope="row">{change.clause === '' ? '—' : change.clause}</th>
+                        <td>{CHANGE_KIND_LABELS[change.kind]}</td>
+                        <td>{change.text}</td>
+                        <td>
+                          <p>{change.quote}</p>
+                          <p className="draft-point-source" data-testid="summary-change-source">
+                            {change.source
+                              ? `出处：附件《${change.source}》（本站从附件逐字提取，未做改写）`
+                              : '出处：未标注（这条的引用没能反查到本轮喂入的附件）'}
+                          </p>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          );
+        })()}
 
         {/*
          * 可能的争议点（issue #86 第 1 刀）—— 全站**唯一一段推断**内容。
@@ -349,6 +403,11 @@ export function SummaryView({
             <>
               上方「草案条文要点」摘自<b>本站从随文附件里逐字读取的条文</b>（{draft.files} 份 /
               约 {draft.chars} 字），条文本身以下方附件与官方原文为准。
+            </>
+          ) : hasChanges ? (
+            <>
+              上方「改了哪几处」表格里的原文，摘自<b>本站从随文附件里逐字读取的正文</b>
+              （{draft.files} 份 / 约 {draft.chars} 字）；条文本身以下方附件与官方原文为准。
             </>
           ) : hasImpacts ? (
             <>

@@ -1,4 +1,5 @@
 import { createGlmLlm } from './adapters/glm-llm.ts';
+import type { ChangeKind } from './change-coverage.ts';
 import { createOpenAiLlmFromEnv } from './adapters/openai-compatible-llm.ts';
 import { StubLlm } from './adapters/stubs/stub-llm.ts';
 import { StubMailer } from './adapters/stubs/stub-mailer.ts';
@@ -83,6 +84,33 @@ export interface StructuredSummary {
    * 据此作出的推断"，两者同屏，由读者自己判断 —— 这是政务 + AI 这个敏感面上唯一站得住的做法。
    */
   impacts?: AmendmentImpactDraft[];
+  /**
+   * 「改了哪几处」（issue #86 第 2 刀；同一份内容 issue #76 实现过、#85 误删）。
+   *
+   * 与 `impacts` 的分工：这一段是**事实**，回答"这一稿把哪几条改成了什么"，每一行都要求
+   * 挂一条逐字原文（反查不到整行丢弃），所以页面把最后一列写成「原文（本站逐字摘录）」；
+   * `impacts` 是**推断**，回答"这可能意味着什么"。**先有事实，再有推断** —— 页面上也是这个顺序。
+   */
+  changes?: AmendmentChangeDraft[];
+}
+
+/**
+ * 一条改动（issue #86 第 2 刀）。
+ *
+ * 为什么没有「原规定 → 拟改为」两列：**修正草案里通常只有新写法**（"一、将第三十六条修改为：…"），
+ * 旧文本压根不在任何一份附件里，硬要两列就只能编一个"原规定"。官方自己写出两边的场合
+ * （如说明里的「将"贫困地区"修改为"欠发达地区"」）已经由 `quote` 那一列原样呈现了 ——
+ * 读者在逐字原文里看得到完整的对照，而本站不去替它拆句。
+ */
+export interface AmendmentChangeDraft {
+  /** 被改条款标识，照抄原文写法（如「第三十六条」「附录A」），不要改写编号 */
+  clause: string;
+  /** 改动类型；认不出的值落 `other`。类型定义在 `change-coverage.ts`（白名单与标签同一处） */
+  kind: ChangeKind;
+  /** 这一处改了什么：一句话，40 字以内 */
+  text: string;
+  /** 逐字原文（可含省略号，但每一截都要逐字）：描述这处改动的那句官方文字 */
+  quote: string;
 }
 
 /**

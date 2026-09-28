@@ -8,6 +8,7 @@ import type {
   StructuredSummary,
 } from '../../ports.ts';
 import { explanationSectionLines } from '../../explanation-coverage.ts';
+import { countChangeMarkers } from '../../change-coverage.ts';
 import type { QuotedStructuredSummary, SummaryQuotes } from '../../summary-content.ts';
 
 /**
@@ -159,6 +160,24 @@ export class StubLlm implements LlmPort {
         });
       }
       if (impacts.length > 0) summary.impacts = impacts;
+    }
+    // 改动点（issue #86 第 2 刀）：只在附件里真的出现**可计数的**改动表述时才回响
+    // （`countChangeMarkers` —— 与页面那行覆盖度用的是同一个判据，所以 stub 回响的行数
+    // 与分母同源，不会出现"分母数不到、表里却有"的假象）。quote 逐字取那一整行，
+    // 于是"表格里每一行都能反查到原文"在测试里走的是真路径。
+    if (draft.length > 0) {
+      const lines = draft
+        .flatMap((source) => source.text.split('\n').map((line) => line.trim()))
+        .filter((line) => line.length > 8 && countChangeMarkers(line).total > 0)
+        .slice(0, 3);
+      if (lines.length > 0) {
+        summary.changes = lines.map((line, index) => ({
+          clause: `【stub】第 ${index + 1} 处`,
+          kind: line.includes('删去') ? 'delete' : line.includes('增加一条') ? 'add' : 'modify',
+          text: `【stub】改动 ${index + 1}：${line.slice(0, 18)}…`,
+          quote: line,
+        }));
+      }
     }
     return summary;
   }

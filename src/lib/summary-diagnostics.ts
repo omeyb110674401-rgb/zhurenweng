@@ -35,13 +35,15 @@ export const SUMMARY_DIAGNOSTICS_VERSION = 1;
  */
 export const RAW_OUTPUT_KEEP_CHARS = 20_000;
 
-/** 四类数组字段的条数（模型吐出 / 归一化 / 真的落库，三个阶段各记一次）。 */
+/** 五类数组字段的条数（模型吐出 / 归一化 / 真的落库，三个阶段各记一次）。 */
 export interface SummaryFieldCounts {
   keyPoints: number;
   explanationPoints: number;
   channels: number;
   /** 可能的影响（issue #86 第 1 刀）：与两个要点字段一样要过逐字反查，所以它也满足那条等式 */
   impacts: number;
+  /** 「改了哪几处」（issue #86 第 2 刀）：同样过逐字反查 */
+  changes: number;
 }
 
 /**
@@ -112,7 +114,7 @@ export interface SummaryDiagnostics {
 }
 
 export function emptyFieldCounts(): SummaryFieldCounts {
-  return { keyPoints: 0, explanationPoints: 0, channels: 0, impacts: 0 };
+  return { keyPoints: 0, explanationPoints: 0, channels: 0, impacts: 0, changes: 0 };
 }
 
 export function emptyDroppedCounts(): SummaryDroppedCounts {
@@ -171,6 +173,7 @@ function fieldCountsOr(value: unknown): SummaryFieldCounts {
     explanationPoints: countOr(record.explanationPoints),
     channels: countOr(record.channels),
     impacts: countOr(record.impacts),
+    changes: countOr(record.changes),
   };
 }
 
@@ -287,11 +290,15 @@ export function describeDiagnostics(diagnostics: SummaryDiagnostics): string {
     if (emitted.impacts > 0 || kept.impacts > 0) {
       parts.push(`影响判读 ${kept.impacts}/${emitted.impacts}`);
     }
+    if (emitted.changes > 0 || kept.changes > 0) {
+      parts.push(`改动点 ${kept.changes}/${emitted.changes}`);
+    }
   } else {
     // 端口没上报时**不写分母**：那个数现在谁都不知道，写成 `3/0` 会被读成"模型吐了 0 条"，
     // 而这两个事实处置相反（一个是模型的问题，一个是没量具）
     parts.push(`落库条文要点 ${kept.keyPoints} 条 / 说明要点 ${kept.explanationPoints} 条`);
     if (kept.impacts > 0) parts.push(`影响判读 ${kept.impacts} 条`);
+    if (kept.changes > 0) parts.push(`改动点 ${kept.changes} 条`);
     parts.push('端口未上报响应细节（只有落库条数可信）');
   }
   if (lost > 0) {

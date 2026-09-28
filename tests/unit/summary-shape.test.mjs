@@ -67,23 +67,29 @@ describe('摘要形状：旧行向后兼容（重刷窗口内不得掉回占位�
   });
 
   /*
-   * issue #85：「改动点」功能（`changes` / `changeMarkers` 两个键）已整体删除，
-   * 而**生产库里那一批摘要还带着这两个键** —— 解析必须照常成功、只是不再把它们带出来。
-   * 这是"删功能"最容易漏的一步：只删写入侧，读侧遇到多余的键就报形状异常，
-   * 于是存量条目在页面上从「有摘要」掉回「待人工复核」占位，而没有任何东西会提醒你。
+   * issue #85 曾把「改动点」（`changes` / `changeMarkers` 两个键）整体删除，当时这条用例
+   * 钉的是"旧行带着已删除的键也要能解析、且不许把它们带出来"。
+   *
+   * **issue #86 第 2 刀把这一段按实测装回来了**（#85 的删除判据是错的：那 5 条候选从来没有
+   * 被带那段代码的版本重跑过，用旧提示词重跑金丝雀一次就吐出 10 条、8 条通过逐字反查）。
+   * 于是这条用例**反过来**钉同一件事的两面：
+   * ① **旧的落库形状今天必须被读出来**（生产库里真有 5 行是这个形状，读不出来它们就白屏）；
+   * ② 解析器对**多余的**键仍然宽容 —— 那是 #85 留下的、与功能存废无关的那条纪律。
    */
-  it('旧行带着已删除的改动点键也要能解析（键多余不是形状异常）', () => {
-    const withDeadKeys = parseQuotedSummary({
+  it('旧的改动点落库形状照常解析出来，多余的键也不报形状异常', () => {
+    const withLegacyKeys = parseQuotedSummary({
       ...LEGACY_SUMMARY,
       changes: [{ clause: '第二条', kind: 'modify', text: '改了什么', quote: '第二条修改为甲' }],
       changeMarkers: { total: 7, byKind: { modify: 4, add: 1, delete: 2, renumber: 0 } },
+      // 一个我们将来也不会认识的键：多余 ≠ 形状异常
+      someFutureKey: { whatever: true },
     });
-    assert.ok(withDeadKeys, '带已删除的键的行必须照常解析');
-    assert.equal(withDeadKeys.keyPoints.length, 2, '其余字段一个都不能少');
-    assert.ok(
-      !Object.hasOwn(withDeadKeys, 'changes') && !Object.hasOwn(withDeadKeys, 'changeMarkers'),
-      '删掉的功能不该从旧行里"复活"成解析结果的一部分',
-    );
+    assert.ok(withLegacyKeys, '带旧键（以及将来才有的键）的行必须照常解析');
+    assert.equal(withLegacyKeys.keyPoints.length, 2, '其余字段一个都不能少');
+    assert.equal(withLegacyKeys.changes.length, 1, '旧形状的改动点要读得出来（这一段回来了）');
+    assert.equal(withLegacyKeys.changes[0].quote, '第二条修改为甲');
+    assert.equal(withLegacyKeys.changeMarkers?.total, 7, '覆盖度分母也要读得出来');
+    assert.ok(!Object.hasOwn(withLegacyKeys, 'someFutureKey'), '不认识的键照旧不带出来');
   });
 });
 

@@ -383,7 +383,7 @@ describe('issue #86：读侧容错、截断与一句话摘要', () => {
     assert.equal(d.model, 'flash-x');
     assert.equal(d.instrumented, false);
     assert.equal(d.elapsedMs, null);
-    assert.deepEqual(d.kept, { keyPoints: 0, explanationPoints: 0, channels: 0, impacts: 0 });
+    assert.deepEqual(d.kept, { keyPoints: 0, explanationPoints: 0, channels: 0, impacts: 0, changes: 0 });
     assert.deepEqual(d.dropped, { emptyOrInvalid: 0, overLimit: 0, quoteNotFound: 0 });
   });
 
@@ -392,7 +392,7 @@ describe('issue #86：读侧容错、截断与一句话摘要', () => {
       model: 'flash-x',
       provider: 'openai',
       attempts: 2,
-      kept: { keyPoints: 1, explanationPoints: 2, channels: 3, impacts: 1 },
+      kept: { keyPoints: 1, explanationPoints: 2, channels: 3, impacts: 1, changes: 2 },
       quoteNotFound: 4,
     });
     assert.deepEqual(parseSummaryDiagnostics(JSON.parse(JSON.stringify(d))), d);

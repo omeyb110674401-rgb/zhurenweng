@@ -116,22 +116,26 @@ describe('issue #76：详情页体裁角标', () => {
   });
 
   /**
-   * issue #85：「改动点」整块功能已删（生产全库 `changes` 非空 **0 条** ⇒ 它从未渲染过），
-   * 但**库里那批摘要还带着 `changes` / `changeMarkers` 两个键**（删除之前生成的）。
-   * 所以"删功能"必须连**读侧**一起处理：解析照常成功、页面上一个字都不出现。
+   * issue #85 曾把「改动点」整块删掉（判据"它从未产出过"），而这个判据是错的 ——
+   * 那 5 条候选从来没有被带那段代码的版本重跑过（86-*.md 第九节）。**这一段已于
+   * issue #86 第 2 刀按实测重建**，所以这条用例**反过来**钉一件事：
+   * **#85 之前落库的旧键形状，今天必须还能原样渲染出来。**
    *
-   * 这条用例刻意**手工把两个键写回库**再取页面 —— 新摘要是不会再产生它们的，
-   * 不注入的话它测的就是一条不存在的路径（本仓库反复栽过的那种假绿灯）。
+   * 为什么值得单独钉：生产库里真有 5 行摘要带着这两个键（`changes` 数组 +
+   * `changeMarkers` 计数），它们是 #81 重跑那批留下的历史形状。重建时改了字段语义
+   * （引用池、类型白名单），读侧一旦不认旧形状，那 5 行就会从「有摘要」变成一栏空白 ——
+   * 而**没有任何东西会提醒你**（#85 第三节那条"删/改功能要连读侧一起处理"）。
+   * 注入而不是等生成：新摘要是不会自己长出这个夹具形状的（不注入就是测一条不存在的路径）。
    */
-  it('旧摘要里带着已删除的改动点键：摘要照常渲染，那一节不复活', async () => {
+  it('#85 之前落库的旧键形状今天照常渲染（那 5 行历史摘要不许变成空白）', async () => {
     const db = new Database(dbFile);
     try {
       const original = db
         .prepare('select ai_summary_json as json from notices where title = ?')
         .get(AMENDMENT_TITLE)?.json;
       assert.ok(original, '前提：这条要有摘要，否则下面测的是"没有摘要"那条路');
-      const withDeadKeys = JSON.parse(original);
-      withDeadKeys.changes = [
+      const withOldKeys = JSON.parse(original);
+      withOldKeys.changes = [
         {
           clause: '第二条',
           kind: 'modify',
@@ -141,9 +145,9 @@ describe('issue #76：详情页体裁角标', () => {
           sourceUrl: null,
         },
       ];
-      withDeadKeys.changeMarkers = { total: 3, byKind: { modify: 1, add: 1, delete: 1, renumber: 0 } };
+      withOldKeys.changeMarkers = { total: 3, byKind: { modify: 1, add: 1, delete: 1, renumber: 0 } };
       db.prepare('update notices set ai_summary_json = ? where title = ?').run(
-        JSON.stringify(withDeadKeys),
+        JSON.stringify(withOldKeys),
         AMENDMENT_TITLE,
       );
     } finally {
@@ -152,9 +156,46 @@ describe('issue #76：详情页体裁角标', () => {
 
     const html = await detailOf(AMENDMENT_TITLE);
     assert.match(html, /data-testid="ai-summary"/, '摘要卡片本身要在，排除"整页没渲染"这种假通过');
-    assert.ok(!html.includes('data-testid="summary-changes"'), '已删除的那一节不该因为旧键复活');
-    assert.ok(!html.includes('改动点'), '连标题都不该有 —— 有标题就等于向读者承诺了一栏内容');
-    assert.ok(!html.includes('第二条修改为'), '那一行的逐字原文同样不该被渲染出来');
+    assert.match(html, /data-testid="summary-changes"/, '这一段回来了：旧键要照常渲染');
+    assert.match(html, /data-testid="summary-change-table"/);
+    assert.ok(html.includes('改了哪几处'), '块标题');
+    assert.ok(html.includes('第二条修改为：从事前款活动应当取得许可。'), '那一行的逐字原文');
+    assert.ok(html.includes('出处：附件《某某法（修正草案征求意见稿）.docx》'), '出处照旧由程序算');
+    assert.match(html, /data-testid="summary-change-coverage"/, '覆盖度那行要跟着旧计数一起渲染');
+    assert.ok(html.includes('检测到 3 处'), '分母来自落库的 changeMarkers');
+    assert.ok(html.includes('本页列出 1 处'), '列得比数到的少就照实说少');
+  });
+
+  /**
+   * issue #79 的教训：**空壳比没有更坏**。一段"标题写着「改了哪几处」、内容却是空的"栏目，
+   * 传达的不是"这次没改动"，而是"这一栏没东西可看" —— 后者不该占一个标题。
+   * 所以判据是"一行都没有 ⇒ 整块不渲染"，而不是"计数为 0 就不渲染"。
+   */
+  it('一行改动都没有时整块不渲染（不是渲染成一张空表）', async () => {
+    const db = new Database(dbFile);
+    try {
+      const original = db
+        .prepare('select ai_summary_json as json from notices where title = ?')
+        .get(AMENDMENT_TITLE)?.json;
+      const cleared = JSON.parse(original);
+      cleared.changes = [];
+      cleared.changeMarkers = { total: 3, byKind: { modify: 1, add: 1, delete: 1, renumber: 0 } };
+      db.prepare('update notices set ai_summary_json = ? where title = ?').run(
+        JSON.stringify(cleared),
+        AMENDMENT_TITLE,
+      );
+    } finally {
+      db.close();
+    }
+
+    const html = await detailOf(AMENDMENT_TITLE);
+    assert.match(html, /data-testid="ai-summary"/);
+    assert.ok(!html.includes('data-testid="summary-changes"'), '一行都没有就不该有这一块');
+    assert.ok(!html.includes('改了哪几处'), '连标题都不出现');
+    assert.ok(
+      !html.includes('本页列出 0 处'),
+      '也不许用一句"列了 0 处"代替 —— 那是把"本站没读到"说成了一种结果',
+    );
   });
 });
 

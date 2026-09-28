@@ -1,4 +1,5 @@
 import type {
+  AmendmentChangeDraft,
   AmendmentExplanationDraft,
   AmendmentImpactDraft,
   DraftSource,
@@ -8,6 +9,7 @@ import type {
   SummaryChannel,
   SummaryChannelKind,
 } from '../ports.ts';
+import { CHANGE_KINDS, type ChangeKind } from '../change-coverage.ts';
 import {
   SUMMARY_CHANNEL_KINDS,
   type QuotedStructuredSummary,
@@ -83,7 +85,7 @@ const SYSTEM_PROMPT = [
   '重要背景：网页正文通常只是公告本身；草案条文、标准文本、名单在**附件**里，只有给了「附件条文」段落时你才真的看得到它们。',
   '因此：没有「附件条文」段落时，不要编写、推测或概括任何「条款内容」，只回答公告里真实存在的参与信息。',
   '请只输出一个 JSON 对象（不要输出任何解释、markdown 代码围栏或其他文字），字段如下：',
-  '{"what":"这是什么：一句话概括这份公示在做什么，40 字以内","who":"影响谁：只有原文明确写出受这份文件影响的主体时才写（如运输机场运营人、医疗器械注册人、标准起草单位）；原文只写「社会公众」「有关单位和个人」这类泛称时**留空字符串** —— 那是「谁能提」，不是「影响谁」。这类页面的正文通常不含受影响主体（它在附件的草案里），宁可留空也不要推断","whoCanSubmit":"谁能提：原文写明的可提出意见的主体或范围；原文未提及则留空字符串","afterDeadline":"逾期会怎样：原文写明超过截止日期后如何处理（如逾期视为无意见、不再受理）；原文未提及则留空字符串","keyPoints":["草案条文要点：仅当给出「附件条文」时填写，2-4 条从条文中读到的实质规定，每条一句话、40 字以内；没有附件条文段落时必须为空数组"],"explanationPoints":[{"heading":"照抄说明里的小节标题（如 一、项目概况）","text":"这一节说了什么：一句话，60 字以内","quote":"这一节的逐字原文，200 字以内"}],"impacts":[{"quote":"这一条/这一处的逐字原文（中间可以省略，但每一截都要逐字对得上）","who":"具体可能受影响的主体，写不出就留空字符串","text":"可能带来什么：一句话，60 字以内","kind":"risk|loophole|burden"}],"deadline":"截止日期：YYYY-MM-DD，原文未明确则为 null","howToComment":"如何提意见：一句话概述提交途径，40 字以内","channels":[{"kind":"email|phone|mail|online|other","value":"可直接使用的具体值"}],"quotes":{"what":"what 对应的原文引用片段（逐字摘录，不超过100字）","who":"who 对应的原文引用片段，留空时空字符串","whoCanSubmit":"谁能提对应的原文片段，没有则空字符串","afterDeadline":"逾期会怎样对应的原文片段，没有则空字符串","keyPoints":["与 keyPoints 一一对应的逐字条文原文，顺序严格一致，没有则为 null"],"deadline":"截止日期对应的原文引用片段","howToComment":"如何提意见对应的原文引用片段","channels":["每条渠道对应的原文片段，顺序与 channels 严格一致"]}}',
+  '{"what":"这是什么：一句话概括这份公示在做什么，40 字以内","who":"影响谁：只有原文明确写出受这份文件影响的主体时才写（如运输机场运营人、医疗器械注册人、标准起草单位）；原文只写「社会公众」「有关单位和个人」这类泛称时**留空字符串** —— 那是「谁能提」，不是「影响谁」。这类页面的正文通常不含受影响主体（它在附件的草案里），宁可留空也不要推断","whoCanSubmit":"谁能提：原文写明的可提出意见的主体或范围；原文未提及则留空字符串","afterDeadline":"逾期会怎样：原文写明超过截止日期后如何处理（如逾期视为无意见、不再受理）；原文未提及则留空字符串","keyPoints":["草案条文要点：仅当给出「附件条文」时填写，2-4 条从条文中读到的实质规定，每条一句话、40 字以内；没有附件条文段落时必须为空数组"],"explanationPoints":[{"heading":"照抄说明里的小节标题（如 一、项目概况）","text":"这一节说了什么：一句话，60 字以内","quote":"这一节的逐字原文，200 字以内"}],"impacts":[{"quote":"这一条/这一处的逐字原文（中间可以省略，但每一截都要逐字对得上）","who":"具体可能受影响的主体，写不出就留空字符串","text":"可能带来什么：一句话，60 字以内","kind":"risk|loophole|burden"}],"changes":[{"clause":"被改条款标识，照抄原文写法（如 第三十六条 / 附录A）","kind":"modify|add|delete|renumber|other","text":"这一处改了什么：一句话，40 字以内","quote":"描述这处改动的逐字原文，160 字以内"}],"deadline":"截止日期：YYYY-MM-DD，原文未明确则为 null","howToComment":"如何提意见：一句话概述提交途径，40 字以内","channels":[{"kind":"email|phone|mail|online|other","value":"可直接使用的具体值"}],"quotes":{"what":"what 对应的原文引用片段（逐字摘录，不超过100字）","who":"who 对应的原文引用片段，留空时空字符串","whoCanSubmit":"谁能提对应的原文片段，没有则空字符串","afterDeadline":"逾期会怎样对应的原文片段，没有则空字符串","keyPoints":["与 keyPoints 一一对应的逐字条文原文，顺序严格一致，没有则为 null"],"deadline":"截止日期对应的原文引用片段","howToComment":"如何提意见对应的原文引用片段","channels":["每条渠道对应的原文片段，顺序与 channels 严格一致"]}}',
   '要求：',
   '1. 只依据给定原文，不编造、不猜测；原文没有的字段留空字符串或 null，宁可留空也不要凑。',
   '2. 引用必须是原文中的逐字连续片段。',
@@ -101,6 +103,12 @@ const SYSTEM_PROMPT = [
   '   - kind 三选一：risk 可能的不利后果 / loophole 可能被规避、滥用或执行不到的地方 / burden 新增的义务、成本或门槛；',
   '   - **看不出影响就输出空数组**。把条文复述一遍（「规定了…」「明确了…」）不算影响，宁可空着；',
   '   - 这一段不要求你下结论，只要求你把「哪条原文 + 谁可能受影响 + 可能是什么」如实摆出来，让读者自己判断。',
+  '8. changes 回答"这一稿把哪几条改成了什么"（**事实**，与 impacts 的"可能意味着什么"是两回事）：',
+  '   - 每项都要带 quote，且 quote 必须是给定原文里的**逐字片段**（中间可以省略，但每一截都要逐字对得上）：本站拿它反查出处，反查不到的整行丢弃；',
+  '   - clause 照抄原文的条款写法（如「第三十六条」「附录A」），不要改写编号；kind 五选一；text 一句话、40 字以内；',
+  '   - 官方通常把改动写在同一句里（如「将第三十六条修改为：……」「删去第七条」「增加一条，作为第X条」），照原句摘出来，不要重述成你自己的话；',
+  '   - **只列你真在文本里看到的改动**。附件可能被本站按字数预算截断，看不到的部分就不要列，也不要写「等」「主要修改内容如下」来掩盖缺口 —— 正文里检测到多少处、本页列出多少处，那个差值是本站读得不够，不是你漏写；',
+  '   - 这份文件不是"修改现行法律、法规、规章或标准"时（全新制定的标准、名单、计划项目等），输出空数组。',
 ].join('\n');
 
 /** 已解析并校验通过的模型配置（工厂与门控共用）。 */
@@ -254,6 +262,7 @@ export function countModelOutput(raw: unknown): SummaryFieldCounts {
     explanationPoints: lengthOf('explanationPoints'),
     channels: lengthOf('channels'),
     impacts: lengthOf('impacts'),
+    changes: lengthOf('changes'),
   };
 }
 
@@ -336,6 +345,10 @@ export function normalizeModelSummary(raw: unknown, tally?: NormalizeTally): Quo
   // 逐字反查不到出处由 buildQuotedSummaryWithTally 负责丢弃。
   const impacts = normalizeImpacts(record.impacts, tally);
 
+  // 「改了哪几处」（issue #86 第 2 刀）：与影响判读同一套路 —— 形状不对的在这里丢掉，
+  // 逐字反查不到出处由 buildQuotedSummaryWithTally 负责丢掉整行。
+  const changes = normalizeChanges(record.changes, tally);
+
   const rawQuotes = readQuotes(record.quotes);
   // keyPoints 与它的引用必须**先按原始下标配好、再过滤空项** —— 这是 normalizeChannels
   // 的同一条教训（issue #56）：先 filter 再取引用，第 3 条要点就会挂上第 2 条的原句，
@@ -370,6 +383,7 @@ export function normalizeModelSummary(raw: unknown, tally?: NormalizeTally): Quo
     ...(keyPoints.length > 0 ? { keyPoints } : {}),
     ...(explanationPoints.length > 0 ? { explanationPoints } : {}),
     ...(impacts.length > 0 ? { impacts } : {}),
+    ...(changes.length > 0 ? { changes } : {}),
     deadline,
     howToComment,
     channels,
@@ -454,6 +468,51 @@ function normalizeImpacts(value: unknown, tally?: NormalizeTally): AmendmentImpa
       // 认不出的值落进 other 而**不是** risk：给一条判读贴上错的类型标签，
       // 比老实说"其他"更坏（读者按标签理解这一条是"不利后果"还是"负担"）
       kind: (IMPACT_KINDS as readonly string[]).includes(declared) ? (declared as ImpactKind) : 'other',
+    });
+  }
+  return out;
+}
+
+/**
+ * 一次摘要最多列多少处改动（issue #86 第 2 刀，沿用 #76 定的 40）。
+ * 再多就不是"给人看的表格"，是把正文重排一遍了；而每一行都要求挂一条逐字原文。
+ */
+const MAX_CHANGES = 40;
+
+/**
+ * 模型给的改动 → 端口形状。
+ *
+ * `quote` 与 `text` 缺一即丢：**没有原文的改动不许落库**（否则表格里会出现一行谁也核对不了的
+ * "改了哪几处"）。`clause` 允许空 —— 有些改动句本身没写条号（如「将相关条文中的…统一修改为…」），
+ * 页面那一格就空着，而不是让模型去补一个看起来很像的编号。
+ */
+function normalizeChanges(value: unknown, tally?: NormalizeTally): AmendmentChangeDraft[] {
+  if (!Array.isArray(value)) return [];
+  const out: AmendmentChangeDraft[] = [];
+  for (const item of value) {
+    if (out.length >= MAX_CHANGES) {
+      if (tally) tally.overLimit += 1;
+      continue;
+    }
+    if (typeof item !== 'object' || item === null) {
+      if (tally) tally.emptyOrInvalid += 1;
+      continue;
+    }
+    const change = item as Record<string, unknown>;
+    const quote = typeof change.quote === 'string' ? change.quote.trim() : '';
+    const text = typeof change.text === 'string' ? change.text.trim() : '';
+    if (quote === '' || text === '') {
+      if (tally) tally.emptyOrInvalid += 1;
+      continue;
+    }
+    const declared = typeof change.kind === 'string' ? change.kind.trim() : '';
+    out.push({
+      quote,
+      text,
+      clause: typeof change.clause === 'string' ? change.clause.trim() : '',
+      kind: (CHANGE_KINDS as readonly string[]).includes(declared)
+        ? (declared as ChangeKind)
+        : 'other',
     });
   }
   return out;
@@ -687,6 +746,7 @@ export class OpenAiCompatibleLlm implements LlmPort {
       explanationPoints: summary.explanationPoints?.length ?? 0,
       channels: summary.channels.length,
       impacts: summary.impacts?.length ?? 0,
+      changes: summary.changes?.length ?? 0,
     };
     return {
       ...summary,

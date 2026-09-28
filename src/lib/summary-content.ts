@@ -7,6 +7,7 @@ import type {
   SummaryChannelKind,
 } from './ports.ts';
 import type { SummaryDiagnostics } from './summary-diagnostics.ts';
+import { CHANGE_KIND_LABELS, type ChangeKind, type ChangeMarkerCount } from './change-coverage.ts';
 
 /**
  * AI 摘要的领域形状（issue #4 建立，issue #55 重构为「参与导引」口径）——
@@ -145,6 +146,29 @@ export interface QuotedImpactPoint {
 }
 
 /**
+ * 一处改动（issue #86 第 2 刀）—— 「改了哪几处」的那一行。
+ *
+ * 与「可能的争议点」的形状几乎一样，但**证据地位是反的**：这一整行都是**事实**，
+ * `quote` 是逐字原文、`source` 由程序反查，`clause` / `kind` / `text` 是对那一句官方文字的
+ * 分类与概括。页面把三者与原文排在同一行里给读者对照 —— 说明本身不可逐字核对，
+ * 所以绝不让它脱离原文单独成立（这条规矩是 #76 立的，重建时一个字没改）。
+ *
+ * 引用可以在**任何一份**喂进去的附件里反查：实测（86 号文档第九节）显示法律修正草案的
+ * 对照句在**正文**附件里（10 条引用全部命中条文侧），而住建部那批在**编制说明**里 ——
+ * 旧实现只认条文侧，那正是它白丢一半的原因之一。
+ */
+export interface QuotedAmendmentChange {
+  /** 被改条款标识（照抄原文写法；原文没写条号时为空串） */
+  clause: string;
+  kind: ChangeKind;
+  /** 一句话说明（≤40 字） */
+  text: string;
+  quote: string;
+  source: string | null;
+  sourceUrl: string | null;
+}
+
+/**
  * ai_summary_json 的落库形状。
  */
 export interface QuotedSummary {
@@ -160,6 +184,10 @@ export interface QuotedSummary {
   explanationPoints: QuotedExplanationPoint[];
   /** 可能的影响（issue #86 第 1 刀）：唯一允许推断的一段，每条都挂着可核对的原文 */
   impacts: QuotedImpactPoint[];
+  /** 「改了哪几处」（issue #86 第 2 刀）：全行都是事实，逐字可核对 */
+  changes: QuotedAmendmentChange[];
+  /** 全部附件正文里数到的改动表述数（覆盖度那句"共 N 处"的分母）；null = 没数过 */
+  changeMarkers: ChangeMarkerCount | null;
   /** 说明全文里检测到的小节数（覆盖度那行的分母，带"约"）；null = 没喂说明 */
   explanationSections: number | null;
   /** deadline.text 为 ISO 日期（YYYY-MM-DD）或 null */
@@ -341,8 +369,15 @@ export function buildQuotedSummary(
   quotes?: SummaryQuotes,
   draftSources?: { name: string; url: string; text: string; role?: 'draft' | 'explanation' | 'other' }[],
   explanationSections?: number | null,
+  changeMarkers?: ChangeMarkerCount | null,
 ): QuotedSummary {
-  return buildQuotedSummaryWithTally(summary, quotes, draftSources, explanationSections).summary;
+  return buildQuotedSummaryWithTally(
+    summary,
+    quotes,
+    draftSources,
+    explanationSections,
+    changeMarkers,
+  ).summary;
 }
 
 /**
@@ -357,6 +392,7 @@ export function buildQuotedSummaryWithTally(
   quotes?: SummaryQuotes,
   draftSources?: { name: string; url: string; text: string; role?: 'draft' | 'explanation' | 'other' }[],
   explanationSections?: number | null,
+  changeMarkers?: ChangeMarkerCount | null,
 ): { summary: QuotedSummary; tally: VerifyTally } {
   // 段落隔离（issue #76 第 3 刀）：条文侧的引用只在条文里反查，说明侧只在说明里。
   // 不这么做，"摘自官方原文"这句话就会被一句其实来自编制说明的话撑起 ——
@@ -388,6 +424,7 @@ export function buildQuotedSummaryWithTally(
 
   const explanationPoints = buildExplanationPoints(summary, explanationSide, tally);
   const impacts = buildImpacts(summary, draftSources ?? [], tally);
+  const changes = buildChanges(summary, draftSources ?? [], tally);
 
   return {
     summary: {
@@ -398,6 +435,8 @@ export function buildQuotedSummaryWithTally(
       keyPoints,
       explanationPoints,
       impacts,
+      changes,
+      changeMarkers: changeMarkers ?? null,
       explanationSections: explanationSections ?? null,
       deadline: {
         text:
@@ -491,6 +530,46 @@ function buildImpacts(
   return out;
 }
 
+/**
+ * 改动点：逐条反查出处，反查不到的整行丢弃（与 keyPoints 同一条不变量）。
+ *
+ * **与 `buildImpacts` 不同的是这里连 role 都不看** —— 全部喂进去的附件一起当池子。
+ * 理由与影响判读相同（见 buildImpacts 的注释），但这里更硬：实测显示**法律修正草案的
+ * 对照句就在正文附件里**，而"将A修改为B"这种写法在编制说明里同样常见，只认一侧必然白丢。
+ */
+function buildChanges(
+  summary: StructuredSummary,
+  sources: { name: string; url: string; text: string; role?: 'draft' | 'explanation' | 'other' }[],
+  tally: VerifyTally,
+): QuotedAmendmentChange[] {
+  const raw = Array.isArray(summary.changes) ? summary.changes : [];
+  const out: QuotedAmendmentChange[] = [];
+  for (const item of raw) {
+    if (typeof item !== 'object' || item === null) continue;
+    const change = item as unknown as Record<string, unknown>;
+    const quote = cleanQuote(typeof change.quote === 'string' ? change.quote : '');
+    const text = typeof change.text === 'string' ? change.text.trim() : '';
+    if (quote === null || text === '') continue;
+    const source = findDraftSourceForQuote(quote, sources);
+    if (source === null) {
+      tally.quoteNotFound += 1;
+      continue;
+    }
+    const declared = typeof change.kind === 'string' ? change.kind : '';
+    out.push({
+      quote,
+      text,
+      clause: typeof change.clause === 'string' ? change.clause.trim() : '',
+      kind: (Object.keys(CHANGE_KIND_LABELS) as string[]).includes(declared)
+        ? (declared as ChangeKind)
+        : 'other',
+      source: source.name,
+      sourceUrl: source.url,
+    });
+  }
+  return out;
+}
+
 /** 落库的说明要点数组 → 内存形状（旧行没这个字段 ⇒ 空数组，不算形状异常） */
 function parseStoredExplanationPoints(value: unknown): QuotedExplanationPoint[] {
   if (!Array.isArray(value)) return [];
@@ -541,6 +620,59 @@ function parseStoredImpacts(value: unknown): QuotedImpactPoint[] {
     });
   }
   return out;
+}
+
+/**
+ * 落库的改动点数组 → 内存形状（issue #86 第 2 刀）。
+ *
+ * 与说明要点、影响判读同样宽容：**缺字段的条目不落库、旧行没有这个键也不算形状异常**。
+ * 这一条特别要紧：`changes` 与 `changeMarkers` 是**删过又装回来的键** ——
+ * 生产库里有 5 行摘要带着 #85 之前的旧键（`changes` 为空数组、`changeMarkers` 为 null），
+ * 而 #85 的读侧兼容测试正是用它们钉的。解析必须照常吃下这两种形状。
+ */
+function parseStoredChanges(value: unknown): QuotedAmendmentChange[] {
+  if (!Array.isArray(value)) return [];
+  const out: QuotedAmendmentChange[] = [];
+  for (const item of value) {
+    if (typeof item !== 'object' || item === null) continue;
+    const change = item as Record<string, unknown>;
+    const quote = typeof change.quote === 'string' ? change.quote.trim() : '';
+    const text = typeof change.text === 'string' ? change.text.trim() : '';
+    if (quote === '' || text === '') continue;
+    const declared = typeof change.kind === 'string' ? change.kind : '';
+    const source = typeof change.source === 'string' && change.source !== '' ? change.source : null;
+    const sourceUrl =
+      typeof change.sourceUrl === 'string' && change.sourceUrl !== '' ? change.sourceUrl : null;
+    out.push({
+      quote,
+      text,
+      clause: typeof change.clause === 'string' ? change.clause.trim() : '',
+      kind: (Object.keys(CHANGE_KIND_LABELS) as string[]).includes(declared)
+        ? (declared as ChangeKind)
+        : 'other',
+      source,
+      sourceUrl,
+    });
+  }
+  return out;
+}
+
+/** 落库的改动表述计数（旧行为 null：页面那行覆盖度文字随之不出现）。 */
+function parseStoredMarkers(value: unknown): ChangeMarkerCount | null {
+  if (typeof value !== 'object' || value === null) return null;
+  const markers = value as Record<string, unknown>;
+  if (typeof markers.total !== 'number') return null;
+  const byKind = markers.byKind as Record<string, unknown> | undefined;
+  const num = (raw: unknown): number => (typeof raw === 'number' ? raw : 0);
+  return {
+    total: markers.total,
+    byKind: {
+      modify: num(byKind?.modify),
+      add: num(byKind?.add),
+      delete: num(byKind?.delete),
+      renumber: num(byKind?.renumber),
+    },
+  };
 }
 
 /**
@@ -617,6 +749,9 @@ export function parseQuotedSummary(value: unknown): QuotedSummary | null {
     explanationPoints: parseStoredExplanationPoints(record.explanationPoints),
     // 影响判读是本轮新增的键：旧行没有 ⇒ 空数组（理由见 parseStoredImpacts）
     impacts: parseStoredImpacts(record.impacts),
+    // 改动点与它的分母是"删过又装回来"的键：三种历史形状（有值 / 空数组 / 根本没有）都要吃下
+    changes: parseStoredChanges(record.changes),
+    changeMarkers: parseStoredMarkers(record.changeMarkers),
     explanationSections: typeof record.explanationSections === 'number' ? record.explanationSections : null,
     deadline,
     howToComment,

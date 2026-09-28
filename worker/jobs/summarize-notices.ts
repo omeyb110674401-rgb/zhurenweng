@@ -17,6 +17,7 @@ import {
 import { attachmentRole } from '../../src/lib/attachment-select.ts';
 import { listNoticeAttachmentTexts } from '../../src/db/repo/attachments.ts';
 import { countExplanationSections } from '../../src/lib/explanation-coverage.ts';
+import { countChangeMarkers } from '../../src/lib/change-coverage.ts';
 import type { DraftSource } from '../../src/lib/ports.ts';
 import { llmReady, llmUnavailableReason } from '../../src/lib/llm-availability.ts';
 import { sendTaskFailureAlert } from '../../src/lib/alerts.ts';
@@ -178,6 +179,10 @@ export const summarizeNoticesJob: Job = {
       // explanation-coverage.ts：拿喂进去的那一截数分母，窗口外的内容永远不会出现在
       // "还差多少"那句话里。
       const fullTexts = await listNoticeAttachmentTexts(target.id);
+      // 改动表述计数（issue #86 第 2 刀）：**分母从全部附件正文算**，不是喂进去的那一截 ——
+      // 与说明小节数同一条规矩（拿喂进去的那一截数分母就是自证：窗口外的改动永远不会
+      // 出现在"还差多少"那句话里）。它不再按体裁门控：那份门控正是 #79 那个空栏的成因。
+      const changeMarkerCount = countChangeMarkers(fullTexts.map((row) => row.text).join(' '));
       const explanationSections = draftSources.some((source) => source.role === 'explanation')
         ? countExplanationSections(
             fullTexts
@@ -196,12 +201,14 @@ export const summarizeNoticesJob: Job = {
           summary.quotes,
           draftSources,
           explanationSections,
+          changeMarkerCount,
         );
         const kept: SummaryFieldCounts = {
           keyPoints: quoted.keyPoints.length,
           explanationPoints: quoted.explanationPoints.length,
           channels: quoted.channels.length,
           impacts: quoted.impacts.length,
+          changes: quoted.changes.length,
         };
         // 诊断与摘要**一起**落库：它描述的就是这一列摘要是哪一次调用产出的
         const diagnostics = buildSummaryDiagnostics(summary.diagnostics, {

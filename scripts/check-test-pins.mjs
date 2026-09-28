@@ -86,6 +86,8 @@ const TARGETS = {
   llmAdapter: 'src/lib/adapters/openai-compatible-llm.ts',
   // issue #86 第 1 刀：影响判读的展示判据（页面 .tsx 进不了单测，所以判据抽在 .ts 里）
   impactDisplay: 'src/lib/impact-display.ts',
+  // issue #86 第 2 刀：「改了哪几处」的覆盖度（改动表述计数 + 三态判词）
+  changeCoverage: 'src/lib/change-coverage.ts',
   // issue #83 补的三个"从没被自证覆盖过"的关键面：SSRF 防护、北极星计数的门口、
   // 后台 HTML 转义。它们此前要么只有 e2e 覆盖（而 e2e 跑的是构建产物，撤源码不红），
   // 要么一个测试都没有 —— 正是最该"撤掉实现必须变红"的三处。
@@ -1328,6 +1330,62 @@ const CASES = [
     to: '          impacts: 0,',
     pattern: '诊断里数得出',
     test: 'tests/e2e/summary-genre-and-explanations.test.mjs',
+  },
+  {
+    // issue #86 第 2 刀：这一条钉的是**与旧实现相反**的那处地基。旧实现的逐字反查池排除
+    // 编制说明（`draftSide = filter(role !== 'explanation')`），而实测显示两类文件的对照句
+    // 落在不同侧（法律修正草案在正文、住建部那批在说明）—— 只认一侧白丢一半。
+    label: '改动点的反查池退回"只认条文侧"（依据写在编制说明里的那一半全被丢掉）',
+    file: 'summaryContent',
+    from: '  const changes = buildChanges(summary, draftSources ?? [], tally);',
+    to: "  const changes = buildChanges(summary, (draftSources ?? []).filter((source) => source.role !== 'explanation'), tally);",
+    pattern: '引用只在编制说明里命中',
+    test: 'tests/unit/summary-changes.test.mjs',
+  },
+  {
+    label: '改动点不再落库（模型吐了也丢掉，页面那一段永远是空的）',
+    file: 'llmAdapter',
+    from: '  const changes = normalizeChanges(record.changes, tally);',
+    to: '  const changes = [];',
+    // 靶点在**适配器的归一化**里，所以判据必须走单测：e2e 用的是 stub LLM，
+    // 它直接返回 StructuredSummary、根本不经过 normalizeModelSummary ——
+    // 指到 e2e 上就是一条"撤掉实现也不红"的假绿灯（本轮实测踩到，靠"必须真变红"当场抓出）。
+    pattern: '超过 40 处',
+    test: 'tests/unit/summary-changes.test.mjs',
+  },
+  {
+    label: '覆盖度分母不落库（页面那行"检测到几处"永远说不出来）',
+    file: 'summarize',
+    from: '          changeMarkerCount,',
+    to: '          null,',
+    pattern: '覆盖度分母数的是全文',
+    test: 'tests/e2e/summary-genre-and-explanations.test.mjs',
+  },
+  {
+    label: '诊断不数改动点的条数（"模型吐了几处改动"这件事又变得查不到）',
+    file: 'summarize',
+    from: '          changes: quoted.changes.length,',
+    to: '          changes: 0,',
+    pattern: '诊断写下来了',
+    test: 'tests/e2e/summary-genre-and-explanations.test.mjs',
+  },
+  {
+    // 下面两条与 #85 搬到说明侧的那三条同构（列得少要照实说少 / 一个都没数到不许说成"全部"）：
+    // 判据同构，两侧都要有。#85 删功能时把改动点那两条一起删了，这一轮按同一条规矩装回来。
+    label: '改动覆盖度永远说"已列出全部"（窗口截掉的改动被藏起来）',
+    file: 'changeCoverage',
+    from: '  if (listed >= markers.total) {',
+    to: '  if (true) {',
+    pattern: '列得比数到的少 ⇒ 照实说少',
+    test: 'tests/unit/summary-changes.test.mjs',
+  },
+  {
+    label: '一处都数不到也写成"已列出全部 0 处"（把"本站没读到"说成一种结果）',
+    file: 'changeCoverage',
+    from: '  if (markers.total === 0) {',
+    to: '  if (false) {',
+    pattern: '一处在正文里也数不到 ⇒ 不说',
+    test: 'tests/unit/summary-changes.test.mjs',
   },
 ];
 
