@@ -59,8 +59,8 @@ docker compose up -d worker          # 让常驻容器也换到新镜像，否�
 
 - `audit-review-selection.sql` —— **只读**：验收门那一步会读到哪几条（有摘要 + 未截止 + 受众面），
   顺带确认 `summary_diagnostics_json` 这一列存不存在（迁移 0019 之前会报 `column does not exist`）
-- `sync-list-86.txt` —— **2026-09-27 那一批的同步清单**（36 个文件），不是估的：把本地 deploy 面的
-  265 个文件算成 sha256 与 `/opt/zhurenweng` 逐文件对拍得出（same=229 / diff=23 / missing=13）。
+- `sync-list-86.txt` —— **2026-09-27 那一批的同步清单**（39 个文件），不是估的：把本地 deploy 面的
+  268 个文件算成 sha256 与 `/opt/zhurenweng` 逐文件对拍得出（same=229 / diff=23 / missing=16）。
   下次要用同一手法时，`git ls-files` 出清单 → 本地算 sha → 在服务器上比一遍即可
 - `run-probe-public-impacts.sh` —— **只读实验的启动器**（issue #86 第十三节）：把**未部署**的源码
   （`src/lib/attachment-feed.ts`、适配器、worker 等）从 `/tmp/zw-probe` **只读挂进**一次性 worker

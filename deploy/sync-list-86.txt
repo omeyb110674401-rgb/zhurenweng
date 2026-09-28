@@ -1,11 +1,13 @@
 .env.example
-deploy/README.md
 deploy/audit-audience-taxonomy.sql
 deploy/audit-email-paths.sql
 deploy/audit-feed-window.sql
+deploy/audit-review-selection.sql
 deploy/audit-summary-grounding.sql
+deploy/README.md
 deploy/run-probe-public-impacts.sh
 deploy/sync-files-local.sh
+deploy/sync-list-86.txt
 drizzle/postgres/0019_add_summary_diagnostics.sql
 drizzle/postgres/meta/_journal.json
 drizzle/sqlite/0019_add_summary_diagnostics.sql
@@ -16,6 +18,7 @@ scripts/check-test-pins.mjs
 scripts/probe-amendment-changes.mjs
 scripts/probe-public-impacts.mjs
 scripts/reset-summaries-for-redraft.mjs
+scripts/show-notice-summary.mjs
 src/app/_lib/summary-view.tsx
 src/app/admin/review/route.ts
 src/db/repo/summaries.ts
