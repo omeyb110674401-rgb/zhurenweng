@@ -1,7 +1,11 @@
 .env.example
 deploy/audit-audience-taxonomy.sql
+deploy/audit-body-as-draft.sql
+deploy/audit-body-shape.sql
 deploy/audit-email-paths.sql
 deploy/audit-feed-window.sql
+deploy/audit-inline-drafts.sql
+deploy/audit-review-inputs.sql
 deploy/audit-review-selection.sql
 deploy/audit-summary-grounding.sql
 deploy/README.md
@@ -28,12 +32,15 @@ src/lib/adapters/openai-compatible-llm.ts
 src/lib/adapters/stubs/stub-llm.ts
 src/lib/attachment-feed.ts
 src/lib/attachments/parse.ts
+src/lib/attachment-select.ts
 src/lib/audience.ts
 src/lib/change-coverage.ts
+src/lib/channel-guidance.ts
 src/lib/explanation-coverage.ts
 src/lib/impact-display.ts
 src/lib/ports.ts
 src/lib/summary-basis.ts
 src/lib/summary-content.ts
 src/lib/summary-diagnostics.ts
+src/lib/summary-display.ts
 worker/jobs/summarize-notices.ts

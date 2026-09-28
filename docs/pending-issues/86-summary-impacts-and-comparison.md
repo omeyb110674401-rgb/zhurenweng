@@ -844,10 +844,11 @@ tsc / eslint 干净。
 
 ## 十五、部署清单（**待授权执行**，2026-09-27 现算）
 
-这一批要上的是第 0 / 1 / 2 / 3 刀与第十四节两处修正。**清单不是估的**：
-把本地 deploy 面的 268 个跟踪文件算成 sha256 清单，与生产 `/opt/zhurenweng` 逐文件对拍
-（只读、只算哈希），结果是 **same=229 / diff=23 / missing=16** ⇒ 要同步的就是那 39 个，
+这一批要上的是第 0 / 1 / 2 / 3 刀、第十四节两处修正与第十六节的"正文就是条文"。
+**清单不是估的**：把本地 deploy 面的 272 个跟踪文件算成 sha256 清单，与生产 `/opt/zhurenweng`
+逐文件对拍（只读、只算哈希），结果是 **same=226 / diff=26 / missing=20** ⇒ 要同步的就是那 46 个，
 落在 [`deploy/sync-list-86.txt`](../../deploy/sync-list-86.txt)。
+（**这份清单是现算的，改动落地后要重算** —— 第十六节落地时就重算过一次，从 39 个变成 46 个。）
 
 几个当场看出来的事实：
 
@@ -864,7 +865,7 @@ tsc / eslint 干净。
 | # | 动作 | 判据 / 备注 |
 | --- | --- | --- |
 | 0 | 备份：`deploy/daily-backup.sh`（或手动 dump）并记下当前镜像 ID | 恢复校验 6 项计数全过才算备份成功 |
-| 1 | 同步 39 个文件（`deploy/sync-files-local.sh` 或 `zw-sync.ps1`，逐个 sha256 对拍） | 39/39 OK；对拍用的清单就是上面那份 |
+| 1 | 同步 46 个文件（`deploy/sync-files-local.sh` 或 `zw-sync.ps1`，逐个 sha256 对拍） | 46/46 OK；对拍用的清单就是上面那份 |
 | 2 | `docker compose build worker web` | **依赖没动** ⇒ 只重建代码层（上一次那 30 分钟的 `npm ci` 不会再发生） |
 | 3 | `docker compose up -d` | 迁移 **在应用首连时自动应用**（README 第 234 行），所以这一步就会把 0019 落库。判据两条：journal 从 19 项变 **20 项**（新增 idx 19），且 `\d notices` 里**看得到 `summary_diagnostics_json`** —— 这一列在生产上还不存在（第 0 刀从未上线） |
 | 4 | **回填受众面**：`docker compose run --rm worker node scripts/tag-notice-audience.mjs --apply` | 预期"拟写入 9"，其中 **3 条 `public → sector`**（那三份方法标准），分桶 public 42→39 |
