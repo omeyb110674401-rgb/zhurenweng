@@ -1044,3 +1044,26 @@ tsc / eslint 干净。
 
 **做法建议**（供拍板时参考）：先只对 `flag=0`（进行中）的条目抓，且加一个开关与大小上限
 （超上限就只声明链接不下载正文，页面照旧显示「源站附件」），量一轮真实带宽与抽取成功率之后再放开。
+
+### 17.5 动手前必须先补的三处（**别直接改适配器**）
+
+接着往代码里看了一步，发现"改适配器声明附件"**单独做等于白做**：
+
+1. **单个附件的上限是 4 MB**：`worker/jobs/extract-attachments.ts:50`
+   `const MAX_BYTES = envInt('ATTACHMENT_MAX_BYTES', 4 * 1024 * 1024, …)`，
+   而第 376 行会**明确拒绝**超限的：`声明 43254307 字节，超过单个附件 4194304 字节上限`。
+   ⇒ 只声明不调上限，那条草案会以 `fetch_failed` 收场 —— 失败是**可见的**（那一列有 error），
+   但这一轮的工作白跑。41 MB 需要把上限抬到 64 MB 一档。
+2. **上限应当按源放宽，而不是抬全局**：`src/sources/registry.ts` 的 `SourceFetchOptions`
+   已经有现成的落点与先例 —— `timeoutMs`（#58：人大网慢是"这一个站的属性，不该由全站买单"）
+   与 `cookieChallenge`（司法部的 WAF cookie）。同一个道理：41 MB 是 npc 的属性，
+   抬 `ATTACHMENT_MAX_BYTES` 等于让所有源都能拉 64 MB。⇒ 加 `maxAttachmentBytes?`，
+   抽取任务按 `sourceId` 取（它本来就知道条目属于哪个源）。
+3. **开关要接三处**：代码缺省、`.env.example`、`docker-compose.yml`（#83 清掉的七个"幽灵旋钮"
+   就是这么来的），并且 `tests/unit/deploy-env-contract.test.mjs` 要按服务逐条钉住。
+   建议形状：`NPC_DRAFT_ATTACHMENTS=off|on`（缺省 `off`），**缺省关**是为了让"部署这一批"
+   与"开始拉 200 MB/轮"是两次独立的决定 —— 前者已经等了两轮授权。
+
+测试形状（供实现时照做）：适配器那条用 **fixture**（`fixtures/npc/flca/<lid>/fjxx/index.json`
+放一份真的 618 字节响应）断言"开关开 ⇒ 声明了带真文件名的附件、开关关 ⇒ 一条都不声明"；
+大小上限那条走**单测**（4 MB 拒绝 / 放宽后放行），不必在 e2e 里造一个 41 MB 的夹具。
