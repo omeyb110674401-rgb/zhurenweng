@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { normalizeModelSummary } from '../../src/lib/adapters/openai-compatible-llm.ts';
+import { SYSTEM_PROMPT, normalizeModelSummary } from '../../src/lib/adapters/openai-compatible-llm.ts';
 import {
   IMPACT_KIND_LABELS,
   buildQuotedSummary,
@@ -290,5 +290,51 @@ describe('issue #86：「可能的争议点」给谁看', () => {
 
   it('一条判读都没有时不渲染（空壳比没有更坏）', () => {
     assert.equal(shouldRenderImpacts({ audience: 'public', impacts: [] }), false);
+  });
+});
+
+/**
+ * 提示词本身（issue #86 第十四节）。
+ *
+ * 为什么要有这一组：`LLM_PROVIDER=stub` 的测试路径**根本不经过提示词** ——
+ * 于是"把规则 7 的某一句话删掉"不会有任何门变红，而提示词是这一段产品唯一的判据所在。
+ * 断言刻意打在**每条规则的实质要求**上（不是"这段文字还在"）：措辞可以改，
+ * 要求不许悄悄消失。删掉任何一条，对应的用例当场变红。
+ */
+describe('issue #86：规则 7 / 8 的实质要求（提示词是唯一判据，必须钉得住）', () => {
+  // SYSTEM_PROMPT 导出的是已经 join 好的整段文本（不是数组）
+  const prompt = SYSTEM_PROMPT;
+
+  it('判读的引用必须是**依据**，不是"文中出现过的一句话"（2026-09-27 实测的套话问题）', () => {
+    assert.match(prompt, /quote 必须是这条结论的依据/);
+    // 判据写成一句可执行的检验：换掉引用后结论是否照样成立
+    assert.match(prompt, /把 quote 换成同一份文件里任意另一句/);
+    assert.match(prompt, /宁可整条不要/);
+  });
+
+  it('两个方向都要找：新增义务/成本/门槛，以及授权过宽、条件模糊、没有救济或过渡', () => {
+    assert.match(prompt, /两个方向都要看/);
+    assert.match(prompt, /授权过宽、条件模糊、没有救济或没有过渡安排/);
+    assert.match(prompt, /不要为了凑其中一个 kind 而编/);
+  });
+
+  it('「看不出影响就输出空数组」仍然在（宁缺勿滥的那条不许被新要求挤掉）', () => {
+    assert.match(prompt, /看不出影响就输出空数组/);
+    assert.match(prompt, /宁可空着/);
+  });
+
+  it('禁止定性/指控的口径仍然在（政务 + AI 的敏感面）', () => {
+    assert.match(prompt, /不做定性、不指控、不预测结果/);
+    assert.match(prompt, /不写「违法」「违宪」/);
+  });
+
+  it('影响的「谁」不许写泛称（原文只写社会公众时留空）', () => {
+    assert.match(prompt, /不要写「社会公众」「人民群众」/);
+  });
+
+  it('改动表（规则 8）的逐字要求与"看不到的部分不要列"仍然在', () => {
+    assert.match(prompt, /changes 回答"这一稿把哪几条改成了什么"/);
+    assert.match(prompt, /只列你真在文本里看到的改动/);
+    assert.match(prompt, /不要写「等」「主要修改内容如下」来掩盖缺口/);
   });
 });

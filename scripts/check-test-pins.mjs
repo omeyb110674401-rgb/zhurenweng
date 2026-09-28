@@ -1091,8 +1091,10 @@ const CASES = [
   {
     label: '受众面：「办法」也被当成立法（负向断言被撤，行业规章全被推给公众）',
     file: 'audience',
-    from: 'const LAW_DRAFT =\n  /(?<![办方做想用说合])法',
-    to: 'const LAW_DRAFT =\n  /法',
+    // 靶点跟着 2026-09-27 那次收窄搬到了简写分支上：负向断言现在管的是
+    // 「办法 / 方法 + 括号里写着草案」这个形状（判据与用例同步扩了一条，见 audience.test.mjs）。
+    from: '(?<![办方做想用说合])法\\s*[（(][^）)]{0,20}草案|',
+    to: '法\\s*[（(][^）)]{0,20}草案|',
     pattern: '「办法」里的法字不算立法',
     test: 'tests/unit/audience.test.mjs',
   },
@@ -1452,6 +1454,35 @@ const CASES = [
     to: '  if (false) {',
     pattern: '一句话摘要里说得出档位',
     test: 'tests/unit/summary-diagnostics.test.mjs',
+  },
+  {
+    // issue #86 第十四节：「…法（征求意见稿）」里的法多半是**方法**（色谱法/测定法/分析法）。
+    // 放宽回"征求意见稿"就等于让每一份方法标准冒充立法 —— 而受众面现在决定喂入档位与成本。
+    label: '方法是立法：法（征求意见稿）又算法律草案（方法标准被按重档白跑一遍）',
+    file: 'audience',
+    from: '(?<![办方做想用说合])法\\s*[（(][^）)]{0,20}草案|',
+    to: '(?<![办方做想用说合])法\\s*[（(][^）)]{0,20}(草案|征求意见稿)|',
+    pattern: '里的法多半是',
+    test: 'tests/unit/audience.test.mjs',
+  },
+  {
+    // 提示词（issue #86 第十四节）：删掉这一句，模型就会继续"挂着一句正确原文、说一句
+    // 放之四海皆准的话"（2026-09-27 实测的真实产出）。stub 的测试路径不经过提示词，
+    // 所以这两条只能配单测 —— 靶点与判据都在同一份文件上。
+    label: '判读的引用不必是依据（套话判读重新合法）',
+    file: 'llmAdapter',
+    from: '**quote 必须是这条结论的依据**',
+    to: '**quote 随便**',
+    pattern: '引用必须是',
+    test: 'tests/unit/summary-impacts.test.mjs',
+  },
+  {
+    label: '判读只看一个方向（"可能被滥用 / 执行不到"那一类不再被要求去找）',
+    file: 'llmAdapter',
+    from: '找的时候**两个方向都要看**',
+    to: '找的时候**随便看看**',
+    pattern: '两个方向都要找',
+    test: 'tests/unit/summary-impacts.test.mjs',
   },
 ];
 

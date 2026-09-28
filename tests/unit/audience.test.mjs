@@ -109,6 +109,45 @@ describe('issue #83：受众面判定', () => {
     });
     assert.equal(d.audience, 'sector');
     assert.doesNotMatch(d.basis, /法律\/条例草案/);
+
+    // 光看上面这条钉不住负向断言：它的括号里只有「公开征求意见稿」，而 2026-09-27 的收窄
+    // 已经不让这个形状命中"简写 = 立法"那一支了。真正会被负向断言拦下的是
+    // **括号里写着草案**的部门规章草案 —— 按本站口径那是行业事项（读者是市场主体与从业者），
+    // 不是面向全体的立法。**同一个判据，所以放同一条用例里**（拆出去就会让 pin 只选中一半）。
+    const regulation = deriveNoticeAudience({
+      title: '关于《危险货物道路运输安全管理办法（修订草案征求意见稿）》公开征求意见的通知',
+    });
+    assert.equal(regulation.audience, 'sector', `实际 ${regulation.audience}（${regulation.basis}）`);
+    assert.doesNotMatch(regulation.basis, /法律\/条例草案/);
+  });
+
+  it('「…法（征求意见稿）」里的法多半是**方法**，不是立法（2026-09-27 修）', () => {
+    // 生产实例：这条是四项环境监测**方法标准**，旧判据按「色谱法（征求意见稿）」判成了公众广域，
+    // 而受众面现在决定喂入档位 —— 它被按重档白跑了一遍（issue #86 第十三节 13.1-3）。
+    for (const title of [
+      '关于公开征求《水质 N,N-二甲基甲酰胺和N,N-二甲基乙酰胺的测定 高效液相色谱法（征求意见稿）》等4项国家生态环境标准意见的通知',
+      '关于征求《固定污染源废气 氨的测定 便携式激光吸收光谱法（征求意见稿）》意见的函',
+      '关于公开征求《土壤 有效磷的测定 比色法（征求意见稿）》意见的通知',
+    ]) {
+      const d = deriveNoticeAudience({ title, sourceId: 'mee' });
+      assert.notEqual(d.audience, 'public', `${title} 不该判成立法（${d.basis}）`);
+      assert.doesNotMatch(d.basis, /法律\/条例草案/);
+    }
+  });
+
+  it('但**写明是草案**的简写照样算立法（收窄不能把真草案一起挡掉）', () => {
+    for (const title of [
+      '关于《中华人民共和国公路法（修正草案征求意见稿）》公开征求意见的通知',
+      '全国人大常委会关于《森林法（修订草案）》征求意见的通知',
+      '关于《收费公路管理条例（草案征求意见稿）》公开征求意见的通知',
+    ]) {
+      assert.equal(deriveNoticeAudience({ title }).audience, 'public', title);
+    }
+    // 全国人大源上的一切都算立法，不看标题措辞（那条规则在最前面）
+    assert.equal(
+      deriveNoticeAudience({ title: '水法（修订草案二次审议稿）征求意见', sourceId: 'npc' }).audience,
+      'public',
+    );
   });
 
   it('判不出来就是 unknown，不兜底成任何一类', () => {
