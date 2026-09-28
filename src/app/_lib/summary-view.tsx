@@ -1,9 +1,5 @@
 import type { ReactNode } from 'react';
-import {
-  CHANGE_KIND_LABELS,
-  changeCoverageVerdict,
-  explanationCoverageVerdict,
-} from '@/lib/amendment-coverage';
+import { explanationCoverageVerdict } from '@/lib/explanation-coverage';
 
 import { safeParseJson, type NoticeRecord } from '@/db/types';
 import {
@@ -142,7 +138,7 @@ export function SummaryView({
    * 读了附件也产不出条文要点 —— 那行字于是指着一段不存在的栏位说话。
    */
   const hasAttachmentPoints =
-    summary.keyPoints.length > 0 || summary.explanationPoints.length > 0 || summary.changes.length > 0;
+    summary.keyPoints.length > 0 || summary.explanationPoints.length > 0;
   const provenance = summaryProvenance({
     attachment: attachmentReport ?? null,
     hasAttachmentPoints,
@@ -200,68 +196,20 @@ export function SummaryView({
         ) : null}
 
         {/*
-         * 改动点表格（issue #76 第 2 刀）：读者对修正案要的是"改了哪几处"，不是把全文
-         * 重述一遍。最后一列是**逐字原文**，与左边的说明同屏 —— 说明本身不可核对（那是模型对着
-         * 原句写的一句话），所以绝不让它脱离原文单独成立。
+         * 「改动点」表格已于 2026-09-27 删除（issue #85）。
          *
-         * 上面那行覆盖度是这块的心脏：分母是本站在**全部**附件正文里数出来的修改表述数，
-         * 不是模型的自我申报。列得比分母少就照实说"其余的不在本站读到的那一截里" ——
-         * 这既是对读者诚实，也是将来决定"要不要为长文上多轮调用"的唯一依据。
+         * 这一段曾经是修正案的正面回答：读者要知道"改了哪几处"，页面就列出条款、类型、
+         * 一句话说明与逐字原文，并在上面给一行覆盖度（"正文里检测到 N 处，本页列出 M 处"）。
+         * 删掉它的判据不是"我觉得没用"，而是**它从来没有产出过**：生产全库 `changes` 非空的
+         * 条目 **0 条**；连"体裁=修正案且证据=附件正文"那 5 条最该产出它的候选，在按新案模板
+         * 点名重跑之后也仍然是 0 条（5 次境外调用换回同一个页面）。一个从不渲染的功能留着，
+         * 代价是每个读者路径都要维护一个永不出现的分支，以及每个后来者都要重新问一遍
+         * "它为什么不出现"。同源的计数词表（`CHANGE_TEXT_MARKERS`）与体裁门控一并删除。
          *
-         * **一行都没有时整节不渲染**（issue #79）：曾经只要 `changeMarkers` 存在就渲染，
-         * 于是 44% 的修正案（体裁靠正文里的"现行"判进来、而词表另一侧不认它）长出一个
-         * 标题写着「改动点」、note 却说"没检测到改动"的空栏。空栏传达的不是"改动点是空的"，
-         * 而是"这一栏没东西可看" —— 后者不该占一个标题。与「编制说明要点」
-         * （`explanationPoints` 为空即整节不出现）同一处理。
+         * 编制说明要点**留着**（下面那一块）：它在生产上真的渲染出来过（金丝雀 2 条），
+         * 而且与"改动点"不同，它不依赖模型产出一种我们从未见过它产出的形状。
          */}
-        {summary.changes.length === 0 ? null : (
-          <div className="summary-section" data-testid="summary-changes">
-            <h2 className="summary-section-title">改动点</h2>
-            {summary.changeMarkers ? (
-              <p className="summary-section-note" data-testid="summary-change-coverage">
-                {changeCoverageVerdict(
-                  summary.changes.length,
-                  summary.changeMarkers,
-                  notice.genreBasis,
-                ).detail}
-              </p>
-            ) : null}
-            <div
-              className="stat-table-wrap"
-              role="region"
-              tabIndex={0}
-              aria-label="改动点表（窄屏可横向滚动）"
-            >
-              <table className="stat-table" data-testid="summary-change-table">
-                <thead>
-                  <tr>
-                    <th scope="col">条款</th>
-                    <th scope="col">类型</th>
-                    <th scope="col">改了什么</th>
-                    <th scope="col">原文（本站逐字摘录）</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {summary.changes.map((change, index) => (
-                    <tr key={index}>
-                      <th scope="row">{change.clause}</th>
-                      <td>{CHANGE_KIND_LABELS[change.kind]}</td>
-                      <td>{change.text}</td>
-                      <td>
-                        <p>{change.quote}</p>
-                        <p className="draft-point-source" data-testid="summary-change-source">
-                          {change.source
-                            ? `出处：附件《${change.source}》（本站从附件逐字提取，未做改写）`
-                            : '出处：未标注（这条的引用没能反查到本轮喂入的条文）'}
-                        </p>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        )}
+
         {(() => {
           /*
            * 编制说明要点（issue #76 第 3 刀）。

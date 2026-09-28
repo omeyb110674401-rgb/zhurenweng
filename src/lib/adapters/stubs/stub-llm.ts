@@ -1,14 +1,12 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import type {
-  AmendmentChangeDraft,
   AmendmentExplanationDraft,
   LlmPort,
   LlmSummarizeInput,
   StructuredSummary,
 } from '../../ports.ts';
-import { CHANGE_TEXT_MARKERS } from '../../notice-genre.ts';
-import { explanationSectionLines } from '../../amendment-coverage.ts';
+import { explanationSectionLines } from '../../explanation-coverage.ts';
 import type { QuotedStructuredSummary, SummaryQuotes } from '../../summary-content.ts';
 
 /**
@@ -124,32 +122,6 @@ export class StubLlm implements LlmPort {
         (source, index) => `【stub】条文要点 ${index + 1}：${quotes[index]}`,
       );
       summary.quotes = { ...summary.quotes, keyPoints: quotes };
-    }
-    // 改动点（issue #76 第 2 刀）：只有条文里真的出现"修改为 / 删去 / 增加一条"这类句子时才回响，
-    // 且 quote 逐字取那一整行 —— 于是"表格里每一行都能反查到原文"在测试里走的是真路径，
-    // 而普通新案夹具不会因 stub 硬造改动点多出一张表。
-    // 认的是**可计数**的那份词表（`CHANGE_TEXT_MARKERS`），不是判体裁那份全表（#79）：
-    // 回响一行"只含判体裁措辞、计数那边数不到"的改动点，等于在测试里复刻线上那个空栏。
-    const changeLines = draft
-      .flatMap((source) => source.text.split(/\r?\n/).map((line) => ({ name: source.name, line: line.trim() })))
-      .filter(
-        (item) =>
-          item.line.length > 8 &&
-          CHANGE_TEXT_MARKERS.some((word) => item.line.includes(word)),
-      )
-      .slice(0, 3);
-    if (changeLines.length > 0) {
-      const changes: AmendmentChangeDraft[] = changeLines.map((item, index) => ({
-        clause: `【stub】附件${item.name.slice(0, 6)} 第${index + 1}处`,
-        kind: item.line.includes('删去')
-          ? 'delete'
-          : item.line.includes('增加一条')
-            ? 'add'
-            : 'modify',
-        text: `【stub】改动点 ${index + 1}：${item.line.slice(0, 18)}…`,
-        quote: item.line,
-      }));
-      summary.changes = changes;
     }
     // 说明小节（issue #76 第 3 刀）：只从 role=explanation 的附件里取，quote 直接用该小节
     // 标题那一行（逐字）—— 于是"说明要点必须能在说明里反查到"这条不变量在测试里走真路径。

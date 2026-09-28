@@ -25,7 +25,7 @@ const READ_AND_FED = { total: 2, okFiles: 2, fedChars: 18_000 };
 const READ_NOT_FED = { total: 2, okFiles: 2, fedChars: 0 };
 const UNREADABLE = { total: 2, okFiles: 0, fedChars: 0 };
 
-const CURRENT_JSON = { what: {}, explanationPoints: [], changes: [], changeMarkers: null };
+const CURRENT_JSON = { what: {}, explanationPoints: [] };
 
 describe('issue #83：摘要依据与可优化性', () => {
   it('依据：附件要点已产出 / 喂了但无条文可摘（这两种都是"读了附件"）', () => {

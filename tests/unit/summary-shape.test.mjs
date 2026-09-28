@@ -65,6 +65,26 @@ describe('摘要形状：旧行向后兼容（重刷窗口内不得掉回占位�
     assert.deepEqual(parsedWithoutWho.who, { text: '', quote: null });
     assert.equal(parseQuotedSummary({ ...LEGACY_SUMMARY, who: { quote: null } }).who.text, '');
   });
+
+  /*
+   * issue #85：「改动点」功能（`changes` / `changeMarkers` 两个键）已整体删除，
+   * 而**生产库里那一批摘要还带着这两个键** —— 解析必须照常成功、只是不再把它们带出来。
+   * 这是"删功能"最容易漏的一步：只删写入侧，读侧遇到多余的键就报形状异常，
+   * 于是存量条目在页面上从「有摘要」掉回「待人工复核」占位，而没有任何东西会提醒你。
+   */
+  it('旧行带着已删除的改动点键也要能解析（键多余不是形状异常）', () => {
+    const withDeadKeys = parseQuotedSummary({
+      ...LEGACY_SUMMARY,
+      changes: [{ clause: '第二条', kind: 'modify', text: '改了什么', quote: '第二条修改为甲' }],
+      changeMarkers: { total: 7, byKind: { modify: 4, add: 1, delete: 2, renumber: 0 } },
+    });
+    assert.ok(withDeadKeys, '带已删除的键的行必须照常解析');
+    assert.equal(withDeadKeys.keyPoints.length, 2, '其余字段一个都不能少');
+    assert.ok(
+      !Object.hasOwn(withDeadKeys, 'changes') && !Object.hasOwn(withDeadKeys, 'changeMarkers'),
+      '删掉的功能不该从旧行里"复活"成解析结果的一部分',
+    );
+  });
 });
 
 describe('摘要形状：新输出 round-trip（build → 落库 → parse）', () => {

@@ -116,33 +116,44 @@ describe('issue #76：详情页体裁角标', () => {
   });
 
   /**
-   * issue #79：这条正是线上那个空栏的形状 —— 体裁靠**正文里那截"现行"**判成修正案
-   * （或者像这里一样靠标题），而改动点数出来是 0，页面于是渲染出：
-   * 「改动点」标题 + 一句"没检测到成文的修改表述" + 一张没有行的表。
+   * issue #85：「改动点」整块功能已删（生产全库 `changes` 非空 **0 条** ⇒ 它从未渲染过），
+   * 但**库里那批摘要还带着 `changes` / `changeMarkers` 两个键**（删除之前生成的）。
+   * 所以"删功能"必须连**读侧**一起处理：解析照常成功、页面上一个字都不出现。
    *
-   * 断言分两截，缺一截这条用例就会变成假绿灯：
-   * 1. 先证明前提成立（库里真的有摘要、真的带着一份"数到 0 处"的覆盖度）——
-   *    否则"页面上没有改动点"可能只是因为这条压根没摘要；
-   * 2. 再断言整块不渲染，**连标题都不出现**（只剩 note 也算占着一栏）。
+   * 这条用例刻意**手工把两个键写回库**再取页面 —— 新摘要是不会再产生它们的，
+   * 不注入的话它测的就是一条不存在的路径（本仓库反复栽过的那种假绿灯）。
    */
-  it('一处改动都数不到时，不渲染一个空的「改动点」栏', async () => {
-    const db = new Database(dbFile, { readonly: true });
-    const row = db
-      .prepare('select genre, ai_summary_json as json from notices where title = ?')
-      .get(AMENDMENT_TITLE);
-    db.close();
-    assert.equal(row?.genre, 'amendment', '上面那条用例已证它被判成修正案');
-    assert.ok(row?.json, '这条应当有摘要（stub 端口），否则下面的断言测不到渲染分支');
-    const summary = JSON.parse(row.json);
-    assert.deepEqual(summary.changes, [], '没有可喂的附件正文 ⇒ 改动点必然是空数组');
-    assert.equal(summary.changeMarkers?.total, 0, '分母是 0（不是"没数过"）—— 空栏就是这么长出来的');
+  it('旧摘要里带着已删除的改动点键：摘要照常渲染，那一节不复活', async () => {
+    const db = new Database(dbFile);
+    try {
+      const original = db
+        .prepare('select ai_summary_json as json from notices where title = ?')
+        .get(AMENDMENT_TITLE)?.json;
+      assert.ok(original, '前提：这条要有摘要，否则下面测的是"没有摘要"那条路');
+      const withDeadKeys = JSON.parse(original);
+      withDeadKeys.changes = [
+        {
+          clause: '第二条',
+          kind: 'modify',
+          text: '取得许可后方可从事',
+          quote: '第二条修改为：从事前款活动应当取得许可。',
+          source: '某某法（修正草案征求意见稿）.docx',
+          sourceUrl: null,
+        },
+      ];
+      withDeadKeys.changeMarkers = { total: 3, byKind: { modify: 1, add: 1, delete: 1, renumber: 0 } };
+      db.prepare('update notices set ai_summary_json = ? where title = ?').run(
+        JSON.stringify(withDeadKeys),
+        AMENDMENT_TITLE,
+      );
+    } finally {
+      db.close();
+    }
 
     const html = await detailOf(AMENDMENT_TITLE);
     assert.match(html, /data-testid="ai-summary"/, '摘要卡片本身要在，排除"整页没渲染"这种假通过');
-    assert.ok(
-      !html.includes('data-testid="summary-changes"'),
-      '一行改动点都没有时，整块「改动点」不该出现（空栏读起来像"这条没改什么"）',
-    );
+    assert.ok(!html.includes('data-testid="summary-changes"'), '已删除的那一节不该因为旧键复活');
     assert.ok(!html.includes('改动点'), '连标题都不该有 —— 有标题就等于向读者承诺了一栏内容');
+    assert.ok(!html.includes('第二条修改为'), '那一行的逐字原文同样不该被渲染出来');
   });
 });

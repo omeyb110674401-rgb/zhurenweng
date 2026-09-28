@@ -5,7 +5,7 @@ import {
   countExplanationSections,
   explanationCoverageVerdict,
   explanationSectionLines,
-} from '../../src/lib/amendment-coverage.ts';
+} from '../../src/lib/explanation-coverage.ts';
 
 /**
  * 单元（issue #76 第 3 刀）：条文段落与说明段落**互相不能借用对方的引用**。
@@ -90,7 +90,6 @@ describe('issue #76 第 3 刀：段落隔离', () => {
       }),
       { keyPoints: ['第二条 从事前款活动应当取得许可。'] },
       [DRAFT, EXPLANATION],
-      null,
       countExplanationSections(EXPLANATION.text),
     );
     assert.equal(summary.keyPoints.length, 1);
@@ -146,6 +145,19 @@ describe('issue #76 第 3 刀：小节计数与那句话', () => {
   });
   it('分母为 0 时不写"已列出全部 0 个"', () => {
     assert.equal(explanationCoverageVerdict(0, 0).state, 'no_markers');
+    assert.doesNotMatch(explanationCoverageVerdict(0, 0).detail, /全部 0/);
+  });
+
+  it('列得比数到的少要照实说少（这是"窗口截掉了多少"唯一诚实的说法）', () => {
+    const verdict = explanationCoverageVerdict(2, 6);
+    assert.equal(verdict.state, 'partial');
+    assert.match(verdict.detail, /检测到约 6 个小节，本页列出 2 个/);
+    assert.match(verdict.detail, /其余的不在本站读到的那一截里/);
+  });
+
+  it('列够了才说"全部"（多列出不算少）', () => {
+    assert.equal(explanationCoverageVerdict(6, 6).state, 'complete');
+    assert.equal(explanationCoverageVerdict(9, 6).state, 'complete');
   });
 
   it('措辞带"约"：这一层是启发式，不假装精确', () => {
@@ -175,7 +187,6 @@ describe('issue #76 第 3 刀：落库与读回', () => {
       }),
       undefined,
       [DRAFT, EXPLANATION],
-      null,
       2,
     );
     const round = parseQuotedSummary(JSON.parse(JSON.stringify(built)));

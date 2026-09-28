@@ -6,16 +6,19 @@ import { after, before, describe, it } from 'node:test';
 import Database from 'better-sqlite3';
 
 /**
- * 端到端（issue #76 第 2 刀）：修正案的**改动点表格**要有产出，而且每一行都得能核对。
+ * 端到端（issue #76 起步，issue #85 起只剩"体裁 + 编制说明要点"这两半）：
+ * 一条决议体裁的公告，摘要该长成什么样。
  *
- * 这块最容易骗人的地方有两处，断言各自钉一处：
- *   1. 表格里的"改了什么"是模型写的一句话 —— 它本身不可核对。所以每行必须带着
- *      **逐字原文**，且那句原文真的在附件正文里（`quote` 反查不到就整行丢弃）；
- *   2. 那行覆盖度的分母必须来自**全部**附件正文。如果拿喂给模型的那一截去数，
- *      窗口外的改动永远不会出现在"还差多少"里 —— 那个数字就成了自证，而不是证据。
+ * 这个文件原本还覆盖「修正案改动点表格」（每行带逐字原文、覆盖度分母按全文数）。
+ * 那套功能已于 2026-09-27 **整体删除**（issue #85）：生产全库 `changes` 非空的条目
+ * **0 条**，连最该产出它的 5 条候选在点名重跑之后也仍是 0 条 —— 一个从不渲染的分支，
+ * 留着只会让每个后来者重新问一遍"它为什么不出现"。删掉的是写入侧与渲染侧，
+ * **读侧的向后兼容单独在 `tests/unit/summary-shape.test.mjs` 里钉住**（旧行还带着
+ * `changes` / `changeMarkers` 两个键，解析必须照常成功）。
  *
- * 顺带钉体裁闸门：正文里有"现行"这种词并不构成修正案 —— 判据是 genre，
- * 新案条目不该凭空长出一张改动点表。
+ * 剩下的两半都还有生产样本，所以留在这里端到端跑：
+ *   1. **体裁判定的顺序**（"等2项"要先于"修正"命中）+ 弱证据不许覆盖强证据；
+ *   2. **编制说明要点**：按说明自己的小节逐条落库，引用只出自说明（段落隔离走真路径）。
  *
  * 零外部依赖（ADR-0001）：临时 SQLite + stub LLM，不起 web、不出网。
  */
@@ -305,75 +308,32 @@ after(() => {
   // 刻意不删临时目录：进程内 SQLite 连接仍持句柄，Windows 上 rmSync 会 EPERM（与各 e2e 一致）
 });
 
-describe('issue #76 第 2 刀：修正案改动点', () => {
+describe('issue #76：体裁判定的两个现场（摘要形状的入口）', () => {
   it('入库时按标题就判成修正案，且依据写明是标题证据', () => {
     const row = readGenre(AMENDED_ID);
     assert.equal(row.genre, 'amendment');
     assert.match(row.basis, /修正|修订/);
   });
 
-  it('摘要里出现了改动点，每一行的原文都逐字来自附件正文', () => {
-    const { json } = readSummary(AMENDED_ID);
-    assert.ok(json, `摘要应落库，日志：${logs.join('\n').slice(-800)}`);
-    if (process.env.E2E_DEBUG) console.log('DEBUG json keys:', JSON.stringify(Object.keys(json)), 'keyPoints:', json.keyPoints.length, 'changes:', JSON.stringify(json.changes), 'expl:', JSON.stringify(json.explanationPoints), 'sections:', json.explanationSections);
-    assert.ok(Array.isArray(json.changes) && json.changes.length > 0, '修正案应产出改动点');
-    for (const change of json.changes) {
-      assert.ok(change.quote.length > 0, '每行都要有逐字原文');
-      assert.equal(
-        containsVerbatim(AMENDED_TEXT, change.quote),
-        true,
-        `quote 必须真的在附件正文里，实际：${change.quote}`,
-      );
-      assert.equal(change.source, ATTACHMENT_NAME, '出处由程序反查，不能是模型自报');
-    }
-  });
-
-  it('覆盖度分母数的是全文，不是喂进去的那一截', async () => {
-    const { countChangeMarkers } = await import('../../src/lib/amendment-coverage.ts');
-    const { json } = readSummary(AMENDED_ID);
-    // 分母数的是**这份公示全部附件正文**（草案 + 说明），不是只看草案那一份
-    const expected = countChangeMarkers(AMENDED_TEXT + ' ' + EXPLANATION_TEXT);
-    assert.equal(json.changeMarkers.total, expected.total, '分母必须等于全文里数到的数量');
-    assert.ok(
-      json.changes.length <= expected.total,
-      '列出的行数不该超过分母 —— 超过了就是页面在宣称"看到了比正文更多的改动"',
-    );
-  });
-
-  it('正文里有"现行"二字不等于修正案：新案条目不长出这张表', async () => {
-    const { countChangeMarkers } = await import('../../src/lib/amendment-coverage.ts');
+  it('正文里有"现行"二字不等于修正案（#79 的金丝雀形状）', () => {
     const row = readGenre(FRESH_ID);
     assert.equal(row.genre, 'new_draft', `新案不该被措辞带跑，实际依据：${row.basis}`);
     const { json } = readSummary(FRESH_ID);
-    // 这条断言是上面那条的意义所在：新案的条文**确实喂进去了**（有条文要点），
-    // 所以"没有改动点"只能是体裁闸门的结果，而不是"没喂所以本来就没有"。
+    // 前提断言：新案的条文**确实喂进去了**（有条文要点），所以"体裁没被判错"这件事
+    // 不是因为"什么都没喂"。夹具正文够长就是为了这个（见 FRESH_TEXT 的长度注释）。
     assert.ok(
       json.keyPoints.length > 0,
-      '新案正文必须够长并被喂进摘要，否则本用例退化成假绿灯（见夹具里那段长度注释）',
+      '新案正文必须够长并被喂进摘要，否则这条用例退化成"因为没喂所以没内容"的假绿灯',
     );
-    // 第二层前提：夹具的说明里**确实**有一句 stub 会回响的改动词 ⇒
-    // 撤掉体裁门时 `changes` 真会非空（2026-09-26 之前它不会，那条 pin 因此是假的）
-    assert.ok(
-      countChangeMarkers(FRESH_EXPLANATION_TEXT).total > 0,
-      '新案夹具的说明里要有一处可计数的改动词，否则这道门撤了也不红',
-    );
-    assert.equal(json.changeMarkers, null, '没判成修正案就不该有覆盖度');
-    assert.deepEqual(json.changes, []);
   });
 
-  it('非修正案（打包清单）即使模型吐出改动点也一律丢弃 —— 体裁真的门控产品形状', () => {
+  it('打包清单先于「修正」命中（顺序错了全站打包标准会被吞进修正案）', () => {
     const row = readGenre(PACKAGE_ID);
     assert.equal(row.genre, 'package_plan', `「等2项」要先于「修正」命中，实际依据：${row.basis}`);
     const { json } = readSummary(PACKAGE_ID);
     assert.ok(json, `打包清单这条也应生成摘要，日志：${logs.join('\n').slice(-400)}`);
-    // 前提：附件确实喂进去了 —— 否则"没有改动点"只是"没喂"的副产品（本仓库栽过的那族假绿灯）
+    // 前提：附件确实喂进去了 —— 否则上面那句"判成打包清单"只是"没喂"的副产品
     assert.ok(json.keyPoints.length > 0, '这份对照正文必须够长并被喂进摘要');
-    assert.equal(json.changeMarkers, null, '不是修正案就没有"共几处"的分母');
-    assert.deepEqual(
-      json.changes,
-      [],
-      '模型吐出的改动点表必须被体裁门清掉 —— 撤掉那道门时这条要红（它是那道门唯一的可观测点）',
-    );
   });
 
   it('编制说明按自己的小节逐条落库，且引用只出自说明（段落隔离走真路径）', () => {

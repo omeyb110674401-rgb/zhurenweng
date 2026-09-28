@@ -16,10 +16,7 @@ import {
 } from '../../src/lib/attachment-select.ts';
 import { attachmentRole } from '../../src/lib/attachment-select.ts';
 import { listNoticeAttachmentTexts } from '../../src/db/repo/attachments.ts';
-import {
-  countChangeMarkers,
-  countExplanationSections,
-} from '../../src/lib/amendment-coverage.ts';
+import { countExplanationSections } from '../../src/lib/explanation-coverage.ts';
 import type { DraftSource } from '../../src/lib/ports.ts';
 import { llmReady, llmUnavailableReason } from '../../src/lib/llm-availability.ts';
 import { sendTaskFailureAlert } from '../../src/lib/alerts.ts';
@@ -165,17 +162,11 @@ export const summarizeNoticesJob: Job = {
       const draftSources = await draftSourcesForSummary(target);
       const draftChars = draftSources.reduce((sum, item) => sum + countCjk(item.text), 0);
       if (draftChars > 0) fedCount += 1;
-      // 修正案才算覆盖度分母：数的是**全部**附件正文里的修改表述，不是喂进去的那一截。
-      // 页面把"检测到 N 处 / 本页列出 M 处"摆在一起，读者才知道本站读了多少。
-      // 两份分母都从**全文**算（改动表述数 / 说明小节数），理由见 amendment-coverage.ts：
-      // 拿喂进去的那一截数分母，窗口外的内容永远不会出现在"还差多少"那句话里。
-      const fullTexts = await listNoticeAttachmentTexts(target.id);
-      const changeMarkers =
-        target.genre === 'amendment'
-          ? countChangeMarkers(fullTexts.map((row) => row.text).join(' '))
-          : null;
       // 说明小节数只在"本轮真喂了说明"时才算：没喂却报一个数，等于让页面去解释
-      // 一份模型根本没读过的文件。
+      // 一份模型根本没读过的文件。分母从**全文**算（不是喂进去的那一截），理由见
+      // explanation-coverage.ts：拿喂进去的那一截数分母，窗口外的内容永远不会出现在
+      // "还差多少"那句话里。
+      const fullTexts = await listNoticeAttachmentTexts(target.id);
       const explanationSections = draftSources.some((source) => source.role === 'explanation')
         ? countExplanationSections(
             fullTexts
@@ -187,16 +178,10 @@ export const summarizeNoticesJob: Job = {
       try {
         const summary = await summarizeWithRetry(llm, target, ctx, draftSources);
         // draftSources 一并交给归一化：条文要点必须能反查到出处才落库（issue #57 第 6 步）
-        // 体裁是真的门控产品形状，不只是打个标签：新案即使模型吐出"改动点"也一律丢弃 ——
-        // 没有对照基准的改动表等于把读者领进一个我们并不成立的承诺。
-        if (target.genre !== 'amendment' && Array.isArray(summary.changes)) {
-          summary.changes = [];
-        }
         const quoted = buildQuotedSummary(
           summary,
           summary.quotes,
           draftSources,
-          changeMarkers,
           explanationSections,
         );
         await saveNoticeSummary({

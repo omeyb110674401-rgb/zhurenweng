@@ -53,12 +53,12 @@ from notices
 where genre = 'amendment' and genre_evidence = 'attachment_text' and genre_basis like '%现行%'
 order by 2, 1;
 
--- ⑤ 读者可见面：52 条修正案里有多少条真带着"改动点"
---    正确判据是 jsonb_array_length（"键在不在"这种问法永远不会失败，见 78-*.md 的 A3）
+-- ⑤ 读者可见面：52 条修正案里有多少条有摘要
+--    （原来这里还有两列问"改动点非空 / 带过覆盖度键" —— 「改动点」功能已于 2026-09-27
+--     整体删除，见 issue #85：全库 changes 非空 0 条，那两列从此永远读出 0，留着只会误导。
+--     本文件保留为历史审计脚本，问的问题只剩"这一批到底有没有摘要"。
+--     顺带记住那条判据教训：问"键在不在"永远不会失败，要问就用 jsonb_array_length 问值。）
 select count(*) filter (where ai_summary_json is not null) as 有摘要,
-       count(*) filter (where ai_summary_json ~ '^\s*\{'
-                          and jsonb_array_length(ai_summary_json::jsonb -> 'changes') > 0) as 改动点非空,
-       count(*) filter (where ai_summary_json ~ '^\s*\{'
-                          and (ai_summary_json::jsonb ? 'changeMarkers')) as 带过覆盖度键
+       count(*) as 修正案总数
 from notices
 where genre = 'amendment';

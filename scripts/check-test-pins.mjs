@@ -52,7 +52,9 @@ const TARGETS = {
   sourceHealth: 'src/lib/source-health.ts',
   summaryDisplay: 'src/lib/summary-display.ts',
   summaryContent: 'src/lib/summary-content.ts',
-  amendmentCoverage: 'src/lib/amendment-coverage.ts',
+  // issue #85：「改动点」删除后这个模块只剩编制说明要点的覆盖度，文件随之改名 ——
+  // 留着一个叫 amendment-coverage 却不再管修正案的名字，就是下一个读代码的人的坑。
+  explanationCoverage: 'src/lib/explanation-coverage.ts',
   attachmentMode: 'src/lib/attachment-mode.ts',
   summarize: 'worker/jobs/summarize-notices.ts',
   noticePage: 'src/app/notices/[id]/page.tsx',
@@ -944,48 +946,34 @@ const CASES = [
     test: 'tests/unit/notice-genre.test.mjs',
   },
   {
-    label: '改动点的引用反查不到出处也照登（页面为核对不上的话背书）',
-    file: 'summaryContent',
-    from: '    if (source === null) continue;',
-    to: "    if (source === null) { out.push({ clause, kind: 'other', text: pointText, quote, source: null, sourceUrl: null }); continue; }",
-    pattern: 'issue #76：改动点必须逐字反查得到出处',
-    test: 'tests/unit/amendment-changes.test.mjs',
-  },
-  {
-    label: '覆盖度永远说"已列出全部"（窗口截掉的改动被藏起来）',
-    file: 'amendmentCoverage',
-    from: '  if (listed >= markers.total) {',
+    // issue #85：这三条原来钉的是「改动点」的覆盖度（分母数正文里的修改表述）。
+    // 那套功能因**从未产出过**被整体删除，覆盖度只剩**编制说明要点**这一侧 ——
+    // 判据同构（列得少要照实说少、0 个标题不许说成"全部"、启发式数字要带"约"），
+    // 所以 pin 原样搬到新模块与新用例上，而不是连带删掉。
+    label: '说明要点覆盖度永远说"已列出全部"（窗口截掉的小节被藏起来）',
+    file: 'explanationCoverage',
+    from: '  if (listed >= sections) {',
     to: '  if (true) {',
-    pattern: 'issue #76：覆盖度那句话的三种写法',
-    test: 'tests/unit/amendment-changes.test.mjs',
+    // pattern 必须选中**真的区分这两种状态**的那条用例：指到"分母为 0"那条时，
+    // 撤掉这一行它照样绿（实测 —— 本轮第二次踩到"指对了文件、指错了用例"这种假绿灯）。
+    pattern: '列得比数到的少要照实说少',
+    test: 'tests/unit/explanation-points.test.mjs',
   },
   {
-    label: '分母为 0 也写成"已列出全部 0 处"（读者以为这条没改什么）',
-    file: 'amendmentCoverage',
-    from: '  if (markers.total === 0) {',
+    label: '说明一个标题都没数到也写成"已列出全部 0 个"（读者以为这份说明没有小节）',
+    file: 'explanationCoverage',
+    from: '  if (sections === 0) {',
     to: '  if (false) {',
-    pattern: 'issue #76：覆盖度那句话的三种写法',
-    test: 'tests/unit/amendment-changes.test.mjs',
+    pattern: '分母为 0 时不写',
+    test: 'tests/unit/explanation-points.test.mjs',
   },
   {
-    label: '体裁不门控产品形状（非修正案也会长出一张改动点表）',
-    file: 'summarize',
-    from: "        if (target.genre !== 'amendment' && Array.isArray(summary.changes)) {",
-    to: '        if (false && Array.isArray(summary.changes)) {',
-    pattern: 'issue #76 第 2 刀：修正案改动点',
-    test: 'tests/e2e/summary-amendment-changes.test.mjs',
-  },
-  {
-    // 2026-09-26 补（issue #79）：体裁门有两半 —— 清掉 `changes`，以及**不给非修正案算覆盖度分母**。
-    // 上面那条只能证明前半（要靠打包清单那条夹具才可观测：新案夹具里的改动词只出现在编制说明里，
-    // 而逐字反查只认草案那一侧，所以新案无论如何都产不出改动点）。
-    // 这一条钉后半：分母为 null 是「新案不该有"共几处"这句话」的唯一证据。
-    label: '体裁不门控覆盖度分母（新案也带上一份"共几处"）',
-    file: 'summarize',
-    from: "        target.genre === 'amendment'\n          ? countChangeMarkers(fullTexts.map((row) => row.text).join(' '))\n          : null;",
-    to: "        countChangeMarkers(fullTexts.map((row) => row.text).join(' '));",
-    pattern: 'issue #76 第 2 刀：修正案改动点',
-    test: 'tests/e2e/summary-amendment-changes.test.mjs',
+    label: '说明覆盖度的措辞不再带"约"（启发式数字被说成精确的）',
+    file: 'explanationCoverage',
+    from: "    return { state: 'complete', detail: `已列出检测到的约 ${sections} 个小节` };",
+    to: "    return { state: 'complete', detail: `已列出检测到的 ${sections} 个小节` };",
+    pattern: '措辞带"约"',
+    test: 'tests/unit/explanation-points.test.mjs',
   },
   {
     // 2026-09-26 补（issue #79）：`force` 是"改了词表之后存量才改得动"的唯一出口。
@@ -995,7 +983,7 @@ const CASES = [
     from: '    if (!options.force && row.genre !== null && !genreDecisionWins(decision.evidence, storedEvidence)) {',
     to: '    if (row.genre !== null && !genreDecisionWins(decision.evidence, storedEvidence)) {',
     pattern: 'issue #79：改词表后的存量回填',
-    test: 'tests/e2e/summary-amendment-changes.test.mjs',
+    test: 'tests/e2e/summary-genre-and-explanations.test.mjs',
   },
   {
     label: '条文与说明共用一个反查池（说明里的话会被标成"摘自条文的原文"）',

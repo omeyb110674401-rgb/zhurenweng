@@ -66,12 +66,6 @@ export interface StructuredSummary {
   /** 提交渠道清单（可为空数组） */
   channels: SummaryChannel[];
   /**
-   * 修正案改动点（issue #76 第 2 刀）：只有体裁判为修正案、且真的喂进了附件正文
-   * 才可能有内容。归一化时拿每条的 `quote` 去喂进去的条文里逐字反查，查不到就丢弃 ——
-   * 与 keyPoints 同一条不变量：页面上出现的每一处改动，都得是本站真的读到的原话。
-   */
-  changes?: AmendmentChangeDraft[];
-  /**
    * 编制说明要点（issue #76 第 3 刀）：按说明**自己的小节**逐节概括，
    * 引用只能来自「编制说明」段落。
    */
@@ -90,22 +84,6 @@ export interface AmendmentExplanationDraft {
   /** 这一节说了什么：一句话，60 字以内 */
   text: string;
   /** 该节的逐字原文（不超过 200 字） */
-  quote: string;
-}
-/**
- * 模型给出的一处改动。
- *
- * 引用与内容放在**同一个对象**里，不用平行数组：keyPoints 那套"按下标与 quotes 对齐"
- * 在归一化时吃过不少亏（错配比留空更糟 —— 读者看到的是一条挂在错误原文上的改动）。
- */
-export interface AmendmentChangeDraft {
-  /** 被改的条款标识，照抄原文写法（如「第三条」「附录A」），不要改写编号 */
-  clause: string;
-  /** 改动类型：modify 修改 / add 新增 / delete 删除 / renumber 条序调整 / other */
-  kind: 'modify' | 'add' | 'delete' | 'renumber' | 'other';
-  /** 这一处改了什么：一句话，40 字以内 */
-  text: string;
-  /** 逐字原文：官方对照文字里描述这处改动的那句话，160 字以内 */
   quote: string;
 }
 
