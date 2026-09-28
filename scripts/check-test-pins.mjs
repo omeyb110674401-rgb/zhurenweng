@@ -1215,6 +1215,16 @@ const CASES = [
     pattern: '合并提醒的条数上限',
     test: 'tests/e2e/subscribe-audience.test.mjs',
   },
+  {
+    // 构建期的 npm 源（issue #84 部署时加的）。写成硬编码 = .env 里设了也不生效，
+    // 而表现是"改了没反应"（构建照旧从被限速的官方源拉），正是幽灵旋钮那一族。
+    label: '构建期 npm 源不再转发（.env 里设了也没用，构建照旧走官方源）',
+    file: 'compose',
+    from: '        NPM_REGISTRY: ${NPM_REGISTRY:-https://registry.npmjs.org}',
+    to: '        NPM_REGISTRY: https://registry.npmjs.org',
+    pattern: '构建期参数按服务逐条转发',
+    test: 'tests/unit/deploy-env-contract.test.mjs',
+  },
 ];
 
 let red = 0;

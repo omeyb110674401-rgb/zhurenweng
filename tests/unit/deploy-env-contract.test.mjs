@@ -107,6 +107,66 @@ const composeVars = referencedVars(composeText);
 const envVars = declaredVars(envExampleText);
 const services = serviceEnvKeys(composeText);
 
+/**
+ * 按服务解析 `build.args` 里**被转发的变量名**（issue #84）。
+ *
+ * 为什么需要它：上面两条不变量查的是"compose 里出现过 ${VAR}"，而 compose 里 NPM_REGISTRY
+ * 出现在 web 与 worker 两个 `build.args` 里 —— 只要还有一个在转发，全集检查就照样为绿，
+ * 而实际后果是一个镜像照旧从被限速的源拉依赖（"改了没反应"的幽灵旋钮那一族）。
+ * 判据必须是**引用形式**（`${NPM_REGISTRY…}`）而不是"键出现过"：写成字面量同样到不了 .env。
+ */
+function serviceBuildVars(text) {
+  const result = new Map();
+  let inServices = false;
+  let current = null;
+  let inBuild = false;
+  let inArgs = false;
+  for (const raw of text.split(/\r?\n/)) {
+    const line = raw.trimEnd();
+    if (line.trim().startsWith('#')) continue;
+    if (/^services:\s*$/.test(line)) {
+      inServices = true;
+      current = null;
+      continue;
+    }
+    if (/^[A-Za-z]/.test(line)) {
+      inServices = false;
+      current = null;
+      continue;
+    }
+    if (!inServices) continue;
+    const service = /^ {2}([a-z][a-z0-9_-]*):\s*$/.exec(line);
+    if (service) {
+      current = service[1];
+      result.set(current, new Set());
+      inBuild = false;
+      inArgs = false;
+      continue;
+    }
+    if (!current) continue;
+    if (/^ {4}build:\s*$/.test(line)) {
+      inBuild = true;
+      continue;
+    }
+    if (/^ {4}\S/.test(line)) {
+      inBuild = false;
+      inArgs = false;
+      continue;
+    }
+    if (!inBuild) continue;
+    if (/^ {6}args:\s*$/.test(line)) {
+      inArgs = true;
+      continue;
+    }
+    if (!inArgs) continue;
+    const arg = /^ {8}([A-Z][A-Z0-9_]*):\s*(.+)$/.exec(line);
+    if (arg && /\$\{/.test(arg[2])) result.get(current).add(arg[1]);
+  }
+  return result;
+}
+
+const buildVars = serviceBuildVars(composeText);
+
 /** web 与 worker 都需要的端口配置（少一个就在那个容器里静默失效）。 */
 const SHARED_PORT_KEYS = [
   'GLM_API_KEY',
@@ -208,6 +268,22 @@ describe('部署环境变量契约（compose ↔ .env.example ↔ docs ↔ 代�
         assert.ok(actual.has(key), `${service} 没拿到 ${key}：文档说它可调，实际改了不生效`);
         assert.ok(envVars.has(key), `${key} 未在 .env.example 声明（操作者无从填写）`);
       }
+    }
+  });
+
+  it('issue #84：构建期参数按服务逐条转发（少一个服务 = 那个镜像照旧走官方源）', () => {
+    // NPM_REGISTRY 只影响构建期（依赖层从哪个 npm 源下载），不传进容器 —— 所以它不在
+    // services（environment）里，上面那几条查不到它。生产实测官方源被限速到 ~140 KB/s
+    // （一次 npm ci 半小时跑不完，表现是"构建卡死"），镜像源快两个数量级；而两个服务
+    // 各自 COPY package.json + npm ci，任何一处没转发，那个镜像就仍旧拉不动。
+    for (const service of ['web', 'worker']) {
+      const keys = buildVars.get(service);
+      assert.ok(keys, `compose 的 ${service} 应有 build 段`);
+      assert.ok(
+        keys.has('NPM_REGISTRY'),
+        `${service} 的 build.args 没转发 \${NPM_REGISTRY}：在那台机器上构建会卡在 npm ci`,
+      );
+      assert.ok(envVars.has('NPM_REGISTRY'), 'NPM_REGISTRY 未在 .env.example 声明（操作者无从填写）');
     }
   });
 

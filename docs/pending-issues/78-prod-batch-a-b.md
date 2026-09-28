@@ -190,6 +190,13 @@ mohurd / moj / mot / ndrc / npc / samr），10 个源 `consecutive_failures` 全
 另：`npm ci` 慢是因为 Dockerfile 没配 npm 缓存挂载，**每次构建都重新下载整棵依赖树**，
 本轮约 45 分钟。要提速就加 `--mount=type=cache,target=/root/.npm`，属独立一轮。
 
+> **2026-09-27 更正（issue #84 部署时实测）**：上面这条归因**不准确**。缓存挂载只是次要项，
+> 主因是**官方 npm 源在这台机器上被限速**：同一时刻量 `registry.npmjs.org` 的 `next` 元数据
+> （31 MB）25 秒只下来 3.4 MB（≈136 KB/s），而 `registry.npmmirror.com` 同一份 **1.65 秒**。
+> 缓存挂载救不了元数据那一段（每个 packument 仍要重新拉），换成镜像源才是根上的修法：#84 把
+> npm 源做成构建期可配（`ARG NPM_REGISTRY` + compose `build.args` + `.env`），改完那次
+> `npm ci` + 双镜像**约 2 分钟**。缓存挂载仍值得做（省已下载的 tarball），但它不是这个数的来源。
+
 ## 十、没做 / 待用户
 
 - **#76 第 2/3 刀在线上仍未证明**，且查出体裁词表不一致这个新缺陷 —— 见

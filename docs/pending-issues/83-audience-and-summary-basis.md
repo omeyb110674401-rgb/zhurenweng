@@ -247,6 +247,15 @@
 生产不读它（web 用 `npm run start`、worker 直接 `node worker/index.ts`，两者在两版里都在），
 下一次真正重建依赖层时会自动跟上。
 
+> **2026-09-27 更正（issue #84 部署时实测，同一天内）**：上面这段把原因写成"缓存打不中 ⇒
+> 慢"，**不完整**。真正的主因是**官方 npm 源被限速**：现场量到 `registry.npmjs.org` 的
+> `next` 元数据（31 MB）25 秒只下来 3.4 MB（≈136 KB/s），而 `registry.npmmirror.com` 同一份
+> **1.65 秒**。所以"退回上一版 package.json 命中缓存"只是绕开它，不是修好它 —— #84 把 npm 源
+> 做成了**构建期可配**（两个 Dockerfile 的 `ARG NPM_REGISTRY` + compose 两个 `build.args`
+> 转发 + `.env.example` 声明 + 生产 `.env` 设镜像源），改完那次 `npm ci` + 双镜像**约 2 分钟**
+> 建完。**那条残留也一并清掉了**：这次依赖层真的重建过，镜像里那份 `package.json` 与仓库
+> 逐字节一致。详见 `84-subscription-audience-and-merged-reminders.md` 第 4.3 节。
+
 另记一件不算意外但要知道的事：`docker compose up -d` 花了约 **3 分钟**才完成 —— 旧 worker 容器
 有 `stop_grace_period: 150s` 且当时正在跑一轮，Docker 要等它优雅退出。这段时间里**旧代码仍在服务**
 （日志里能看到它把 6 封截止提醒发了出去）。

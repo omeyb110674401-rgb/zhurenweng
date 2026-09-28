@@ -31,6 +31,12 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.web
+      # 依赖层走哪个 npm 源（issue #84）：国内实测 registry.npmjs.org 被限速到
+      # ~140 KB/s（一次 npm ci 半小时跑不完），registry.npmmirror.com 快两个数量级。
+      # 只在**构建期**生效，与运行时无关；换源不影响完整性校验（npm ci 按 lock 的
+      # integrity 逐包验），所以它不是一个"看着可调其实没用"的旋钮。
+      args:
+        NPM_REGISTRY: ${NPM_REGISTRY:-https://registry.npmjs.org}
     restart: unless-stopped
     environment:
       NODE_ENV: production
@@ -96,6 +102,9 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.worker
+      # 与 web 同一份理由（issue #84）：构建期 npm 源，缺省官方源
+      args:
+        NPM_REGISTRY: ${NPM_REGISTRY:-https://registry.npmjs.org}
     restart: unless-stopped
     environment:
       NODE_ENV: production

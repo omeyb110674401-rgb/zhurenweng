@@ -4,8 +4,16 @@ FROM node:24-slim
 WORKDIR /app
 
 COPY package.json package-lock.json ./
+# 依赖层的 npm 源（issue #84）。为什么要有这个参数：生产机在国内，实测
+# registry.npmjs.org 被限速到约 140 KB/s —— `next` 一个包的元数据 31 MB，光它就要
+# 四分钟，一次 `npm ci` 半小时都跑不完（2026-09-26 那次的表现是"卡死"：日志停在
+# 第 56 秒、load 0.04、进程 rchar 二十秒不涨）。registry.npmmirror.com 同一份元数据
+# 1.65 秒。**换源不降低供应链保证**：`npm ci` 按 package-lock.json 里的
+# integrity(sha512) 逐包校验，镜像站替换内容会当场失败。
+# 缺省仍是官方源（本文件不假设部署地），生产在 .env 里设 NPM_REGISTRY。
+ARG NPM_REGISTRY=https://registry.npmjs.org
 # better-sqlite3 自带预编译二进制，slim 镜像无 Python/工具链，跳过 install 脚本（ADR-0001 同源处理）
-RUN npm ci --ignore-scripts
+RUN npm ci --ignore-scripts --registry="$NPM_REGISTRY"
 
 # 与 Dockerfile.worker 同一份裁剪清单（理由与实测见那边的注释）：web 其实连留下来的
 # 那部分都不导入，但两份 Dockerfile 用同一组路径比「一边裁一边不裁」好核对，也挡住了

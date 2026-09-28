@@ -4,8 +4,11 @@ FROM node:24-slim
 WORKDIR /app
 
 COPY package.json package-lock.json ./
+# 依赖层的 npm 源（issue #84，理由与实测见 Dockerfile.web 同一段注释）：缺省官方源，
+# 生产在 .env 里设 NPM_REGISTRY。换源不降低供应链保证（npm ci 逐包校验 integrity）。
+ARG NPM_REGISTRY=https://registry.npmjs.org
 # better-sqlite3 自带预编译二进制，slim 镜像无 Python/工具链，跳过 install 脚本（ADR-0001 同源处理）
-RUN npm ci --ignore-scripts
+RUN npm ci --ignore-scripts --registry="$NPM_REGISTRY"
 
 # 裁掉 pdfjs-dist 里 worker 用不到的产物：35MB 里约 29MB 是浏览器查看器、现代构建、
 # source map、图像解码器与内嵌 JS 沙箱 —— 我们只用 `legacy/build/pdf.mjs` 抽文字层。

@@ -50,6 +50,14 @@ bash deploy/sync-files-local.sh src/app/page.tsx src/lib/dates.ts
 `cd /opt/zhurenweng && docker compose build web worker && docker compose up -d web worker`。
 通道细节、历史脚本（`deploy-NN.sh`）为何不可用见 `deploy/README.md`。
 
+构建前先确认 `.env` 里的 `NPM_REGISTRY`（issue #84）：它只在**构建期**决定依赖从哪个
+npm 源下载。生产机实测 `registry.npmjs.org` 被限速到约 140 KB/s —— `npm ci` 会跑不完，
+表现是"构建卡住"而不是报错（日志停住、load 接近 0）。仓库缺省值在 `docker-compose.yml`
+与 `Dockerfile.*` 里都是官方源，所以国内机器**要么**在 `.env` 里设
+`NPM_REGISTRY=https://registry.npmmirror.com`，**要么**构建时显式写
+`docker compose build --build-arg NPM_REGISTRY=…`。换源不影响完整性校验：
+`npm ci` 按 `package-lock.json` 的 `integrity`（sha512）逐包验。
+
 ## 3. 配置环境变量
 
 ```bash
