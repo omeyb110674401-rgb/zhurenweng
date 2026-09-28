@@ -88,6 +88,10 @@ const TARGETS = {
   impactDisplay: 'src/lib/impact-display.ts',
   // issue #86 第 2 刀：「改了哪几处」的覆盖度（改动表述计数 + 三态判词）
   changeCoverage: 'src/lib/change-coverage.ts',
+  // issue #86 第 3 刀：喂入侧的档位与预算。这一处撤掉之后**一个字都不会报错** ——
+  // 档位判错就是"还是老样子"（回到标准档，页面照常出摘要），喂少了只是模型看到的东西变少，
+  // 而那正是这一刀要消灭的静默失败，所以它必须有"撤掉实现必须变红"的钉子。
+  attachmentFeed: 'src/lib/attachment-feed.ts',
   // issue #83 补的三个"从没被自证覆盖过"的关键面：SSRF 防护、北极星计数的门口、
   // 后台 HTML 转义。它们此前要么只有 e2e 覆盖（而 e2e 跑的是构建产物，撤源码不红），
   // 要么一个测试都没有 —— 正是最该"撤掉实现必须变红"的三处。
@@ -432,8 +436,10 @@ const CASES = [
   {
     label: '影子档也喂条文（shadow 与 on 不再有任何区别）',
     file: 'summarize',
-    from: '  if (!attachmentTextFeedsSummary()) return [];',
-    to: '  if (false) return [];',
+    // issue #86 第 3 刀把这一行搬进了 `feedPlanForSummary`（它同时要带出喂入清单），
+    // 靶点跟着搬：判据（影子档不许喂）一个字没变，撤掉的实现也还是同一处。
+    from: '  if (!attachmentTextFeedsSummary()) return { tier, sources: [], report };',
+    to: '  if (false) return { tier, sources: [], report };',
     pattern: '附件条文进摘要',
     test: 'tests/e2e/summary-draft-input.test.mjs',
   },
@@ -1386,6 +1392,66 @@ const CASES = [
     to: '  if (false) {',
     pattern: '一处在正文里也数不到 ⇒ 不说',
     test: 'tests/unit/summary-changes.test.mjs',
+  },
+  {
+    // issue #86 第 3 刀：档位判反了就是"每一个没归好类的条目都按重档跑一遍" ——
+    // 花钱、变慢，而且不会有任何报错。判据就是那条 fail-safe 本尊。
+    label: '受众面判不出来也走重档（未判定 ⇒ 每次调用都加倍）',
+    file: 'attachmentFeed',
+    from: "  return audience === 'public' ? 'deep' : 'standard';",
+    to: "  return audience !== 'sector' ? 'deep' : 'standard';",
+    pattern: '判不出来就当标准档',
+    test: 'tests/unit/attachment-feed.test.mjs',
+  },
+  {
+    label: '保底份额取消（装不下时最后那一份又只剩几百字）',
+    file: 'attachmentFeed',
+    from: '  const reserve = rest.reduce((sum, cjk) => sum + Math.min(state.budget.minShare, cjk), 0);',
+    to: '  const reserve = 0;',
+    pattern: '最后一份仍然拿得到保底',
+    test: 'tests/unit/attachment-feed.test.mjs',
+  },
+  {
+    label: '"全都装得下"永远判成装不下（明明吃得下也要按保底切一刀）',
+    file: 'attachmentFeed',
+    from: '  return windowCjk.reduce((sum, cjk) => sum + cjk, 0) <= total;',
+    to: '  return false;',
+    pattern: '全都装得下',
+    test: 'tests/unit/attachment-feed.test.mjs',
+  },
+  {
+    // 靶点在 worker 组装输入的那一行，判据在跨进程的 e2e（stub 的调用日志里记着档位）——
+    // 两处在同一条执行路径上：撤掉这一行，端口收到的就是标准档。
+    label: '档位不传给端口（重档的预算被适配器的标准档上限静默切掉）',
+    file: 'summarize',
+    from: '    tier,',
+    to: "    tier: 'standard',",
+    pattern: '档位真的传到了端口',
+    test: 'tests/e2e/summary-feed-tier.test.mjs',
+  },
+  {
+    label: '喂入清单不落库（"模型没读到"与"我们没喂"又变得分不出来）',
+    file: 'summarize',
+    from: '          feed: feedReport,',
+    to: '          feed: undefined,',
+    pattern: '公众广域走重档',
+    test: 'tests/e2e/summary-feed-tier.test.mjs',
+  },
+  {
+    label: '两段正文的上限不随档位（重档喂到 16,000 字符，被标准档的 10,000 切掉尾巴）',
+    file: 'llmAdapter',
+    from: '    explanationBlock(input.draftSources, budget.explanationBlockChars),',
+    to: '    explanationBlock(input.draftSources),',
+    pattern: '重档放得下那份 20,000 字符的说明',
+    test: 'tests/unit/summary-draft-points.test.mjs',
+  },
+  {
+    label: '一句话摘要不再说档位与喂入量（后台与日志里看不出这条走了哪一档）',
+    file: 'summaryDiagnostics',
+    from: '  if (feed) {',
+    to: '  if (false) {',
+    pattern: '一句话摘要里说得出档位',
+    test: 'tests/unit/summary-diagnostics.test.mjs',
   },
 ];
 

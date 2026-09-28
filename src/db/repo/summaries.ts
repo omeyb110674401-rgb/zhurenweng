@@ -21,6 +21,11 @@ export interface PendingSummaryTarget {
   sourceId: string;
   /** 体裁（issue #76）：修正案要走"改动点"那一套，其余按参与导引摘要 */
   genre: string | null;
+  /**
+   * 受众面（issue #86 第 3 刀）：**喂入的档位由它决定**（公众广域走重档，见
+   * src/lib/attachment-feed.ts）。NULL = 本列上线前的存量，与 `unknown` 一样回标准档。
+   */
+  audience: string | null;
 }
 
 /**
@@ -42,6 +47,7 @@ export async function listNoticesForSummary(limit = 50): Promise<PendingSummaryT
       bodyText: notices.bodyText,
       sourceId: notices.sourceId,
       genre: notices.genre,
+      audience: notices.audience,
     })
     .from(notices)
     .where(

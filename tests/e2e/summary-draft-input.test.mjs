@@ -154,9 +154,12 @@ describe('issue #57 第 5/6 步：附件条文进摘要（档位必须真的有�
     process.env.ATTACHMENT_TEXT = 'shadow';
     const output = await runSummaryRound();
     assert.match(output, /摘要任务完成：成功 1 条/, 'shadow 档下摘要仍要正常生成');
+    // 判据是"日志不许声称喂了条文"，措辞随日志格式走（issue #86 第 3 刀把这一句换成了
+    // 喂入清单的口径：`标准档喂入 N 份 / M 汉字`）。**不跟着改就会变成一条恒真的判据** ——
+    // 旧措辞 `附件条文 N 份` 已经不存于任何一行日志，查它永远为真。
     assert.ok(
-      !/附件条文 \d+ 份/.test(output),
-      '日志说「用到附件条文」就等于把没做的事说成做了（这条是界面上那句话的源头）',
+      !/喂入 [1-9]\d* 份/.test(output),
+      '日志说「喂入 N 份」就等于把没做的事说成做了（这条是界面上那句话的源头）',
     );
 
     const row = summaryRow();
@@ -173,7 +176,9 @@ describe('issue #57 第 5/6 步：附件条文进摘要（档位必须真的有�
     process.env.ATTACHMENT_TEXT = 'on';
     resetSummary();
     const output = await runSummaryRound();
-    assert.match(output, /附件条文 1 份/, '日志要说清这条摘要用了条文（生产排查全靠它）');
+    // 日志要说清这条摘要用了条文（生产排查全靠它）：措辞是喂入清单那一句
+    // （issue #86 第 3 刀起它带着档位、份数、实际喂进去的汉字数）
+    assert.match(output, /标准档喂入 1 份 \/ \d+ 汉字/);
     assert.match(output, /档位 on/);
 
     const summary = JSON.parse(summaryRow().json);

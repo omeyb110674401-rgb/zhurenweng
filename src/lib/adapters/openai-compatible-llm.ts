@@ -9,6 +9,7 @@ import type {
   SummaryChannel,
   SummaryChannelKind,
 } from '../ports.ts';
+import { SUMMARY_TIERS } from '../attachment-feed.ts';
 import { CHANGE_KINDS, type ChangeKind } from '../change-coverage.ts';
 import {
   SUMMARY_CHANNEL_KINDS,
@@ -550,7 +551,8 @@ function readQuotes(raw: unknown): SummaryQuotes | undefined {
   };
 }
 
-function userPrompt(input: LlmSummarizeInput): string {
+export function userPrompt(input: LlmSummarizeInput): string {
+  const budget = SUMMARY_TIERS[input.tier ?? 'standard'];
   const body =
     input.bodyText.length > MAX_BODY_CHARS
       ? `${input.bodyText.slice(0, MAX_BODY_CHARS)}…（正文过长已截断）`
@@ -560,20 +562,12 @@ function userPrompt(input: LlmSummarizeInput): string {
     `官方原文链接：${input.url}`,
     '正文纯文本：',
     body.length > 0 ? body : '（未抓取到正文，仅能基于标题判断）',
-    draftBlock(input.draftSources),
-    explanationBlock(input.draftSources),
+    draftBlock(input.draftSources, budget.draftBlockChars),
+    explanationBlock(input.draftSources, budget.explanationBlockChars),
   ]
     .filter((part) => part.length > 0)
     .join('\n');
 }
-
-/**
- * 说明段落单独的字数预算（issue #76 第 3 刀）。
- *
- * 刻意不与条文共用一条预算：生产实测编制说明**中位 19,207 字**，而条文动辄上万，
- * 共用时先被喂满的一定是排在前面的条文，说明永远只剩个开头 —— 那还不如不给它段落。
- */
-const MAX_EXPLANATION_TOTAL_CHARS = 10_000;
 
 /**
  * 「编制说明」段落（issue #76 第 3 刀）。
@@ -581,14 +575,21 @@ const MAX_EXPLANATION_TOTAL_CHARS = 10_000;
  * 与「附件条文」分开成两段，是为了让**引用反查按段落隔离**：说明里的话不能当作规定
  * 落进 keyPoints，条文也不能冒充"说明里的解释"。角色由调用方按文件名判好
  * 带在 DraftSource.role 上（见 src/lib/attachment-select.ts 的 attachmentRole）。
+ *
+ * 上限由档位给（issue #86 第 3 刀）：缺省 = 标准档（与在此之前逐个相同）；重档放宽是因为
+ * worker 那一侧的重档预算已经把说明喂到 16,000 字符，卡在 10,000 就会**静默切掉尾部** ——
+ * 而"静默切掉"正是这一刀要消灭的失败模式。数字只在 `attachment-feed.ts` 里存一份。
  */
-export function explanationBlock(sources: DraftSource[] | undefined): string {
+export function explanationBlock(
+  sources: DraftSource[] | undefined,
+  maxChars: number = SUMMARY_TIERS.standard.explanationBlockChars,
+): string {
   const usable = (sources ?? []).filter((item) => item.role === 'explanation' && item.text.trim().length > 0);
   if (usable.length === 0) return '';
   const parts: string[] = [
     `编制说明（本站从该公示的官方附件中逐字提取，共 ${usable.length} 份。这是解释性文件，不是规定本身：讲为什么制定、依据什么、主要改了什么、向谁征求意见）：`,
   ];
-  let left = MAX_EXPLANATION_TOTAL_CHARS;
+  let left = maxChars;
   usable.forEach((item, index) => {
     const label = `【说明 ${index + 1}：${item.name}】`;
     if (left <= 0) {
@@ -602,23 +603,27 @@ export function explanationBlock(sources: DraftSource[] | undefined): string {
   return parts.join('\n');
 }
 
-/** 附件条文的总字符上限（最后一道防线：调用方已按字数预算截取，这里挡住把整份文档直接塞进来的调用）。 */
-const MAX_DRAFT_TOTAL_CHARS = 24_000;
-
 /**
  * 「附件条文」段落（issue #57 第 5 步）。
  *
  * 没有条文时返回**空串**（而不是「（无附件）」之类的占位）—— 提示词里那句
  * 「没有『附件条文』段落时 keyPoints 必须为空数组」的依据就是这个段落出现与否，
  * 占位文字会让「没给条文」和「给了空条文」看起来一样。
+ *
+ * 上限由档位给（issue #86 第 3 刀），理由同 `explanationBlock`：
+ * 它是**最后一道防线**（挡"把整份文档直接塞进 draftSources"的调用方），不是预算本身 ——
+ * 预算在 `attachment-feed.ts`，两处同源。
  */
-export function draftBlock(sources: DraftSource[] | undefined): string {
+export function draftBlock(
+  sources: DraftSource[] | undefined,
+  maxChars: number = SUMMARY_TIERS.standard.draftBlockChars,
+): string {
   const usable = (sources ?? []).filter((item) => item.text.trim().length > 0 && item.role !== 'explanation');
   if (usable.length === 0) return '';
   const parts: string[] = [
     `附件条文（本站从该公示的官方附件中逐字提取，共 ${usable.length} 份。这是草案正文本身，不是公告；只写你在这里确实读到的规定）：`,
   ];
-  let left = MAX_DRAFT_TOTAL_CHARS;
+  let left = maxChars;
   usable.forEach((item, index) => {
     const label = `【附件 ${index + 1}：${item.name}】`;
     if (left <= 0) {

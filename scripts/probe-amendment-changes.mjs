@@ -100,7 +100,7 @@ console.log(`端口 ${config.providerLabel} 模型 ${config.model} 基址 ${conf
 const client = new Client({ connectionString: process.env.DATABASE_URL });
 await client.connect();
 const noticeResult = await client.query(
-  `select id, title, url, source_id, body_text, genre, status, deadline_at
+  `select id, title, url, source_id, body_text, genre, audience, status, deadline_at
      from notices where id like $1 || '%' limit 2`,
   [idPrefix],
 );
@@ -124,6 +124,7 @@ const target = {
   bodyText: row.body_text,
   sourceId: row.source_id,
   genre: row.genre,
+  audience: row.audience,
 };
 // 与生产同一份窗口：条数/字数预算/结构感知截取/角色判定全走 worker 自己那份实现
 const draftSources = await draftSourcesForSummary(target);

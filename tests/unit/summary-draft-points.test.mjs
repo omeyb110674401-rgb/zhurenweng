@@ -5,7 +5,7 @@ import {
   findDraftSourceForQuote,
   parseQuotedSummary,
 } from '../../src/lib/summary-content.ts';
-import { draftBlock } from '../../src/lib/adapters/openai-compatible-llm.ts';
+import { draftBlock, explanationBlock, userPrompt } from '../../src/lib/adapters/openai-compatible-llm.ts';
 
 /**
  * 单元：条文要点的出处核对（issue #57 第 5 / 6 步）。
@@ -162,5 +162,56 @@ describe('draftBlock：条文段落出现与否就是提示词的全部依据', 
     assert.match(block, /【附件 1：机场垃圾管理办法（征求意见稿）\.pdf】/);
     assert.match(block, /【附件 2：起草说明\.docx】/);
     assert.ok(block.indexOf('起草说明.docx') < block.indexOf('本办法共六章'), '文件名标签应在正文之前');
+  });
+});
+
+describe('issue #86 第 3 刀：两段正文的上限随档位（最后一道防线不许切掉预算允许的内容）', () => {
+  /** 20,000 字符的说明：**每一行都带序号**，这样"尾行在不在"才是一个有区分度的判据。 */
+  const longExplanation = (lines) =>
+    Array.from(
+      { length: lines },
+      (_, i) => `第${i + 1}项 为了规范某某活动第${i + 1}类情形，制定本办法。\n`,
+    ).join('');
+  const LONG_EXPLANATION = longExplanation(1_000);
+  const EXPLANATION_TAIL = `第1000项 为了规范某某活动第1000类情形，制定本办法。`;
+  const EXPLANATION = [
+    { name: '某某办法（征求意见稿）编制说明.docx', url: 'https://attachments.test/e.docx', text: LONG_EXPLANATION, role: 'explanation' },
+  ];
+  const DRAFT_SOURCE = [
+    { name: '某某办法（征求意见稿）.docx', url: 'https://attachments.test/d.docx', text: longExplanation(900), role: 'draft' },
+  ];
+  const input = (extra) => ({
+    title: '关于《某某办法（征求意见稿）》公开征求意见的公告',
+    bodyText: '现就该办法征求意见。',
+    url: 'https://source.test/n.html',
+    ...extra,
+  });
+
+  it('上限明着给的时候按它切（判据是 `slice(0, maxChars)`，没有第二条路）', () => {
+    assert.ok(LONG_EXPLANATION.length > 20_000);
+    assert.ok(draftBlock(DRAFT_SOURCE, 1_000).length <= 1_000 + '附件条文'.length + 200);
+    assert.ok(explanationBlock(EXPLANATION, 1_000).length <= 1_000 + '编制说明'.length + 200);
+  });
+
+  it('标准档（缺省）与不写档位完全一样 —— 行业专业那一档的行为一个字都没动', () => {
+    const withoutTier = userPrompt(input({ draftSources: [...DRAFT_SOURCE, ...EXPLANATION] }));
+    const explicitStandard = userPrompt(
+      input({ draftSources: [...DRAFT_SOURCE, ...EXPLANATION], tier: 'standard' }),
+    );
+    assert.equal(withoutTier, explicitStandard);
+  });
+
+  it('重档放得下那份 20,000 字符的说明（标准档会把它切掉一半）', () => {
+    const sources = [...DRAFT_SOURCE, ...EXPLANATION];
+    const standard = userPrompt(input({ draftSources: sources, tier: 'standard' }));
+    const deep = userPrompt(input({ draftSources: sources, tier: 'deep' }));
+    assert.ok(deep.length > standard.length, '重档必须真的喂得更多，否则这个档就是空档');
+    assert.ok(standard.includes('第1项'), '两种档位都该从头喂');
+    assert.equal(deep.includes(EXPLANATION_TAIL), true, '重档要把整份说明喂进去');
+    assert.equal(
+      standard.includes(EXPLANATION_TAIL),
+      false,
+      '标准档切掉尾部正是它今天的行为（本刀不动它）',
+    );
   });
 });

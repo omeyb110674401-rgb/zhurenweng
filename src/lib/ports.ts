@@ -1,4 +1,5 @@
 import { createGlmLlm } from './adapters/glm-llm.ts';
+import type { SummaryTier } from './attachment-feed.ts';
 import type { ChangeKind } from './change-coverage.ts';
 import { createOpenAiLlmFromEnv } from './adapters/openai-compatible-llm.ts';
 import { StubLlm } from './adapters/stubs/stub-llm.ts';
@@ -180,6 +181,13 @@ export interface LlmSummarizeInput {
    * （见 src/lib/attachment-mode.ts 的 `attachmentTextFeedsSummary`）。
    */
   draftSources?: DraftSource[];
+  /**
+   * 喂入档位（issue #86 第 3 刀）：决定适配器里两段附件正文的**最后一道防线**放多宽。
+   * 省略 = 标准档。调用方（worker）按受众面定档，与它截取时用的是同一份预算
+   * （见 src/lib/attachment-feed.ts），所以这一层正常永远不会咬到内容 ——
+   * 它挡的是"把整份文档直接塞进 draftSources"的调用方（探针、一次性脚本）。
+   */
+  tier?: SummaryTier;
 }
 
 export interface LlmPort {

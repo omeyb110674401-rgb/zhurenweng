@@ -25,8 +25,17 @@
  * 这个上限只挡异常），并且 `rawChars` 记的是**未截断的真值**，所以"它其实更长"这件事查得到。
  */
 
-/** 形状版本：字段增删时 +1，读侧据此判断能不能按当前口径解读。 */
-export const SUMMARY_DIAGNOSTICS_VERSION = 1;
+import type { FeedReport } from './attachment-feed.ts';
+
+/**
+ * 形状版本：字段增删时 +1，读侧据此判断能不能按当前口径解读。
+ *
+ * - **1**（第 0 刀）：模型吐了什么 / 归一化丢了几条 / 反查丢了几条。
+ * - **2**（第 3 刀）：多一个 `feed` —— **喂进去的那一截**（每份附件拿了多少、谁被预算挤掉）。
+ *   这一项在此之前从来不落库，于是"模型没读到"与"我们没喂"在库里长得一模一样；
+ *   1 版的行没有这个键，读侧当"没记"处理（不是"喂了 0 份"）。
+ */
+export const SUMMARY_DIAGNOSTICS_VERSION = 2;
 
 /**
  * 原始输出的留存上限（字符）。
@@ -111,6 +120,15 @@ export interface SummaryDiagnostics {
   /** 真的落库的条数（再过一道逐字反查，见 `dropped.quoteNotFound`） */
   kept: SummaryFieldCounts;
   dropped: SummaryDroppedCounts;
+  /**
+   * 喂入清单（issue #86 第 3 刀，v2 起）。
+   *
+   * 与上面那些字段**方向相反**：上面回答"模型说了什么、我们丢了什么"，这一项回答
+   * "我们给它看了什么"。缺了它，`quoteNotFound` 那一条永远有两种读法 ——
+   * 模型抄了自己没被喂进去的那一截，还是我们根本没把那一份送进去（#79 就是这么卡住的）。
+   * `undefined` = 这一次调用没记（v1 的存量行、或失败在选取之前）。
+   */
+  feed?: FeedReport;
 }
 
 export function emptyFieldCounts(): SummaryFieldCounts {
@@ -178,6 +196,47 @@ function fieldCountsOr(value: unknown): SummaryFieldCounts {
 }
 
 /**
+ * 读侧解析喂入清单：**认不出来就整个丢掉**（返回 undefined），不返回半份。
+ *
+ * 半份清单比没有清单更坏 —— 读的人会把"这里只列了两份"当成"一共只喂了两份"。
+ */
+function feedReportOr(value: unknown): FeedReport | undefined {
+  if (typeof value !== 'object' || value === null) return undefined;
+  const record = value as Record<string, unknown>;
+  const tier = record.tier === 'deep' ? 'deep' : record.tier === 'standard' ? 'standard' : null;
+  if (tier === null) return undefined;
+  const budgetRaw = (typeof record.budget === 'object' && record.budget !== null ? record.budget : {}) as Record<string, unknown>;
+  const sources = Array.isArray(record.sources) ? record.sources : [];
+  const starved = Array.isArray(record.starved) ? record.starved : [];
+  return {
+    tier,
+    budget: {
+      perSource: countOr(budgetRaw.perSource),
+      total: countOr(budgetRaw.total),
+      minShare: countOr(budgetRaw.minShare),
+    },
+    usedCjk: countOr(record.usedCjk),
+    sources: sources
+      .filter((item): item is Record<string, unknown> => typeof item === 'object' && item !== null)
+      .map((item) => ({
+        name: typeof item.name === 'string' ? item.name : '',
+        role: item.role === 'draft' || item.role === 'explanation' ? item.role : 'other',
+        fullCjk: countOr(item.fullCjk),
+        fedCjk: countOr(item.fedCjk),
+        chars: countOr(item.chars),
+        allowance: countOr(item.allowance),
+        truncated: item.truncated === true,
+      })),
+    starved: starved
+      .filter((item): item is Record<string, unknown> => typeof item === 'object' && item !== null)
+      .map((item) => ({
+        name: typeof item.name === 'string' ? item.name : '',
+        fullCjk: countOr(item.fullCjk),
+      })),
+  };
+}
+
+/**
  * 读侧解析（审计脚本与后台用）：**形状不认识就返回 null，绝不抛错**。
  *
  * 与 `parseQuotedSummary` 同一条纪律：这一列是给人查问题用的，
@@ -199,6 +258,7 @@ export function parseSummaryDiagnostics(value: unknown): SummaryDiagnostics | nu
           return { promptTokens: pick('promptTokens'), completionTokens: pick('completionTokens'), totalTokens: pick('totalTokens') };
         })()
       : null;
+  const feed = feedReportOr(record.feed);
 
   return {
     v: version,
@@ -223,9 +283,9 @@ export function parseSummaryDiagnostics(value: unknown): SummaryDiagnostics | nu
         quoteNotFound: countOr(raw.quoteNotFound),
       };
     })(),
+    ...(feed ? { feed } : {}),
   };
 }
-
 /**
  * 把「端口上报的诊断（可能没有）」与「worker 才知道的那几个字段」合成一份完整诊断。
  *
@@ -245,6 +305,11 @@ export function buildSummaryDiagnostics(
     attempts: number;
     kept: SummaryFieldCounts;
     quoteNotFound: number;
+    /**
+     * 喂入清单（第 3 刀）：**worker 才知道**它自己送了什么，端口看不到选取过程。
+     * 传 `undefined` 表示这次没走选取（例如失败在调用之前），不是"喂了 0 份"。
+     */
+    feed?: FeedReport;
   },
 ): SummaryDiagnostics {
   const base: SummaryDiagnostics = reported ?? {
@@ -271,6 +336,9 @@ export function buildSummaryDiagnostics(
     attempts: overrides.attempts,
     kept: overrides.kept,
     dropped: { ...base.dropped, quoteNotFound: overrides.quoteNotFound },
+    // 端口上报的那一份不带 feed（它看不到选取过程），所以以 worker 的为准；
+    // 没给就保留端口那一份里的（正常为空），不编一个空的喂入清单出来。
+    ...(overrides.feed ? { feed: overrides.feed } : {}),
   };
 }
 
@@ -307,6 +375,15 @@ export function describeDiagnostics(diagnostics: SummaryDiagnostics): string {
     );
   }
   if (diagnostics.attempts > 1) parts.push(`重试后第 ${diagnostics.attempts} 次成功`);
+  const feed = diagnostics.feed;
+  if (feed) {
+    const cut = feed.sources.filter((item) => item.truncated).length;
+    parts.push(
+      `${feed.tier === 'deep' ? '重档' : '标准档'}喂入 ${feed.sources.length} 份 / ${feed.usedCjk} 汉字` +
+        (cut > 0 ? `（其中 ${cut} 份被截）` : '') +
+        (feed.starved.length > 0 ? `，${feed.starved.length} 份一个字没喂进去` : ''),
+    );
+  }
   if (diagnostics.finishReason !== null && diagnostics.finishReason !== 'stop') {
     parts.push(`结束原因 ${diagnostics.finishReason}`);
   }

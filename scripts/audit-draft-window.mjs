@@ -9,8 +9,11 @@
  * 而模型没引用 —— 只有第一种不需要动代码，而后两种要修的东西完全不同。光看库里的字数看不出来，
  * 必须把**真正送进提示词的那一截**打出来。
  *
- * 判据一律复用摘要任务自己的 `draftSourcesForSummary()`（同一份门槛、预算与档位），
+ * 判据一律复用摘要任务自己的 `feedPlanForSummary()`（同一份门槛、预算、档位与角色判定），
  * 脚本里不重写选取逻辑 —— 重写了就等于在诊断一个与生产不同的实现。
+ *
+ * issue #86 第 3 刀起它还打印**档位与喂入清单**：受众面 ⇒ 重档/标准档、每一份的配额与实际送进去的
+ * 字数、以及"一个字都没喂进去"的那些（此前那种情况不留任何痕迹）。
  *
  * 用法（在部署了本仓库的容器里跑，需要 DATABASE_URL；只 SELECT）：
  *   docker compose run --rm worker node scripts/audit-draft-window.mjs <noticeId> [<noticeId> …]
@@ -20,8 +23,7 @@
 import { getDb } from '../src/db/client.ts';
 import { notices } from '../src/db/schema/sqlite.ts';
 import { inArray, sql } from 'drizzle-orm';
-import { draftSourcesForSummary } from '../worker/jobs/summarize-notices.ts';
-import { countCjk } from '../src/lib/attachment-select.ts';
+import { feedPlanForSummary } from '../worker/jobs/summarize-notices.ts';
 import { parseQuotedSummary } from '../src/lib/summary-content.ts';
 import { safeParseJson } from '../src/db/types.ts';
 
@@ -54,11 +56,21 @@ if (ids.length === 0 && !argv.includes('--no-points')) {
 const targets =
   ids.length > 0
     ? await db
-        .select({ id: notices.id, title: notices.title, summaryJson: notices.aiSummaryJson })
+        .select({
+          id: notices.id,
+          title: notices.title,
+          summaryJson: notices.aiSummaryJson,
+          audience: notices.audience,
+        })
         .from(notices)
         .where(inArray(notices.id, ids))
     : await db
-        .select({ id: notices.id, title: notices.title, summaryJson: notices.aiSummaryJson })
+        .select({
+          id: notices.id,
+          title: notices.title,
+          summaryJson: notices.aiSummaryJson,
+          audience: notices.audience,
+        })
         .from(notices)
         .where(sql`ai_summary_json is not null and status <> 'closed'`)
         .orderBy(notices.id);
@@ -76,26 +88,39 @@ for (const row of targets) {
   console.log(`\n=== ${row.id}  要点带出处 ${sourcePoints} 条`);
   console.log(`    ${row.title}`);
 
-  const sources = await draftSourcesForSummary({
+  // 档位由受众面定（issue #86 第 3 刀）：判据与生产同一份实现，脚本里不另写一遍
+  const { tier, sources, report } = await feedPlanForSummary({
     id: row.id,
     title: row.title,
     url: '',
     bodyText: null,
     sourceId: '',
+    genre: null,
+    audience: row.audience,
   });
+  console.log(
+    `    受众面 ${row.audience ?? '(null)'} ⇒ ${tier === 'deep' ? '重档' : '标准档'}` +
+      `（单份 ${report.budget.perSource} / 合计 ${report.budget.total} 汉字 / 保底 ${report.budget.minShare}）`,
+  );
   if (sources.length === 0) {
     console.log('    送进提示词的条文：0 份（附件没抽出来 / 没过 400 字门槛 / 正文够长不走附件）');
     continue;
   }
-  for (const source of sources) {
-    const anchors = (source.text.match(ANCHOR) ?? []).length;
-    const normative = (source.text.match(NORMATIVITY) ?? []).length;
-    const head = source.text.replace(/\s+/g, ' ').slice(0, HEAD_CHARS);
+  console.log(`    实际花掉 ${report.usedCjk} 汉字`);
+  for (const item of report.sources) {
+    const source = sources.find((entry) => entry.name === item.name);
+    const anchors = (source?.text.match(ANCHOR) ?? []).length;
+    const normative = (source?.text.match(NORMATIVITY) ?? []).length;
+    const head = (source?.text ?? '').replace(/\s+/g, ' ').slice(0, HEAD_CHARS);
     console.log(
-      `    窗口：${source.name}  送入 ${source.text.length} 字符 / ${countCjk(source.text)} 汉字；` +
-        `第X条 ${anchors} 处，规范性字样 ${normative} 处`,
+      `    窗口[${item.role}]：${item.name}  配额 ${item.allowance} 字符 ⇒ 送入 ${item.chars} 字符 / ${item.fedCjk} 汉字` +
+        `（原件 ${item.fullCjk} 汉字${item.truncated ? '，被截' : '，整份'}）` +
+        `；第X条 ${anchors} 处，规范性字样 ${normative} 处`,
     );
     console.log(`      开头：${head}`);
+  }
+  for (const item of report.starved) {
+    console.log(`    ⚠ 一个字都没喂进去：${item.name}（${item.fullCjk} 汉字）—— 预算不够，此前不留任何痕迹`);
   }
 }
 console.log(`\n共看 ${scanned} 条。送入窗口里没有「第X条」也不等于没条文可摘`

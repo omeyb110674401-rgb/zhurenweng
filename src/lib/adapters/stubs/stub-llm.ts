@@ -185,9 +185,11 @@ export class StubLlm implements LlmPort {
   private appendCallLog(input: LlmSummarizeInput): void {
     if (!this.callsFile) return;
     fs.mkdirSync(path.dirname(path.resolve(this.callsFile)), { recursive: true });
+    // `tier` 一并记下来（issue #86 第 3 刀）：它决定适配器里两段附件正文的上限放多宽，
+    // 而"档位有没有真的传到端口"此前只能靠读代码 —— 跨进程的 e2e 就是靠这一行断言它的。
     fs.appendFileSync(
       this.callsFile,
-      `${JSON.stringify({ seq: this.callSeq, title: input.title, url: input.url })}\n`,
+      `${JSON.stringify({ seq: this.callSeq, title: input.title, url: input.url, tier: input.tier ?? 'standard' })}\n`,
       'utf8',
     );
   }

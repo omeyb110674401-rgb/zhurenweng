@@ -89,6 +89,9 @@ const withSummary = await db
     url: notices.url,
     bodyText: notices.bodyText,
     sourceId: notices.sourceId,
+    // 受众面（issue #86 第 3 刀）：它决定喂入档位，所以"这条会不会带上条文"的预判
+    // 必须与生产用同一份输入 —— 少了这一列，脚本会按标准档预估、生产按重档跑
+    audience: notices.audience,
     status: notices.status,
     summaryStatus: notices.summaryStatus,
     summaryJson: notices.aiSummaryJson,

@@ -5,6 +5,7 @@ import {
   normalizeModelSummary,
 } from '../../src/lib/adapters/openai-compatible-llm.ts';
 import { buildQuotedSummary, buildQuotedSummaryWithTally } from '../../src/lib/summary-content.ts';
+import { emptyFeedReport } from '../../src/lib/attachment-feed.ts';
 import {
   RAW_OUTPUT_KEEP_CHARS,
   SUMMARY_DIAGNOSTICS_VERSION,
@@ -324,7 +325,7 @@ describe('issue #86：worker 侧合成诊断时不编造', () => {
     model: 'stub',
     provider: 'stub',
     attempts: 1,
-    kept: { keyPoints: 2, explanationPoints: 0, channels: 1, impacts: 0 },
+    kept: { keyPoints: 2, explanationPoints: 0, channels: 1, impacts: 0, changes: 0 },
     quoteNotFound: 3,
   };
 
@@ -413,10 +414,14 @@ describe('issue #86：读侧容错、截断与一句话摘要', () => {
       model: 'flash-x',
       provider: 'openai',
       attempts: 1,
-      kept: { keyPoints: 1, explanationPoints: 0, channels: 0, impacts: 0 },
+      kept: { keyPoints: 1, explanationPoints: 0, channels: 0, impacts: 0, changes: 0 },
       quoteNotFound: 2,
     });
-    const line = describeDiagnostics({ ...d, instrumented: true, emitted: { keyPoints: 4, explanationPoints: 0, channels: 0 } });
+    const line = describeDiagnostics({
+      ...d,
+      instrumented: true,
+      emitted: { keyPoints: 4, explanationPoints: 0, channels: 0, impacts: 0, changes: 0 },
+    });
     assert.match(line, /条文要点 1\/4/);
     assert.match(line, /反查不到出处 2/);
   });
@@ -426,12 +431,150 @@ describe('issue #86：读侧容错、截断与一句话摘要', () => {
       model: 'stub',
       provider: 'stub',
       attempts: 1,
-      kept: { keyPoints: 3, explanationPoints: 2, channels: 0, impacts: 0 },
+      kept: { keyPoints: 3, explanationPoints: 2, channels: 0, impacts: 0, changes: 0 },
       quoteNotFound: 0,
     });
     const line = describeDiagnostics(d);
     assert.doesNotMatch(line, /\/\d/, '分母未知（没人上报）就不许出现分母');
     assert.match(line, /落库条文要点 3 条/);
     assert.match(line, /端口未上报响应细节/);
+  });
+});
+
+describe('issue #86 第 3 刀：喂入清单（"我们给它看了什么"）', () => {
+  const kept = { keyPoints: 1, explanationPoints: 1, channels: 0, impacts: 0, changes: 0 };
+  const feed = {
+    tier: 'deep',
+    budget: { perSource: 16_000, total: 24_000, minShare: 4_000 },
+    usedCjk: 7_913,
+    sources: [
+      {
+        name: '《水质 …》编制说明.docx',
+        role: 'explanation',
+        fullCjk: 12_400,
+        fedCjk: 2_753,
+        chars: 8_000,
+        allowance: 8_000,
+        truncated: true,
+      },
+      {
+        name: '水质 ….docx',
+        role: 'other',
+        fullCjk: 2_972,
+        fedCjk: 2_972,
+        chars: 7_973,
+        allowance: 8_000,
+        truncated: false,
+      },
+    ],
+    starved: [{ name: '海水 汞的测定.docx', fullCjk: 2_188 }],
+  };
+
+  it('落库再读回等价（含每一份的配额、是不是被截过）', () => {
+    const d = buildSummaryDiagnostics(undefined, {
+      model: 'flash-x',
+      provider: 'openai',
+      attempts: 1,
+      kept,
+      quoteNotFound: 0,
+      feed,
+    });
+    const back = parseSummaryDiagnostics(JSON.parse(JSON.stringify(d)));
+    assert.deepEqual(back.feed, feed);
+    assert.equal(back.v, SUMMARY_DIAGNOSTICS_VERSION);
+  });
+
+  it('worker 没给喂入清单 ⇒ 不许编一份空的（"没记"与"喂了 0 份"处置相反）', () => {
+    const d = buildSummaryDiagnostics(undefined, {
+      model: 'stub',
+      provider: 'stub',
+      attempts: 1,
+      kept,
+      quoteNotFound: 0,
+    });
+    assert.equal('feed' in d, false);
+    // 空清单是另一回事：它是一份**真的**喂入结果（0 份），必须与"没记"区分得开
+    const empty = buildSummaryDiagnostics(undefined, {
+      model: 'stub',
+      provider: 'stub',
+      attempts: 1,
+      kept,
+      quoteNotFound: 0,
+      feed: emptyFeedReport('standard'),
+    });
+    assert.equal(empty.feed.sources.length, 0);
+    assert.equal(empty.feed.tier, 'standard');
+  });
+
+  it('1 版的行（没有这个键）照常解析，读侧当"没记"而不是"喂了 0 份"', () => {
+    const v1 = {
+      v: 1,
+      model: 'flash-x',
+      provider: 'openai',
+      elapsedMs: 100,
+      attempts: 1,
+      instrumented: true,
+      finishReason: 'stop',
+      usage: null,
+      rawChars: 2,
+      raw: '{}',
+      rawTruncated: false,
+      emitted: kept,
+      normalized: kept,
+      kept,
+      dropped: { emptyOrInvalid: 0, overLimit: 0, quoteNotFound: 0 },
+    };
+    const parsed = parseSummaryDiagnostics(v1);
+    assert.ok(parsed, '旧版行必须解析得出来');
+    assert.equal('feed' in parsed, false);
+  });
+
+  it('形状认不出来的喂入清单整个丢掉（半份清单比没有清单更坏）', () => {
+    for (const bad of [
+      { tier: 'unknown-tier', sources: [], starved: [] },
+      'deep',
+      [],
+      { sources: [], starved: [] },
+    ]) {
+      const parsed = parseSummaryDiagnostics({
+        v: SUMMARY_DIAGNOSTICS_VERSION,
+        model: 'x',
+        provider: 'y',
+        kept,
+        dropped: { emptyOrInvalid: 0, overLimit: 0, quoteNotFound: 0 },
+        feed: bad,
+      });
+      assert.equal('feed' in parsed, false, `${JSON.stringify(bad)} 不该被读成一份喂入清单`);
+    }
+  });
+
+  it('一句话摘要里说得出档位、被截的份数与"一个字没喂进去"的份数', () => {
+    const d = buildSummaryDiagnostics(undefined, {
+      model: 'flash-x',
+      provider: 'openai',
+      attempts: 1,
+      kept,
+      quoteNotFound: 0,
+      feed,
+    });
+    const line = describeDiagnostics(d);
+    assert.match(line, /重档喂入 2 份 \/ 7913 汉字/);
+    assert.match(line, /其中 1 份被截/);
+    assert.match(line, /1 份一个字没喂进去/);
+  });
+
+  it('标准档也要说得出档位（否则读的人分不清这条走了哪一档）', () => {
+    const line = describeDiagnostics(
+      buildSummaryDiagnostics(undefined, {
+        model: 'stub',
+        provider: 'stub',
+        attempts: 1,
+        kept,
+        quoteNotFound: 0,
+        feed: emptyFeedReport('standard'),
+      }),
+    );
+    assert.match(line, /标准档喂入 0 份/);
+    assert.doesNotMatch(line, /被截|一个字没喂/);
   });
 });
