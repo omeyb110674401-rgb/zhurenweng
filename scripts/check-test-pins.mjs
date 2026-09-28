@@ -446,7 +446,9 @@ const CASES = [
   {
     label: '用到条文也不标「已喂」（详情页那句「本站读到的条文」失去依据）',
     file: 'summarize',
-    from: '        if (draftSources.length > 0) {',
+    // #86 第十六节把这一行换成了 `fedUrls`（正文那一份没有对应的附件行，要滤掉）——
+    // 判据一个字没变：摘要真用了附件，就必须把附件标成已喂。
+    from: '        if (fedUrls.length > 0) {',
     to: '        if (false) {',
     pattern: '附件条文进摘要',
     test: 'tests/e2e/summary-draft-input.test.mjs',
@@ -1483,6 +1485,32 @@ const CASES = [
     to: '找的时候**随便看看**',
     pattern: '两个方向都要找',
     test: 'tests/unit/summary-impacts.test.mjs',
+  },
+  {
+    // issue #86 第十六节：门槛塌了之后，公告壳（220 字符、0 处条号）也会被当成"正文就是条文"，
+    // 而那正是 #55/#56 花了两轮才关掉的那类编造（从壳里概括条文）。
+    label: '公告壳也算"正文就是条文"（又回到从壳里概括条文）',
+    file: 'attachmentFeed',
+    from: '  return text.length >= BODY_DRAFT_MIN_CHARS && countArticleAnchors(text) >= BODY_DRAFT_MIN_ANCHORS;',
+    to: '  return text.length >= 0 && countArticleAnchors(text) >= 0;',
+    pattern: '公告壳不是条文',
+    test: 'tests/unit/attachment-feed.test.mjs',
+  },
+  {
+    label: '"正文就是条文"那一档被附件分支吃掉（页面一边说没有随文附件一边印着条文要点）',
+    file: 'summaryDisplay',
+    from: "  if (report.bodyDraft === true) return { kind: 'body-draft', files: report.total };",
+    to: "  if (false) return { kind: 'body-draft', files: report.total };",
+    pattern: '条文就在本页正文里',
+    test: 'tests/unit/summary-display.test.mjs',
+  },
+  {
+    label: '出处行把"本页正文"写成附件（读者会去找一份不存在的附件）',
+    file: 'summaryDisplay',
+    from: '  return source === BODY_DRAFT_LABEL',
+    to: '  return false',
+    pattern: '出处那一行按来路分开写',
+    test: 'tests/unit/summary-display.test.mjs',
   },
 ];
 

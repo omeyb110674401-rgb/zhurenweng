@@ -6,7 +6,9 @@ import { after, before, describe, it } from 'node:test';
 import Database from 'better-sqlite3';
 
 import { parseSummaryDiagnostics } from '../../src/lib/summary-diagnostics.ts';
-import { SUMMARY_TIERS } from '../../src/lib/attachment-feed.ts';
+import { parseQuotedSummary } from '../../src/lib/summary-content.ts';
+import { changeCoverageVerdict } from '../../src/lib/change-coverage.ts';
+import { BODY_DRAFT_LABEL, SUMMARY_TIERS } from '../../src/lib/attachment-feed.ts';
 
 /**
  * 端到端（issue #86 第 3 刀）：**喂入档位真的接到了受众面上**。
@@ -25,6 +27,8 @@ import { SUMMARY_TIERS } from '../../src/lib/attachment-feed.ts';
 
 const PUBLIC_ID = 'a1'.repeat(16);
 const SECTOR_ID = 'b2'.repeat(16);
+/** 正文就是草案全文、一份附件都没有（`cac` 那批的真实形状，issue #86 第十六节）。 */
+const INLINE_ID = 'c3'.repeat(16);
 const SOURCE_ID = 'e2e-feed-tier';
 
 /** 每一行都带序号：这样"尾行在不在"才是判据（重复文本里 `includes` 会假绿）。 */
@@ -33,6 +37,22 @@ function chineseLines(count, prefix) {
     { length: count },
     (_, i) =>
       `第${i + 1}项 ${prefix}第${i + 1}类情形的，应当依照本条规定办理；不符合的，不得办理。\n`,
+  ).join('');
+}
+
+/**
+ * 正文形状的**草案条文**（每行一个「第 X 条」）。
+ *
+ * 与 `chineseLines` 的区别是条号：那边写的是「第 X 项」（故意不构成条文形状），
+ * 这边是「第 X 条」—— `bodyLooksLikeDraft` 数的就是这个，写成「项」它就判不出来
+ * （第一版夹具就是这么错的，e2e 当场红）。
+ */
+function chineseArticles(count, prefix) {
+  return Array.from(
+    { length: count },
+    (_, i) =>
+      `第${i + 1}条 ${prefix}第${i + 1}类情形的，应当依照本条规定办理；不符合的，不得办理。` +
+      `县级以上地方人民政府有关部门依照职责分工负责第${i + 1}类情形的监督管理。\n`,
   ).join('');
 }
 
@@ -78,6 +98,17 @@ function readDiagnostics(id) {
   }
 }
 
+/** 落库的摘要（形状由 `parseQuotedSummary` 解析，与页面读侧同一份实现）。 */
+function readSummaryJson(id) {
+  const db = new Database(dbFile, { readonly: true });
+  try {
+    const row = db.prepare('select ai_summary_json as j from notices where id = ?').get(id);
+    return parseQuotedSummary(row?.j ? JSON.parse(row.j) : null);
+  } finally {
+    db.close();
+  }
+}
+
 before(async () => {
   workDir = fs.mkdtempSync(path.join(os.tmpdir(), 'zhurenweng-feed-tier-'));
   dbFile = path.join(workDir, 'app.db');
@@ -105,6 +136,19 @@ before(async () => {
       id: SECTOR_ID,
       title: '关于征求《某某污水处理技术标准（征求意见稿）》意见的通知',
     },
+    {
+      // 国信办那条的真实形状：**一份附件都没有**，全文就印在正文里。
+      // 标题走「国务院关于…的规定」那一支 ⇒ 公众广域（与生产上那条一致）。
+      id: INLINE_ID,
+      title:
+        '国家互联网信息办公室关于《国务院关于保障未成年人健康安全使用网络的规定（征求意见稿）》公开征求意见的通知',
+      // 正文 = 草案全文（22 条，约 2,000 字符）—— 直接决定了 feed 会不会把它当条文喂进去。
+      // 末尾刻意再放一条**带改动措辞**的条文：覆盖度分母如果只数附件，这里就会是 0
+      // （这条公示一份附件都没有），页面那行就会说"一处都没数到"。
+      bodyText:
+        chineseArticles(22, '为了保障未成年人健康安全使用网络，本条规定') +
+        '第二十三条 将第二条规定修改为：为了保障未成年人健康安全使用网络，本条自公布之日起施行。\n',
+    },
   ];
   for (const notice of notices) {
     await noticesRepo.upsertNotice({
@@ -116,10 +160,12 @@ before(async () => {
       publishedAt: '2026-09-20',
       deadlineAt: '2026-11-30',
       status: 'open',
-      bodyText: '现就上述文件公开征求意见，请于截止日期前反馈。',
+      bodyText: notice.bodyText ?? '现就上述文件公开征求意见，请于截止日期前反馈。',
       attachments: FILES.map((file) => ({ name: file.name, url: file.url })),
       fetchedAt: new Date().toISOString(),
     });
+    // 正文就是全文的那一条**一个附件都不挂**（这正是它的形状）
+    if (notice.id === INLINE_ID) continue;
     // 清单必须**按公示一次给全**（否则后写的那份会把先写的撤下）
     await attachmentsRepo.syncAttachmentManifest({
       noticeId: notice.id,
@@ -214,9 +260,45 @@ describe('issue #86 第 3 刀：受众面决定喂入档位', () => {
 
   it('档位真的传到了端口（不是只在 worker 里算了一下）', () => {
     const calls = readCalls();
-    assert.equal(calls.length, 2, `两条条目各调一次，实际 ${calls.length} 次`);
+    assert.equal(calls.length, 3, `三条条目各调一次，实际 ${calls.length} 次`);
     const byTier = new Map(calls.map((call) => [call.url, call.tier]));
     assert.equal(byTier.get(`https://source.test/${PUBLIC_ID}.html`), 'deep');
     assert.equal(byTier.get(`https://source.test/${SECTOR_ID}.html`), 'standard');
+    assert.equal(byTier.get(`https://source.test/${INLINE_ID}.html`), 'deep');
+  });
+
+  it('正文就是条文那一条：没有附件也照样喂进条文，且标着来源是"本页正文"（#86 第十六节）', () => {
+    const { status, diagnostics } = readDiagnostics(INLINE_ID);
+    assert.equal(status, 'done', '这条必须真的生成过摘要');
+    const feed = diagnostics?.feed;
+    assert.ok(feed, '要带着喂入清单');
+    assert.equal(feed.sources.length, 1, '唯一一份来源就是正文');
+    assert.equal(feed.sources[0].origin, 'body', '来路要如实记成"正文"，不能记成附件');
+    assert.equal(feed.sources[0].name, BODY_DRAFT_LABEL);
+    assert.equal(feed.sources[0].role, 'draft');
+    assert.ok(feed.sources[0].fedCjk > 0);
+
+    // 落库的要点必须挂在这个来源上 —— 页面那句「出处：本页正文」靠的就是它
+    const summary = readSummaryJson(INLINE_ID);
+    assert.ok(summary.keyPoints.length > 0, '正文里的条文必须产得出要点');
+    assert.equal(summary.keyPoints[0].source, BODY_DRAFT_LABEL);
+    assert.ok(summary.impacts.length > 0, '公众广域 + 有条文 ⇒ 判读也该产出');
+    assert.equal(summary.impacts[0].source, BODY_DRAFT_LABEL);
+  });
+
+  it('覆盖度分母也算上正文那一份（只数附件的话这里会是 0，页面就会说"一处都没数到"）', () => {
+    const summary = readSummaryJson(INLINE_ID);
+    const markers = summary.changeMarkers;
+    assert.ok(markers, 'changeMarkers 必须落库（本页那行覆盖度靠它）');
+    assert.ok(
+      markers.total >= 1,
+      `分母必须数到正文里那一处改动表述，实际 ${markers.total} —— 数不到就说明它只数了附件`,
+    );
+    assert.ok(summary.changes.length > 0, '正文里写了改动 ⇒ 表格该有行（stub 会回响那一行）');
+    assert.notEqual(
+      changeCoverageVerdict(summary.changes.length, markers).state,
+      'no_markers',
+      '分母数到过改动 ⇒ 不许说"没有数到成文的修改表述"',
+    );
   });
 });

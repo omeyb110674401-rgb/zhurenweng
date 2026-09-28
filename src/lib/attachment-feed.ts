@@ -30,7 +30,12 @@
  *   保底会替后面那些"本来就吃得下"的附件扣住额度 —— 实测那条就会白丢 226 字符的条文。
  */
 
-import { PROMPT_CHARS_PER_ATTACHMENT, TARGET_TOTAL_CJK_CHARS, type AttachmentRole } from './attachment-select.ts';
+import {
+  PROMPT_CHARS_PER_ATTACHMENT,
+  TARGET_TOTAL_CJK_CHARS,
+  countArticleAnchors,
+  type AttachmentRole,
+} from './attachment-select.ts';
 
 export type SummaryTier = 'standard' | 'deep';
 
@@ -136,6 +141,11 @@ export interface FeedSourceReport {
   name: string;
   role: AttachmentRole;
   /**
+   * 这一份是从哪来的（issue #86 第十六节）：官方**附件**，还是**公告正文本身**。
+   * 后者只有在附件侧一份条文都没有、而正文自带条文形状时才会出现（见 `bodyLooksLikeDraft`）。
+   */
+  origin: 'attachment' | 'body';
+  /**
    * 这份附件**本身**的汉字数（截取前）。
    *
    * 与 `fedCjk` 分两个字段而不是共用一个 `cjk`：两个数的基不同，混在一个键里读的人
@@ -175,4 +185,35 @@ export function emptyFeedReport(tier: SummaryTier): FeedReport {
     sources: [],
     starved: [],
   };
+}
+
+/**
+ * 「正文本身就是条文」时，那份来源在提示词与页面上的名字（issue #86 第十六节）。
+ *
+ * 用常量而不是各处手写字符串：读侧要靠它把「出处：附件《…》」改成「出处：本页正文」，
+ * 两处写法一旦漂移，页面上就会出现一条指向"附件《本页正文》"的假出处。
+ */
+export const BODY_DRAFT_LABEL = '本页正文（公告里直接给出的条文）';
+
+/** 判"正文本身就是条文"的两个门槛，都由实测定的（见下）。 */
+export const BODY_DRAFT_MIN_CHARS = 1_500;
+export const BODY_DRAFT_MIN_ANCHORS = 5;
+
+/**
+ * 这份公示的**正文**是不是就是条文本身（纯函数）。
+ *
+ * 为什么要有它：`cac`（国家互联网信息办公室）把草案全文直接发在页面正文里、**从不发附件**。
+ * 实测（2026-09-27 只读，`deploy/audit-inline-drafts.sql`）：全库正文 ≥1,500 字符的条目**恰好 7 条、
+ * 全是 cac、其中 0 条有可读附件**，而其中 6 条的正文带条文形状 ——
+ * 《互联网信息服务管理办法（修订草案）》181 处「第X条」、《反网络暴力法（征求意见稿）》78 处、
+ * 《未成年人网络保护规定》40 处…… 在这之前它们**一条都产不出条文要点/判读**：
+ * 提示词明令"没有「附件条文」段落时 keyPoints 必须为空数组"，而反查池也只有附件。
+ *
+ * 两个门槛都来自那批实测，不是拍的：最小的真草案正文 3,550 字符 / 22 处锚点，
+ * 而公告壳（npc 那 5 条法律草案）是 220–234 字符、0 处锚点；全库最大的壳 532 字符。
+ * ⇒ 取 1,500 字符 + 5 处锚点，两侧都留了足够余量，且**壳不可能通过**（它没有条号）。
+ */
+export function bodyLooksLikeDraft(bodyText: string | null | undefined): boolean {
+  const text = bodyText ?? '';
+  return text.length >= BODY_DRAFT_MIN_CHARS && countArticleAnchors(text) >= BODY_DRAFT_MIN_ANCHORS;
 }

@@ -1,7 +1,11 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import {
+  BODY_DRAFT_MIN_ANCHORS,
+  BODY_DRAFT_MIN_CHARS,
+  BODY_DRAFT_LABEL,
   SUMMARY_TIERS,
+  bodyLooksLikeDraft,
   emptyFeedReport,
   feedAllowance,
   feedFitsAll,
@@ -11,6 +15,7 @@ import {
   MAX_FILES_PER_NOTICE,
   PROMPT_CHARS_PER_ATTACHMENT,
   TARGET_TOTAL_CJK_CHARS,
+  countArticleAnchors,
 } from '../../src/lib/attachment-select.ts';
 
 /**
@@ -220,5 +225,65 @@ describe('喂入清单：形状与"没喂进去"的留痕', () => {
   it('同一批输入给出同一个结果（预算是确定的，不做随机或时间相关的分配）', () => {
     const state = { used: 3_000, budget: SUMMARY_TIERS.standard };
     assert.equal(feedAllowance([2_000, 2_000], state), feedAllowance([2_000, 2_000], state));
+  });
+});
+
+/**
+ * issue #86 第十六节：**正文本身就是条文**。
+ *
+ * 实测（2026-09-27 只读，`deploy/audit-inline-drafts.sql`）：全库正文 ≥1,500 字符的条目**恰好 7 条、
+ * 全是 cac、0 条有可读附件**，其中 6 条正文带条文形状（《互联网信息服务管理办法（修订草案）》
+ * 181 处「第X条」、《反网络暴力法》78 处、《未成年人网络保护规定》40 处）。
+ * 在此之前它们一条都产不出条文要点/判读 —— 提示词明说"没有「附件条文」段落时 keyPoints 必须为空数组"。
+ */
+describe('正文本身就是条文：两个门槛都由实测定的', () => {
+  /** 一份真实形状的草案正文（一串条文），每行都带条号，每行约 90 字符。 */
+  function draftBody(articles) {
+    return Array.from(
+      { length: articles },
+      (_, i) =>
+        `第${i + 1}条 为了规范某某活动第${i + 1}类情形，应当依照本条规定办理；不符合的，不得办理。` +
+        `县级以上地方人民政府交通运输主管部门负责本行政区域内第${i + 1}类情形的监督管理。\n`,
+    ).join('');
+  }
+  /** 一份公告壳：npc 那五条法律草案的正文（220–234 字符），一处条号都没有。 */
+  const NPC_SHELL =
+    '十四届全国人大常委会第二十四次会议对《中华人民共和国道路交通安全法（修订草案）》进行了审议。' +
+    '现将《中华人民共和国道路交通安全法（修订草案）》公布，社会公众可以直接登录中国人大网（www.npc.gov.cn）' +
+    '或国家法律法规数据库（flk.npc.gov.cn）提出意见，也可以将意见寄送全国人大常委会法制工作委员会。';
+
+  it('数条号只认「第…条」，不认「第…项」「第…章」', () => {
+    assert.equal(countArticleAnchors('第一条 甲乙丙。第二条 丁戊己。'), 2);
+    assert.equal(countArticleAnchors('第十条 甲乙。第二十三条 丙丁。第一百零二条 戊。'), 3);
+    assert.equal(countArticleAnchors('第一项 甲乙。第一章 丙丁。'), 0);
+    assert.equal(countArticleAnchors(''), 0);
+  });
+
+  it('公告壳不是条文（实测那 5 条法律草案的正文 220–234 字符、0 处条号）', () => {
+    assert.equal(bodyLooksLikeDraft(NPC_SHELL), false);
+    // 门槛是"两个都满足"，只满足一个也不算
+    assert.equal(bodyLooksLikeDraft(draftBody(3)), false, '条号够了但太短');
+    assert.equal(bodyLooksLikeDraft('啊'.repeat(BODY_DRAFT_MIN_CHARS + 100)), false, '够长但没有条号');
+  });
+
+  it('真的草案正文算条文（实测最小的那份 3,550 字符 / 22 处条号）', () => {
+    const smallest = draftBody(22);
+    assert.ok(smallest.length >= BODY_DRAFT_MIN_CHARS);
+    assert.ok(countArticleAnchors(smallest) >= BODY_DRAFT_MIN_ANCHORS);
+    assert.equal(bodyLooksLikeDraft(smallest), true);
+    // 边界：条号刚好 5 处、长度刚好过线 —— 也算（两个门槛都是"含等于"）
+    const boundary = Array.from(
+      { length: BODY_DRAFT_MIN_ANCHORS },
+      (_, i) => `第${i + 1}条 ${'为了规范某某活动。'.repeat(40)}`,
+    ).join('\n');
+    assert.equal(countArticleAnchors(boundary), BODY_DRAFT_MIN_ANCHORS);
+    assert.ok(boundary.length >= BODY_DRAFT_MIN_CHARS);
+    assert.equal(bodyLooksLikeDraft(boundary), true);
+    assert.equal(bodyLooksLikeDraft(null), false);
+    assert.equal(bodyLooksLikeDraft(undefined), false);
+  });
+
+  it('那份来源在提示词与页面上有个固定的名字（两处写法漂移就会出现假出处）', () => {
+    assert.match(BODY_DRAFT_LABEL, /本页正文/);
   });
 });

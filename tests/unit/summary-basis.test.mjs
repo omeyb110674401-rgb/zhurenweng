@@ -104,6 +104,26 @@ describe('issue #83：摘要依据与可优化性', () => {
     assert.equal(noAttachment.state, 'not-upgradable');
   });
 
+  it('正文就是条文那一条（#86 第十六节）自成依据，不能混进"仅公示页信息"', () => {
+    const body = summaryProvenance({
+      attachment: { total: 0, fedChars: 0, okFiles: 0, bodyDraft: true },
+      hasAttachmentPoints: true,
+      template: 'current',
+    });
+    assert.equal(body.basis, 'body-points');
+    assert.equal(body.label, '公告正文条文');
+    assert.equal(body.state, 'optimized');
+    // 没这一档的话它会落进 notice-only（"仅公示页信息"）—— 而那一档的说明写着
+    // "公示页就是它全部的信息源"，与"摘要里有逐字条文"直接打架。
+    assert.notEqual(body.basis, 'notice-only');
+    const legacy = summaryProvenance({
+      attachment: { total: 0, fedChars: 0, okFiles: 0, bodyDraft: true },
+      hasAttachmentPoints: true,
+      template: 'legacy',
+    });
+    assert.equal(legacy.state, 'upgradable', '旧模板的正文条文重跑也有收益（与附件条文同一档）');
+  });
+
   it('分类的词表是完整的：每一档都有中文名与一句说明', () => {
     const bases = [
       'attachment-points',
@@ -111,6 +131,7 @@ describe('issue #83：摘要依据与可优化性', () => {
       'attachment-unused',
       'attachment-unreadable',
       'notice-only',
+      'body-points',
       'not-probed',
     ];
     for (const basis of bases) {

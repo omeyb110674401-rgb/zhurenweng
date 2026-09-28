@@ -3,15 +3,22 @@
 # into a throwaway worker container and run the probe. Writes NOTHING to the
 # database and NOTHING into /opt/zhurenweng (mounts are read-only, sources come
 # from /tmp/zw-probe). Output goes to /tmp/zw-probe/out.txt.
+#
+# 这份挂载清单是个**维护面**：探针的 import 变了，清单就得跟着变 ——
+# 漏挂的表现是硬失败（`does not provide an export named …`），不是静默跑旧代码，
+# 所以还算好查。2026-09-27 就漏了一次 `attachment-select.ts`（第十六节加了新导出）。
 cd /opt/zhurenweng || exit 1
 MOUNTS=""
 for f in \
   scripts/probe-public-impacts.mjs \
+  src/lib/attachment-select.ts \
   src/lib/attachment-feed.ts \
   src/lib/ports.ts \
+  src/lib/summary-display.ts \
   src/lib/summary-diagnostics.ts \
   src/lib/summary-content.ts \
   src/lib/change-coverage.ts \
+  src/lib/audience.ts \
   src/lib/adapters/openai-compatible-llm.ts \
   src/db/repo/summaries.ts \
   worker/jobs/summarize-notices.ts

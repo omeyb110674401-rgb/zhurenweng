@@ -3,9 +3,11 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, it } from 'node:test';
+import { BODY_DRAFT_LABEL } from '../../src/lib/attachment-feed.ts';
 import {
   SUMMARY_NOT_SUMMARIZED_STATUS,
   draftAvailability,
+  draftProvenanceLine,
   summaryDisplayState,
 } from '../../src/lib/summary-display.ts';
 
@@ -133,6 +135,36 @@ describe('draftAvailability：「条文在哪」这句话只说事实（issue #5
     assert.deepEqual(draftAvailability({ total: 0, fedChars: 0, okFiles: 0 }), {
       kind: 'no-attachments',
     });
+  });
+
+  it('条文就在本页正文里 ⇒ 与"没有随文附件"分开说（否则页面自相矛盾）', () => {
+    // `cac` 那批：正文就是草案全文、一份附件都没有（#86 第十六节）。
+    // 少了这一支，页面会一边说「没有随文附件」一边印着条文要点与出处。
+    assert.deepEqual(draftAvailability({ total: 0, fedChars: 0, okFiles: 0, bodyDraft: true }), {
+      kind: 'body-draft',
+      files: 0,
+    });
+    // 正文是全文、同时还挂着附件（说明那类）时也要说得出附件份数
+    assert.deepEqual(draftAvailability({ total: 2, fedChars: 0, okFiles: 0, bodyDraft: true }), {
+      kind: 'body-draft',
+      files: 2,
+    });
+  });
+
+  it('正文那一档排在附件之前判（附件行数为 0 时先撞上的会是"没有随文附件"）', () => {
+    // 顺序不是风格问题：两条都成立时读者要听的是"条文在你眼前这一段里"，
+    // 而 `total === 0` 那一支会把同一页上的条文要点说成不存在。
+    const state = draftAvailability({ total: 0, fedChars: 0, okFiles: 0, bodyDraft: true });
+    assert.equal(state.kind, 'body-draft');
+  });
+
+  it('出处那一行按来路分开写（附件《…》 vs 本页正文）', () => {
+    assert.equal(draftProvenanceLine(null, '出处：未标注'), '出处：未标注');
+    assert.equal(draftProvenanceLine('', '出处：未标注'), '出处：未标注');
+    assert.match(draftProvenanceLine('某某法（草案）.docx', 'x'), /^出处：附件《某某法（草案）\.docx》/);
+    const body = draftProvenanceLine(BODY_DRAFT_LABEL, 'x');
+    assert.match(body, /^出处：本页正文（公告里直接给出的条文/);
+    assert.doesNotMatch(body, /附件《/, '正文那一份不能说成附件 —— 读者会去找一份不存在的附件');
   });
 
   it('没探测过就是没探测过（抽取还没跑到这条时不能断言「没有附件」）', () => {

@@ -43,7 +43,13 @@ export function channelGuidance(input: {
         ? 'unreadable'
         : draft.kind === 'no-attachments'
           ? 'none'
-          : 'unknown';
+          : draft.kind === 'body-draft'
+            ? // 条文来自本页正文（#86 第十六节）：渠道通常就在那一段正文里，而我们确实读到了它。
+              // 但附件行数非零时不能说"没有附件" —— 那时渠道也可能在附件里。
+              draft.files > 0
+              ? 'readable'
+              : 'none'
+            : 'unknown';
   return {
     // 一个字都没抓到 ⇒ 不是"原文没写"，是"我们没拿到"。这两件事必须分开说。
     reason: input.bodyChars > 0 ? 'not-in-body' : 'no-body',

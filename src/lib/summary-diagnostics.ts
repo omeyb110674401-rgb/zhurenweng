@@ -221,6 +221,8 @@ function feedReportOr(value: unknown): FeedReport | undefined {
       .map((item) => ({
         name: typeof item.name === 'string' ? item.name : '',
         role: item.role === 'draft' || item.role === 'explanation' ? item.role : 'other',
+        // 来路（#86 第十六节）：认不出来一律当附件 —— 旧行没有这个键，而旧的只可能是附件
+        origin: item.origin === 'body' ? ('body' as const) : ('attachment' as const),
         fullCjk: countOr(item.fullCjk),
         fedCjk: countOr(item.fedCjk),
         chars: countOr(item.chars),

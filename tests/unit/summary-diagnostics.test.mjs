@@ -451,6 +451,7 @@ describe('issue #86 第 3 刀：喂入清单（"我们给它看了什么"）', (
       {
         name: '《水质 …》编制说明.docx',
         role: 'explanation',
+        origin: 'attachment',
         fullCjk: 12_400,
         fedCjk: 2_753,
         chars: 8_000,
@@ -460,6 +461,7 @@ describe('issue #86 第 3 刀：喂入清单（"我们给它看了什么"）', (
       {
         name: '水质 ….docx',
         role: 'other',
+        origin: 'attachment',
         fullCjk: 2_972,
         fedCjk: 2_972,
         chars: 7_973,

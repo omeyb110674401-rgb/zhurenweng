@@ -14,7 +14,9 @@ import {
 } from '../../src/lib/attachment-select.ts';
 import { attachmentRole } from '../../src/lib/attachment-select.ts';
 import {
+  BODY_DRAFT_LABEL,
   SUMMARY_TIERS,
+  bodyLooksLikeDraft,
   emptyFeedReport,
   feedAllowance,
   feedFitsAll,
@@ -110,20 +112,56 @@ export async function feedPlanForSummary(
     limit: MAX_FILES_PER_NOTICE,
   });
   const sources: DraftSource[] = [];
+  /** 待喂的一份（附件或正文），预算分配与诊断都按同一份形状走。 */
+  interface PlannedSource {
+    row: { name: string; url: string; text: string };
+    window: string;
+    windowCjk: number;
+    fullCjk: number;
+    fullChars: number;
+    role: 'draft' | 'explanation' | 'other';
+    origin: 'attachment' | 'body';
+  }
   // 先把每一份按单份上限各切一刀 —— 判"装不装得下"必须看**真正要送进去的那一截**的汉字数，
   // 不能看原文：实测那批环保标准的编制说明 35,980 字里只有约 12,400 个汉字，8,000 字符的窗口
   // 只装到 2,753 个；按原文算会把一个明明装得下的条目判成装不下，白切一刀。
-  const planned = rows.map((row) => {
-    const window = excerptForPrompt(row.text, budget.perSource).trim();
-    return {
-      row,
-      window,
-      windowCjk: countCjk(window),
-      fullCjk: countCjk(row.text),
-      fullChars: row.text.trim().length,
-      role: attachmentRole(row.name),
-    };
-  });
+  const planned: PlannedSource[] = rows.map(
+    (row): PlannedSource => {
+      const window = excerptForPrompt(row.text, budget.perSource).trim();
+      return {
+        row,
+        window,
+        windowCjk: countCjk(window),
+        fullCjk: countCjk(row.text),
+        fullChars: row.text.trim().length,
+        role: attachmentRole(row.name),
+        origin: 'attachment',
+      };
+    },
+  );
+  /**
+   * 附件侧一份条文都没有（只有说明或什么都没有）、而**正文本身就是条文**时，
+   * 把正文也当作一份来源（issue #86 第十六节）。
+   *
+   * 为什么不看源而是看形状：`cac` 那 7 条实测如此，但"哪个源习惯这么发"是运营知识，
+   * 判据得跟着文档走 —— 换成另一个源开始这么发，这里不用改。
+   * 为什么只在"附件侧没有条文"时才加：正文与附件同时给条文的形状今天**一条都没有**
+   * （实测 7/7 条正文长的都没有可读附件），所以这一支是纯增量；真有那么一天，
+   * 两份条文会一起进提示词、由 `fitsAll`/保底照常分配额度。
+   */
+  const bodyText = target.bodyText ?? '';
+  if (!planned.some((item) => item.role !== 'explanation') && bodyLooksLikeDraft(bodyText)) {
+    const bodyWindow = excerptForPrompt(bodyText, budget.perSource).trim();
+    planned.push({
+      row: { name: BODY_DRAFT_LABEL, url: target.url, text: bodyText },
+      window: bodyWindow,
+      windowCjk: countCjk(bodyWindow),
+      fullCjk: countCjk(bodyText),
+      fullChars: bodyText.trim().length,
+      role: 'draft',
+      origin: 'body',
+    });
+  }
   // 全都装得下 ⇒ 一份都不截（实测 `41f2e22e` 那条走的就是这一支：三份窗口合计 7,913 汉字）。
   const fitsAll = feedFitsAll(planned.map((item) => item.windowCjk), budget.total);
   let usedCjk = 0;
@@ -144,10 +182,17 @@ export async function feedPlanForSummary(
     if (text === '') continue;
     const fedCjk = countCjk(text);
     usedCjk += fedCjk;
-    sources.push({ name: plan.row.name, url: plan.row.url, text, role: plan.role });
+    sources.push({
+      name: plan.row.name,
+      url: plan.row.url,
+      text,
+      role: plan.role,
+      origin: plan.origin,
+    });
     report.sources.push({
       name: plan.row.name,
       role: plan.role,
+      origin: plan.origin,
       fullCjk: plan.fullCjk,
       fedCjk,
       chars: text.length,
@@ -252,7 +297,12 @@ export const summarizeNoticesJob: Job = {
       // 改动表述计数（issue #86 第 2 刀）：**分母从全部附件正文算**，不是喂进去的那一截 ——
       // 与说明小节数同一条规矩（拿喂进去的那一截数分母就是自证：窗口外的改动永远不会
       // 出现在"还差多少"那句话里）。它不再按体裁门控：那份门控正是 #79 那个空栏的成因。
-      const changeMarkerCount = countChangeMarkers(fullTexts.map((row) => row.text).join(' '));
+      // **正文那一份也要算进分母**（第十六节）：正文本身就是条文的那些条目一份附件都没有，
+      // 分母不算它的话，页面那行会写"附件正文里没有数到成文的修改表述" —— 而正文里明明有。
+      const bodyAsDraft = draftSources.some((source) => source.origin === 'body');
+      const changeMarkerCount = countChangeMarkers(
+        [...fullTexts.map((row) => row.text), ...(bodyAsDraft ? [target.bodyText ?? ''] : [])].join(' '),
+      );
       const explanationSections = draftSources.some((source) => source.role === 'explanation')
         ? countExplanationSections(
             fullTexts
@@ -297,9 +347,14 @@ export const summarizeNoticesJob: Job = {
           diagnosticsJson: JSON.stringify(diagnostics),
         });
         // 只有**摘要真的用了**才标记（失败重试耗尽的条目不能留下「条文已接入」的痕迹，
-        // 否则详情页会宣布一件没发生过的事）
-        if (draftSources.length > 0) {
-          await markAttachmentsFedToSummary(target.id, draftSources.map((item) => item.url));
+        // 否则详情页会宣布一件没发生过的事）。
+        // 正文那一份没有对应的附件行（它的 url 就是公示本身的 url），要滤掉 ——
+        // 否则就是拿一个不存在的附件去更新一张表（今天无害，但那是"说得比事实多"）。
+        const fedUrls = draftSources
+          .filter((item) => item.origin !== 'body')
+          .map((item) => item.url);
+        if (fedUrls.length > 0) {
+          await markAttachmentsFedToSummary(target.id, fedUrls);
         }
         succeeded += 1;
         ctx.logger(

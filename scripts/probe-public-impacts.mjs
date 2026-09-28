@@ -34,6 +34,7 @@ import { countChangeMarkers, changeCoverageVerdict } from '../src/lib/change-cov
 import { countExplanationSections } from '../src/lib/explanation-coverage.ts';
 import { attachmentRole } from '../src/lib/attachment-select.ts';
 import { effectiveStatus } from '../src/lib/notice-status.ts';
+import { draftProvenanceLine } from '../src/lib/summary-display.ts';
 import { buildSummaryDiagnostics, describeDiagnostics } from '../src/lib/summary-diagnostics.ts';
 
 const argv = process.argv.slice(2);
@@ -220,7 +221,7 @@ for (const row of targets.rows) {
     for (const item of summary.impacts) {
       console.log(`   • [${item.kind}] ${item.who || '（未写明影响谁）'}：${item.text}`);
       console.log(`     引用：${item.quote}`);
-      console.log(`     出处：${item.source ? `附件《${item.source}》` : '（未反查到出处 —— 不该落库）'}`);
+      console.log(`     ${draftProvenanceLine(item.source, '出处：（未反查到出处 —— 不该落库）')}`);
     }
   } else {
     console.log('\n  ── 可能的争议点：本页不渲染（一条都没过逐字反查） ──');
@@ -233,7 +234,7 @@ for (const row of targets.rows) {
     for (const item of summary.changes) {
       console.log(`   • ${item.clause || '—'} ｜ ${item.kind} ｜ ${item.text}`);
       console.log(`     原文：${item.quote}`);
-      console.log(`     出处：${item.source ? `附件《${item.source}》` : '（未反查到出处 —— 不该落库）'}`);
+      console.log(`     ${draftProvenanceLine(item.source, '出处：（未反查到出处 —— 不该落库）')}`);
     }
   } else {
     console.log('\n  ── 改了哪几处：本页不渲染（一行都没反查到） ──');

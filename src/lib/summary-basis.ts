@@ -38,6 +38,8 @@ export type SummaryBasis =
   | 'attachment-unreadable'
   /** 公告没有随文附件：摘要只能依据公示页信息 */
   | 'notice-only'
+  /** 条文来自**公告正文本身**（issue #86 第十六节：`cac` 那批把草案全文直接发在正文里） */
+  | 'body-points'
   /** 还没探测过附件（抽取任务没跑到它）—— 不能替源站宣布"没有附件" */
   | 'not-probed';
 
@@ -47,6 +49,7 @@ export const SUMMARY_BASIS_LABELS: Record<SummaryBasis, string> = {
   'attachment-unused': '读了附件但摘要未用',
   'attachment-unreadable': '附件读不到',
   'notice-only': '仅公示页信息',
+  'body-points': '公告正文条文',
   'not-probed': '未探测附件',
 };
 
@@ -57,6 +60,7 @@ export const SUMMARY_BASIS_NOTES: Record<SummaryBasis, string> = {
   'attachment-unused': '附件能读却没喂给这份摘要 —— 重跑一次就能改善',
   'attachment-unreadable': '源站拒绝访问或格式不支持，重跑也读不到',
   'notice-only': '公告没有随文附件，公示页就是它全部的信息源 —— 重跑结果不会变',
+  'body-points': '这条公示把草案全文直接发在正文里（没有附件），摘要依据的是那段正文本身',
   'not-probed': '抽取任务还没跑到它，之后会自动补上',
 };
 
@@ -118,15 +122,17 @@ export function summaryProvenance(input: {
   const basis: SummaryBasis =
     draft.kind === 'not-probed'
       ? 'not-probed'
-      : draft.kind === 'no-attachments'
-        ? 'notice-only'
-        : draft.kind === 'unreadable'
-          ? 'attachment-unreadable'
-          : draft.kind === 'read-not-used'
-            ? 'attachment-unused'
-            : input.hasAttachmentPoints
-              ? 'attachment-points'
-              : 'attachment-no-points';
+      : draft.kind === 'body-draft'
+        ? 'body-points'
+        : draft.kind === 'no-attachments'
+          ? 'notice-only'
+          : draft.kind === 'unreadable'
+            ? 'attachment-unreadable'
+            : draft.kind === 'read-not-used'
+              ? 'attachment-unused'
+              : input.hasAttachmentPoints
+                ? 'attachment-points'
+                : 'attachment-no-points';
 
   return {
     basis,
@@ -147,7 +153,9 @@ export function summaryProvenance(input: {
  * （`未优化（可重跑）` vs `未优化（重跑无效）`）。
  */
 function upgradeStateOf(basis: SummaryBasis, template: SummaryTemplate): SummaryUpgradeState {
-  if (basis === 'attachment-points') {
+  // 正文条文与附件条文同一档：都"读到了条文"，重跑的价值只取决于模板新旧
+  // （正文那一份同样吃着逐字反查与提示词版本）。
+  if (basis === 'attachment-points' || basis === 'body-points') {
     return template === 'current' ? 'optimized' : 'upgradable';
   }
   if (basis === 'attachment-unused') return 'upgradable';

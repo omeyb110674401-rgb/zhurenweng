@@ -182,6 +182,17 @@ export function countCjk(text: string): number {
   return count;
 }
 
+/**
+ * 一段文字里有多少个「第 X 条」锚点（issue #86 第十六节）。
+ *
+ * 与 `STRUCTURE_ANCHORS`（截取窗口用的锚点）**不是一回事**：那个是给窗口定位的固定短语表，
+ * 这个是**数条号**，用来判"这段文字本身就是条文"（不是公告壳、不是说明）。
+ * 判据只有这一处：以前探针与审计脚本各自抄了一份正则，这次并进来。
+ */
+export function countArticleAnchors(text: string): number {
+  return (text.match(/第[一二三四五六七八九十百零两0-9]{1,6}条/g) ?? []).length;
+}
+
 /** 抽出的文本到底算不算「有条文」。空白表的判据在解析后、零成本，不必再看文件名。 */
 export function hasDraftText(text: string): boolean {
   return countCjk(text) >= MIN_DRAFT_CJK_CHARS;

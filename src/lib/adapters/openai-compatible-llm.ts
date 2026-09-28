@@ -626,14 +626,21 @@ export function draftBlock(
 ): string {
   const usable = (sources ?? []).filter((item) => item.text.trim().length > 0 && item.role !== 'explanation');
   if (usable.length === 0) return '';
+  // 段落标题必须**如实**说明这些字是从哪来的（issue #86 第十六节）：`cac` 那批公示把草案全文
+  // 直接发在正文里、一份附件都没有 —— 把正文标成"从官方附件中提取"就是给模型一条假前提，
+  // 而这段提示词的立身之本正是"你看得到什么、看不到什么"必须是真的。
+  const fromBody = usable.some((item) => item.origin === 'body');
   const parts: string[] = [
-    `附件条文（本站从该公示的官方附件中逐字提取，共 ${usable.length} 份。这是草案正文本身，不是公告；只写你在这里确实读到的规定）：`,
+    fromBody
+      ? `条文（本站逐字提取，共 ${usable.length} 份。标着「本页正文」的那一份来自公告正文本身，其余来自官方附件。这是草案正文，不是公告；只写你在这里确实读到的规定）：`
+      : `附件条文（本站从该公示的官方附件中逐字提取，共 ${usable.length} 份。这是草案正文本身，不是公告；只写你在这里确实读到的规定）：`,
   ];
   let left = maxChars;
   usable.forEach((item, index) => {
-    const label = `【附件 ${index + 1}：${item.name}】`;
+    // 正文那一份不编号、也不叫"附件"：名字本身就告诉模型它来自哪里（#86 第十六节）
+    const label = item.origin === 'body' ? `【正文：${item.name}】` : `【附件 ${index + 1}：${item.name}】`;
     if (left <= 0) {
-      parts.push(`…（另有 ${usable.length - index} 份附件条文超出字数预算，未提供）`);
+      parts.push(`…（另有 ${usable.length - index} 份条文超出字数预算，未提供）`);
       return;
     }
     const text = item.text.trim().slice(0, left);

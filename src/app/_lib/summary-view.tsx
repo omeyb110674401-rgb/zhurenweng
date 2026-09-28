@@ -11,7 +11,12 @@ import {
   type SummarySection,
   type SummaryStatus,
 } from '@/lib/summary-content';
-import { draftAvailability, type DraftAvailabilityInput } from '@/lib/summary-display';
+import { BODY_DRAFT_LABEL } from '@/lib/attachment-feed';
+import {
+  draftAvailability,
+  draftProvenanceLine,
+  type DraftAvailabilityInput,
+} from '@/lib/summary-display';
 import { shouldRenderImpacts } from '@/lib/impact-display';
 import { summaryProvenance, summaryTemplateOf } from '@/lib/summary-basis';
 
@@ -131,7 +136,18 @@ export function SummaryView({
   }
 
   const deadlineText = summary.deadline.text ?? notice.deadlineAt ?? '未标注';
-  const draft = draftAvailability(attachmentReport ?? null);
+  /**
+   * 条文来自**本页正文**吗（issue #86 第十六节）：判据是"摘要里有没有出处 = 本页正文的内容"。
+   * 从摘要自己推、不加新列 —— 与 `summaryTemplateOf` 用"键在不在"同一条路数。
+   * 少了这一句，页面会一边说「没有随文附件」一边印着条文要点与出处。
+   */
+  const bodyDraft =
+    summary.keyPoints.some((point) => point.source === BODY_DRAFT_LABEL) ||
+    summary.impacts.some((point) => point.source === BODY_DRAFT_LABEL) ||
+    summary.changes.some((point) => point.source === BODY_DRAFT_LABEL);
+  const draft = draftAvailability(
+    attachmentReport ? { ...attachmentReport, bodyDraft } : null,
+  );
   /**
    * 摘要依据（issue #83）：读者有权知道这份摘要是"读了随文条文写的"还是"只读了公告本身"。
    * 判据收在 `lib/summary-basis.ts` 一处（页面 / 后台 / 审计脚本共用），这里只负责渲染。
@@ -193,9 +209,10 @@ export function SummaryView({
                     />
                   ) : null}
                   <p className="draft-point-source" data-testid="summary-draft-point-source">
-                    {point.source
-                      ? `出处：附件《${point.source}》（本站从附件逐字提取，未做改写）`
-                      : '出处：未标注（本条摘要生成于附件出处核对上线之前）'}
+                    {draftProvenanceLine(
+                      point.source,
+                      '出处：未标注（本条摘要生成于附件出处核对上线之前）',
+                    )}
                   </p>
                 </li>
               ))}
@@ -257,7 +274,10 @@ export function SummaryView({
                           <p>{change.quote}</p>
                           <p className="draft-point-source" data-testid="summary-change-source">
                             {change.source
-                              ? `出处：附件《${change.source}》（本站从附件逐字提取，未做改写）`
+                              ? draftProvenanceLine(
+                                  change.source,
+                                  '出处：未标注（这条的引用没能反查到本轮喂入的附件）',
+                                )
                               : '出处：未标注（这条的引用没能反查到本轮喂入的附件）'}
                           </p>
                         </td>
@@ -320,7 +340,10 @@ export function SummaryView({
                     />
                     <p className="draft-point-source" data-testid="summary-impact-source">
                       {impact.source
-                        ? `出处：附件《${impact.source}》（本站从附件逐字提取，未做改写）`
+                        ? draftProvenanceLine(
+                            impact.source,
+                            '出处：未标注（这条的引用没能反查到本轮喂入的附件）',
+                          )
                         : '出处：未标注（这条的引用没能反查到本轮喂入的附件）'}
                     </p>
                   </li>
@@ -398,7 +421,22 @@ export function SummaryView({
         >
           摘要依据：{provenance.label}
         </span>
-        {draft.kind === 'read-and-used' ? (
+        {draft.kind === 'body-draft' ? (
+          // 条文在本页正文里（issue #86 第十六节）：说清"没有附件"与"我们读了什么"两件事。
+          // 这一支必须排在最前 —— 它的附件行数通常是 0，落到下面那一支就会写出
+          // 「没有随文附件」与上方条文要点互相打架的话。
+          hasClausePoints || hasChanges || hasImpacts ? (
+            <>
+              这份公示<b>没有随文附件</b>：草案全文就印在本页正文里，本站已逐字读取并据此写出上面的内容
+              {draft.files > 0 ? `（另挂着 ${draft.files} 份附件）` : ''}；条文本身以官方原文页面为准。
+            </>
+          ) : (
+            <>
+              这份公示<b>没有随文附件</b>：草案全文在本页正文里，本站读了，但这份公告没有可逐条摘录的内容；
+              上面几段只依据公告本身，完整内容以官方原文页面为准。
+            </>
+          )
+        ) : draft.kind === 'read-and-used' ? (
           hasClausePoints ? (
             <>
               上方「草案条文要点」摘自<b>本站从随文附件里逐字读取的条文</b>（{draft.files} 份 /

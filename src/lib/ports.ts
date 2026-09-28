@@ -168,6 +168,14 @@ export interface DraftSource {
    * 条文的引用只能进 keyPoints / changes，说明的引用只能进 explanationPoints。
    */
   role?: 'draft' | 'explanation' | 'other';
+  /**
+   * 这一份从哪来（issue #86 第十六节）：官方**附件**（缺省），还是**公告正文本身**。
+   * 正文那一份只在"附件侧一份条文都没有、而正文自带条文形状"时才会出现
+   * （判据 `src/lib/attachment-feed.ts` 的 `bodyLooksLikeDraft`）——
+   * 提示词据此把段落标题写成"其中标着「本页正文」的那一份来自公告正文"，
+   * 免得模型以为它是一份附件。
+   */
+  origin?: 'attachment' | 'body';
 }
 
 export interface LlmSummarizeInput {
