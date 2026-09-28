@@ -35,7 +35,15 @@ export interface AttachmentParseResult {
   status: 'ok' | 'scanned_no_text' | 'unsupported_container';
   /** 抽取文本；`unsupported_container` 时为空串 */
   text: string;
-  /** 去空白后的字符数，扫描件判据与 `char_count` 列都用它 */
+  /**
+   * **去空白后的字符数**（`text.replace(/\s/g,'').length`）。
+   *
+   * ⚠️ 它**不是** `notice_attachments.char_count` 那一列的值：那一列存的是**汉字数**
+   * （`countCjk(text)`，见 `worker/jobs/extract-attachments.ts`），因为「有没有条文正文」
+   * 的判据（`hasDraftText`）与喂入预算都以汉字计。两处同名不同义，本字段目前**没有任何读侧**
+   * （2026-09-27 第 3 刀实测时发现，登记在 `docs/pending-issues/FOLLOWUPS.md`）。
+   * 原始注释写的是"扫描件判据与 `char_count` 列都用它"，那句话是错的。
+   */
   charCount: number;
   /** PDF 页数，非 PDF 为 null */
   pages: number | null;
