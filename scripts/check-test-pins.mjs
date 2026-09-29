@@ -1415,6 +1415,17 @@ const CASES = [
     test: 'tests/unit/summary-changes.test.mjs',
   },
   {
+    // §20：逐处找出来的顺序是**按位置**的，探针与（将来的）按条目列表都靠它把"处"归到句上。
+    // 撤掉排序，返回的就成了"按正则表的顺序"（add 在 delete 前面），而每处的字面都对 ——
+    // 于是谁都没注意到这份清单已经不是正文顺序了。
+    label: '逐处找出的改动表述不按正文顺序（按处归句会错位）',
+    file: 'changeCoverage',
+    from: '  return found.sort((a, b) => a.index - b.index);',
+    to: '  return found;',
+    pattern: '逐处找出来的位置与字面',
+    test: 'tests/unit/summary-changes.test.mjs',
+  },
+  {
     // issue #86 第 3 刀：档位判反了就是"每一个没归好类的条目都按重档跑一遍" ——
     // 花钱、变慢，而且不会有任何报错。判据就是那条 fail-safe 本尊。
     label: '受众面判不出来也走重档（未判定 ⇒ 每次调用都加倍）',
