@@ -17,12 +17,15 @@ import { attachmentRole, countArticleAnchors } from '../src/lib/attachment-selec
 import { BODY_DRAFT_LABEL, bodyLooksLikeDraft } from '../src/lib/attachment-feed.ts';
 import { countChangeMarkers, findChangeMarkers } from '../src/lib/change-coverage.ts';
 import { parseQuotedSummary, quoteSegments } from '../src/lib/summary-content.ts';
+import { draftProvenanceLine } from '../src/lib/summary-display.ts';
 
 const argv = process.argv.slice(2);
 const idIndex = argv.indexOf('--id');
 const prefix = idIndex === -1 ? null : (argv[idIndex + 1] ?? null);
 const limitIndex = argv.indexOf('--limit');
 const limit = limitIndex === -1 ? 3 : Number(argv[limitIndex + 1]) || 3;
+/** `--table`：额外渲染"按官方条目成行"的完整表（§20.3 的形状，供拍板前过目）。 */
+const showTable = argv.includes('--table');
 
 /** 读侧容错与页面同源：解析失败当成"没有摘要"，不让一行脏数据打断整轮。 */
 function safeParseJson(text) {
@@ -117,16 +120,40 @@ for (const row of targets) {
    */
   const normalized = (value) => value.replace(/\s+/g, '');
   const rowSegments = listed.map((item) => quoteSegments(item.quote).map(normalized));
-  const WINDOW_LENGTHS = [8, 12, 16];
-  const rowCoversMarker = (index) =>
-    rowSegments.some((segments) =>
-      WINDOW_LENGTHS.some((length) => {
-        const window = normalized(
-          fullText.slice(index, Math.min(fullText.length, index + length)),
-        );
-        return window.length >= 8 && segments.some((segment) => segment.includes(window));
-      }),
-    );
+  const WINDOW_LENGTHS = [16, 12, 8];
+  /** 这一行最长的命中窗口是哪个长度（0 = 没盖住）。长度越大越"具体"。 */
+  const rowMatchLength = (segments, index) => {
+    for (const length of WINDOW_LENGTHS) {
+      const window = normalized(
+        fullText.slice(index, Math.min(fullText.length, index + length)),
+      );
+      if (window.length >= 8 && segments.some((segment) => segment.includes(window))) {
+        return length;
+      }
+    }
+    return 0;
+  };
+  /**
+   * 盖住这一处表述的**那一行**（没有则 -1）。
+   *
+   * ⚠️ 必须取**最长**命中，不能取"第一个命中"（2026-09-28 第四版判据就栽在这里）：
+   * 第六十一条第一款与第六十三条两行的引用都以 `修改为：“本法第五十九条` 开头，
+   * 8 字窗口两边都命中 ⇒ 按顺序取第一个会把第六十三条那一行印成第六十一条第一款
+   * （探针渲染出的表里同一行出现两次，就是这么来的）。**够具体的那个才算数。**
+   */
+  const coveringRowIndex = (index) => {
+    let best = -1;
+    let bestLength = 0;
+    for (const [position, segments] of rowSegments.entries()) {
+      const length = rowMatchLength(segments, index);
+      if (length > bestLength) {
+        best = position;
+        bestLength = length;
+      }
+    }
+    return best;
+  };
+  const rowCoversMarker = (index) => coveringRowIndex(index) !== -1;
 
   let coveredMarkers = 0;
   let coveredSentences = 0;
@@ -151,5 +178,68 @@ for (const row of targets) {
       `落库的改动表 ${listed.length} 行`,
   );
   if (bodyAsDraft) console.log(`  （正文那一份按 ${BODY_DRAFT_LABEL} 计入分母）`);
+
+  /**
+   * `--table`：把"按官方条目成行"的那张**完整表**渲染出来（供拍板前过目，不进页面）。
+   *
+   * 形状来自 doc 86 §20.3：**行由程序定**（每句官方条目一行），**说明由模型填**；
+   * 模型没写出可核对说明的行，只报事实、不编内容；标题性质的句子不单独成行。
+   *
+   * 标题的判据（写出来，不靠"看着像标题"）：这一句里没有引号引起来的条款内容，
+   * 且**紧接着的那一句以子条目开头**（（一）/ 1. 之类）—— 也就是它下面挂着一串子条目。
+   */
+  if (showTable) {
+    const isSubItemStart = (text) => /^\s*[（(][一二三四五六七八九十0-9]{1,3}[）)]/.test(text);
+    const isHeaderSentence = (sentence, next) =>
+      !/[“”"]/.test(sentence) && next !== undefined && isSubItemStart(next);
+
+    const clauseOf = (sentence) =>
+      (/第[一二三四五六七八九十百零两0-9]{1,6}条(第[一二三四五六七八九十]{1,3}款)?/.exec(sentence) ?? [
+        '',
+      ])[0];
+
+    console.log('\n  ── 改了哪几处（探针版完整表：行由程序定，说明由模型填）──');
+    let rows = 0;
+    let described = 0;
+    let headers = 0;
+    const sentenceTexts = sentencesWithMarkers.map((span) =>
+      fullText.slice(span.start, span.end).trim(),
+    );
+    for (const [position, span] of sentencesWithMarkers.entries()) {
+      const sentence = sentenceTexts[position];
+      const next = sentenceTexts[position + 1];
+      const hits = markers.filter(
+        (marker) => marker.index >= span.start && marker.index < span.end,
+      );
+      if (isHeaderSentence(sentence, next)) {
+        headers += 1;
+        console.log(`   （标题，不单独成行）${sentence.slice(0, 50)} —— 下面挂着子条目`);
+        continue;
+      }
+      // 命中的那一行：第一个盖住这一处表述的行
+      const rowIndex = hits.reduce(
+        (found, hit) => (found === -1 ? coveringRowIndex(hit.index) : found),
+        -1,
+      );
+      const row = rowIndex === -1 ? null : listed[rowIndex];
+      rows += 1;
+      if (row !== null) {
+        described += 1;
+        console.log(`   ${row.clause || clauseOf(sentence) || '—'} ｜ ${row.kind} ｜ ${row.text}`);
+        console.log(`     原文：${row.quote}`);
+        console.log(`     ${draftProvenanceLine(row.source, '出处：（无出处）')}`);
+      } else {
+        console.log(
+          `   ${clauseOf(sentence) || '—'} ｜ （${hits.map((hit) => hit.kind).join('+')}） ｜ ` +
+            '本站检测到这一处改动表述，但没能给出可核对的说明',
+        );
+        console.log(`     原文：${sentence.slice(0, 120)}${sentence.length > 120 ? '…' : ''}`);
+      }
+    }
+    console.log(
+      `\n   ⇒ 这张表 ${rows} 行（其中 ${described} 行有模型的说明、${rows - described} 行只报事实）；` +
+        `另有 ${headers} 个标题句子不单独成行。落库那一版是 ${listed.length} 行。`,
+    );
+  }
 }
 console.log('\n（本探针只读：一个字都没写库）');
