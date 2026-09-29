@@ -171,14 +171,21 @@ describe('issue #86：覆盖度那三句话（分母是全文，不是喂进去�
     assert.doesNotMatch(verdict.detail, /全部 0/);
   });
 
-  it('列得比数到的少 ⇒ 照实说少，并把差值归给"本站读到的那一截"', () => {
+  it('列得比数到的少 ⇒ 照实说少，且**不替差额认领原因**（2026-09-28 实测：那句话曾经是假的）', () => {
     const markers = countChangeMarkers(DRAFT.text);
     assert.ok(markers.total >= 2, `夹具里该数得到改动表述，实际 ${markers.total}`);
     const verdict = changeCoverageVerdict(1, markers);
     assert.equal(verdict.state, 'partial');
     assert.match(verdict.detail, new RegExp(`检测到 ${markers.total} 处`));
     assert.match(verdict.detail, /本页列出 1 处/);
-    assert.match(verdict.detail, /其余的不在本站读到的那一截文本里/);
+    // 分母是什么、表里为什么只有这些 —— 这两件是我们真的知道的
+    assert.match(verdict.detail, /检测按本站读到的全部附件正文数/);
+    assert.match(verdict.detail, /表里只列模型写出、且引用能逐字对回原文的那些/);
+    // 差额的两种可能都要说出来，而不是只挑"本站没读到"那一种
+    assert.match(verdict.detail, /差额既可能来自模型没写/);
+    assert.match(verdict.detail, /也可能来自本站没读到的那部分/);
+    // 反例：公路法那条正文整份都在窗口内，同一输入四遍列出 8/2/3/8 行 ⇒ "没读到"不是通解
+    assert.doesNotMatch(verdict.detail, /其余的不在本站读到的那一截/);
   });
 
   it('列够了才说"全部"', () => {
