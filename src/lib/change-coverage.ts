@@ -56,21 +56,52 @@ export interface ChangeMarkerCount {
   byKind: { modify: number; add: number; delete: number; renumber: number };
 }
 
+/** 一处在正文里数到的改动表述（位置由 `findChangeMarkers` 给，供探针与"按处列表"用）。 */
+export interface ChangeMarker {
+  kind: Exclude<ChangeKind, 'other'>;
+  /** 命中在原文里的起始下标 */
+  index: number;
+  /** 命中的字面（如「修改为」「增加一条」） */
+  text: string;
+}
+
 /**
- * 数一遍正文里的改动表述。正则带 g，每次都用新副本，不吃 lastIndex。
+ * 把正文里的改动表述**逐处**找出来（位置 + 类型 + 字面）。
  *
- * 同一处文字可能被多个模式各数一次（"删去…增加一条作为第X条"就是一句三处），
- * **这正是要的**：读者关心的是"有多少处表述要解释"，不是"改了几条"。
+ * 为什么把位置也交出来（2026-09-28）：`countChangeMarkers` 的 `total` 是**覆盖度的分母**，
+ * 不是"改了几条" —— 同一句话可能被多个模式各数一次（"删去…增加一条作为第X条"就是一句三处）。
+ * 这个区别在纸上很清楚，但用它的人（我）在写"把数到的每一处都列成行"这个方案时就忘了，
+ * 差一点让页面把一句话印成三行。所以把位置与字面暴露出来：以后要按处列表、或是要核对
+ * "分母里这 14 处到底落在哪几句上"，都从这一份实现里取，不再各自抄正则。
+ */
+export function findChangeMarkers(text: string): ChangeMarker[] {
+  const source = text ?? '';
+  if (source === '') return [];
+  const found: ChangeMarker[] = [];
+  for (const [kind, pattern] of Object.entries(KIND_PATTERNS)) {
+    for (const match of source.matchAll(new RegExp(pattern.source, 'g'))) {
+      found.push({
+        kind: kind as ChangeMarker['kind'],
+        index: match.index ?? 0,
+        text: match[0],
+      });
+    }
+  }
+  return found.sort((a, b) => a.index - b.index);
+}
+
+/**
+ * 数一遍正文里的改动表述。判据只有 `findChangeMarkers` 一处，这里只做汇总 ——
+ * 从前它自己抄了一遍正则，多一份就多一次漂移的机会（两份词表打架的教训见 #79）。
  */
 export function countChangeMarkers(text: string): ChangeMarkerCount {
-  const source = text ?? '';
   const byKind = { modify: 0, add: 0, delete: 0, renumber: 0 };
-  if (source === '') return { total: 0, byKind };
-  for (const [kind, pattern] of Object.entries(KIND_PATTERNS)) {
-    const key = kind as keyof typeof byKind;
-    byKind[key] = [...source.matchAll(new RegExp(pattern.source, 'g'))].length;
-  }
-  return { total: byKind.modify + byKind.add + byKind.delete + byKind.renumber, byKind };
+  const found = findChangeMarkers(text);
+  for (const marker of found) byKind[marker.kind] += 1;
+  return {
+    total: found.length,
+    byKind,
+  };
 }
 
 /**

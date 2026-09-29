@@ -10,6 +10,7 @@ import {
   CHANGE_KIND_LABELS,
   changeCoverageVerdict,
   countChangeMarkers,
+  findChangeMarkers,
 } from '../../src/lib/change-coverage.ts';
 
 /**
@@ -200,6 +201,30 @@ describe('issue #86：覆盖度那三句话（分母是全文，不是喂进去�
     assert.equal(markers.byKind.add, 1);
     assert.equal(markers.byKind.renumber, 1);
     assert.equal(markers.total, 2, '读者关心的是"有多少处表述要解释"，不是"改了几条"');
+  });
+
+  it('逐处找出来的位置与字面：总数与 countChangeMarkers 同源，且**一句话可以是三处**', () => {
+    // 这条用例存在的理由是个真实事故（差点发生）：`total` 是**覆盖度的分母**，不是"改了几条"。
+    // 2026-09-28 写"把数到的每一处都列成行"那个方案时我按 14 处 = 14 行去想了 —— 而这一句
+    // 就能数出三处。把它钉住，是为了让下一个人先看到"分母 ≠ 条款数"。
+    const sentence = '删去第七条，增加一条，作为第八条。';
+    const found = findChangeMarkers(sentence);
+    assert.deepEqual(
+      found.map((marker) => marker.kind),
+      ['delete', 'add', 'renumber'],
+      '按位置升序返回，类型各算一处',
+    );
+    assert.deepEqual(
+      found.map((marker) => marker.text),
+      ['删去', '增加一条', '作为第八条'],
+      '字面照抄命中片段，不去改写',
+    );
+    const [first, second, third] = found;
+    assert.ok(first.index < second.index && second.index < third.index, '位置升序');
+    // 与 countChangeMarkers 同源：一个是逐处、一个是汇总，不许各算一套
+    assert.equal(countChangeMarkers(sentence).total, found.length);
+    assert.equal(countChangeMarkers('这份文件里没有任何改动表述。').total, 0);
+    assert.deepEqual(findChangeMarkers(''), []);
   });
 });
 
