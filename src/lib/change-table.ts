@@ -6,6 +6,7 @@ import {
 } from './change-coverage.ts';
 import {
   MIN_VERIFIABLE_QUOTE_CHARS,
+  normalizeQuoteMarks,
   quoteFingerprint,
   quoteSegments,
   stripQuoteWhitespace,
@@ -90,12 +91,16 @@ export function buildChangeTable(text: string, changes: { quote: string }[]): Ch
 
   // 去空白后的全文 + 每个字回原文的下标：模型常把附件里的换行与缩进压成一行，
   // 按原样 indexOf 会把**真的逐字引用**判成"不属于任何一句"（指纹口径见 summary-content 的
-  // `quoteFingerprint`，这里只是把它的"去空白"也用在 haystack 上）。
+  // `quoteFingerprint`，这里把它的"去空白"与"引号字形归一"同样用在 haystack 上）。
+  //
+  // 引号那一层是 2026-09-30 补的：`normalizeQuoteMarks` 是一对一的字符替换（长度不变），
+  // 所以 `positions` 照样回得到原文下标 —— 这也是那一层只换字形、不动别的字符的原因。
+  const normalized = normalizeQuoteMarks(source);
   const chars: string[] = [];
   const positions: number[] = [];
-  for (let i = 0; i < source.length; i += 1) {
-    if (!/[\s\u3000]/.test(source[i])) {
-      chars.push(source[i]);
+  for (let i = 0; i < normalized.length; i += 1) {
+    if (!/[\s\u3000]/.test(normalized[i])) {
+      chars.push(normalized[i]);
       positions.push(i);
     }
   }
@@ -104,9 +109,10 @@ export function buildChangeTable(text: string, changes: { quote: string }[]): Ch
   /**
    * 这一段引用在我们读到的正文里的起止下标（找不到 = null）。
    *
-   * 两种写法都试：原样的去空白版，以及**再去掉包裹引号**的指纹版（与落库时那一关同一口径，
-   * 见 `quoteFingerprint`）。只试一种的话，`“……` 这种以引号开头的段会找不到 ——
-   * 后果不是出错，而是那一行被挪到表尾（见下面的兜底），读者会觉得顺序莫名其妙。
+   * 两种写法都试：去空白 + 引号字形归一的那一版，以及**再去掉包裹引号**的指纹版
+   * （与落库时那一关同一口径，见 `quoteFingerprint`；引号归一从那一份 import，不在这里
+   * 抄第二份）。只试一种的话，`“……` 这种以引号开头的段会找不到 —— 后果不是出错，
+   * 而是那一行被挪到表尾（见下面的兜底），读者会觉得顺序莫名其妙。
    *
    * 只取**首次出现**，所以每段都必须够长：短于 `MIN_VERIFIABLE_QUOTE_CHARS` 的段本来就不该
    * 出现在落库的引用里（`findDraftSourceForQuote` 会把整行丢掉），这里跟着同一个门槛，
@@ -114,7 +120,10 @@ export function buildChangeTable(text: string, changes: { quote: string }[]): Ch
    */
   const locate = (segment: string): { start: number; end: number } | null => {
     if (segment.length < MIN_VERIFIABLE_QUOTE_CHARS) return null;
-    for (const needle of [stripQuoteWhitespace(segment), stripQuoteWhitespace(quoteFingerprint(segment))]) {
+    for (const needle of [
+      stripQuoteWhitespace(normalizeQuoteMarks(segment)),
+      stripQuoteWhitespace(quoteFingerprint(segment)),
+    ]) {
       if (needle.length < MIN_VERIFIABLE_QUOTE_CHARS) continue;
       const at = haystack.indexOf(needle);
       if (at === -1) continue;

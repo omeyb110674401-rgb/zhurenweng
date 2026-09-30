@@ -182,11 +182,66 @@ describe('issue #86：覆盖度那三句话（分母是全文，不是喂进去�
     // 分母是什么、表里为什么只有这些 —— 这两件是我们真的知道的
     assert.match(verdict.detail, /检测按本站读到的全部附件正文数/);
     assert.match(verdict.detail, /表里只列模型写出、且引用能逐字对回原文的那些/);
-    // 差额的两种可能都要说出来，而不是只挑"本站没读到"那一种
-    assert.match(verdict.detail, /差额既可能来自模型没写/);
-    assert.match(verdict.detail, /也可能来自本站没读到的那部分/);
+    // 这一行是 v1 的存量形状（诊断里没有 feed）⇒ 照实说给不出答案，而不是把差额推给"我们没读到"
+    assert.match(verdict.detail, /没有留下本轮的喂入记录/);
     // 反例：公路法那条正文整份都在窗口内，同一输入四遍列出 8/2/3/8 行 ⇒ "没读到"不是通解
     assert.doesNotMatch(verdict.detail, /其余的不在本站读到的那一截/);
+    assert.doesNotMatch(verdict.detail, /本站没读到/);
+  });
+
+  it('喂入清单说有一份被截 ⇒ "我们没读到"才可以作为一种可能出现（§19.4 收尾）', () => {
+    const markers = countChangeMarkers(DRAFT.text);
+    const feed = {
+      tier: 'standard',
+      budget: { perSource: 8_000, total: 12_000, minShare: 1_500 },
+      usedCjk: 2_000,
+      sources: [
+        {
+          name: DRAFT.name,
+          role: 'draft',
+          origin: 'attachment',
+          fullCjk: 5_000,
+          fedCjk: 2_000,
+          chars: 4_000,
+          allowance: 4_000,
+          truncated: true,
+        },
+      ],
+      starved: [],
+    };
+    const verdict = changeCoverageVerdict(1, markers, feed);
+    assert.equal(verdict.state, 'partial');
+    assert.match(verdict.detail, /本轮读到 1 份来源，共喂进模型 2000 个汉字/);
+    assert.match(verdict.detail, /其中 1 份只喂进一部分（被截）/);
+    assert.match(verdict.detail, /差额可能出在没喂进去的那一截上/);
+  });
+
+  it('清单说每一份都整份进了窗口 ⇒ 那句话彻底消失（差额归给模型没写）', () => {
+    const markers = countChangeMarkers(DRAFT.text);
+    const feed = {
+      tier: 'standard',
+      budget: { perSource: 8_000, total: 12_000, minShare: 1_500 },
+      usedCjk: 2_000,
+      sources: [
+        {
+          name: DRAFT.name,
+          role: 'draft',
+          origin: 'attachment',
+          fullCjk: 2_000,
+          fedCjk: 2_000,
+          chars: 4_000,
+          allowance: 8_000,
+          truncated: false,
+        },
+      ],
+      starved: [],
+    };
+    const detail = changeCoverageVerdict(1, markers, feed).detail;
+    assert.match(detail, /每一份都整份进了窗口，没有一份被截/);
+    assert.match(detail, /差额来自模型没有把检测到的改动表述都写出来/);
+    assert.doesNotMatch(detail, /没喂进去的那一截/);
+    assert.doesNotMatch(detail, /其余的不在本站读到的那一截/);
+    assert.doesNotMatch(detail, /本站没读到/);
   });
 
   it('列够了才说"全部"', () => {

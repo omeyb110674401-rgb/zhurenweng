@@ -358,6 +358,15 @@ worker 注册表中的 `summarize-notices` 任务（`worker/jobs/summarize-notic
   （`worker/jobs/summarize-notices.ts` 里同一个局部变量），两个数不可能分家；
   这一版之前落库的行没有 `changeTable` 键 ⇒ 页面退回"只列模型写出的行"。
   覆盖度那一句由 `changeTableNote` 写，页面与验收脚本 `scripts/show-notice-summary.mjs` 共用。
+- **覆盖度那句话把差额归给谁：看喂入清单说话**（issue #86 §19.4 收尾；判据在
+  `src/lib/explanation-coverage.ts` 的 `coverageGapAttribution`，两张表共用同一句交代）：
+  ① 清单**报了**缺口（有来源被截、或一个字都没喂进去）⇒ 把"没喂进去的那一截"作为**一种可能**
+  说出来；② 清单说每一份都整份进了窗口 ⇒ 差额归给模型没写（这一支是实测出来的：正文整份都在
+  窗口内，模型仍然只列出三分之一的小节）；③ **没有喂入清单**（v1 存量行、后台人工录入）⇒
+  照实说"这条摘要没有留下本轮的喂入记录，给不出可核对的答案"。这一列以前读者侧拿不到
+  （`getNoticeSummary` 不查 `summary_diagnostics_json`），那句话于是只能在"模型没写"与
+  "我们没读到"之间猜 —— 猜错过一次，而它读起来像一句可核对的交代。判据在 `.ts` 里，
+  详情页只把 `feed` 原样传给摘要卡。
 - **「可能的争议点」（L3 判读）**（issue #86 第 1 刀）：全站唯一一段**推断**内容，
   只给「公众广域」渲染、每条必须挂一句逐字原文（反查不到整条不落库、出处由程序算）、
   块级免责声明、一行都没有时整块不渲染。展示门控的判据在 `src/lib/impact-display.ts`
@@ -375,6 +384,23 @@ worker 注册表中的 `summarize-notices` 任务（`worker/jobs/summarize-notic
   `--all` 要显式写；清空前把旧摘要**连模型名**一起备份，判据复用 `draftSourcesForSummary()`
   所以"会不会喂进条文"与真跑时同源；已经带出可核对要点的条目自动跳过，工具因此可重复跑）。
   2026-09-24 用它置换了 49 条，过程与两处坑记在 `docs/pending-issues/67-summaries-redraft.md`。
+
+- **已截止、但正文自带条文的条目：点名补摘要**（2026-09-30 加，`scripts/summarize-now.mjs`）。
+  上面那条入队条件排除了已截止条目，而生产上「公众广域」那 39 条里 **31 条已截止、从来没有摘要**：
+  29 条是公告壳（0 份可读附件、正文 260–687 字 —— 补了也没内容，那是数据不是判据），
+  **2 条例外**，草案全文就写在公告正文里（`cac` 那类源不发附件，判据见 `bodyLooksLikeDraft`）：
+  `0b00deff17dfa050`《中华人民共和国反网络暴力法（征求意见稿）》（正文 10,896 字、78 处「第X条」）、
+  `71738d1c45736276`《小型个人信息处理者个人信息保护简化措施规定》（3,550 字、22 处条号）。
+  工具**点名**跑、不动队列口径：
+  `docker compose run --rm worker node scripts/summarize-now.mjs --ids 0b00deff,71738d1c`
+  （默认**只读**：逐条打印标题 / status / deadline_at / 受众面 / 档位 / 会喂进去几份多少字 /
+  是否已有摘要 / 是否已截止；已截止照实打印，不拒绝 —— 那正是它的用途）；
+  加 `--apply` 才写库，`--limit` 缺省 5（不给就不许一次点更多，**每条一次境外调用**，先认下来）；
+  已有摘要的条目默认拒绝，`--replace` 才覆盖、且覆盖前把旧值打成 `#BACKUP` 行
+  （`compose run --rm` 会删掉容器内写的文件，stdout 才是不会丢的那份备份）。
+  实现与日常那一轮**同一份**（`worker/jobs/summarize-notices.ts` 的 `summarizeOneNotice()`，
+  链上七步逐字一致），失败照实报、退出码非 0，但**不发任务告警** ——
+  告警的去重键是「日 × 任务 × 源」，工具顶着 `summarize-notices` 发信会占掉当天该源真正的那封。
 
 - **失败策略**：单条条目失败后重试 `SUMMARY_MAX_RETRIES` 次（默认 3，指数退避），
   仍失败置 `summary_status=failed_review` 转人工复核，worker 不再自动重试；

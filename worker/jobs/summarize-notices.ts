@@ -62,8 +62,13 @@ import type { Job, JobContext } from '../registry.ts';
  * 此后 worker 不再自动重试（由复核队列人工处理）。单条失败不影响同批其他条目。
  */
 
-/** 失败后的最大重试次数（不含首次调用；共尝试 1 + SUMMARY_MAX_RETRIES 次） */
-const MAX_RETRIES = envInt('SUMMARY_MAX_RETRIES', 3, { min: 0, max: 10 });
+/**
+ * 失败后的最大重试次数（不含首次调用；共尝试 1 + SUMMARY_MAX_RETRIES 次）。
+ *
+ * 导出给 `scripts/summarize-now.mjs` 用：它要在"要真跑"那一行如实写出这一次最多几次尝试
+ * （那正是这个工具的成本），而从环境变量再推导一遍就是把同一个默认值写两份。
+ */
+export const MAX_RETRIES = envInt('SUMMARY_MAX_RETRIES', 3, { min: 0, max: 10 });
 /** 重试退避基数（毫秒），按 2 的幂指数递增：base, 2*base, 4*base … */
 const RETRY_BASE_DELAY_MS = envInt('SUMMARY_RETRY_DELAY_MS', 500, { min: 0 });
 
@@ -220,7 +225,7 @@ function sleep(ms: number): Promise<void> {
 async function summarizeWithRetry(
   llm: LlmPort,
   target: PendingSummaryTarget,
-  ctx: JobContext,
+  logger: (message: string) => void,
   draftSources: DraftSource[],
   tier: SummaryTier,
 ): Promise<{ summary: QuotedStructuredSummary; attempts: number }> {
@@ -237,7 +242,7 @@ async function summarizeWithRetry(
   for (let attempt = 0; attempt <= MAX_RETRIES; attempt += 1) {
     if (attempt > 0) {
       const delayMs = RETRY_BASE_DELAY_MS * 2 ** (attempt - 1);
-      ctx.logger(`条目 ${target.id} 摘要第 ${attempt}/${MAX_RETRIES} 次重试（${delayMs}ms 后）`);
+      logger(`条目 ${target.id} 摘要第 ${attempt}/${MAX_RETRIES} 次重试（${delayMs}ms 后）`);
       await sleep(delayMs);
     }
     try {
@@ -245,12 +250,191 @@ async function summarizeWithRetry(
       return { summary, attempts: attempt + 1 };
     } catch (error) {
       lastError = error;
-      ctx.logger(
+      logger(
         `条目 ${target.id} LLM 调用失败（第 ${attempt + 1}/${MAX_RETRIES + 1} 次尝试）：${errorMessage(error)}`,
       );
     }
   }
   throw lastError;
+}
+
+/**
+ * 单条条目的**完整**摘要 —— job 与 `scripts/summarize-now.mjs` 共用这一份实现。
+ *
+ * 抽出来的理由不是"少写几行"，而是"一次点名重跑必须与日常那一轮走同一条链"：
+ * `feedPlanForSummary` → `summarizeWithRetry` → `buildQuotedSummaryWithTally` →
+ * `buildChangeTable` → `saveNoticeSummary` → `markAttachmentsFedToSummary` → 检索索引同步。
+ * 少了任何一步、或哪一步的判据在工具里另抄一份，工具产出的摘要就与生产产出的**不是同一种东西**，
+ * 而这一点从摘要本身看不出来（两者的形状一模一样）。job 的 `run` 从此只负责
+ * "跑哪几条"与四个汇总计数。
+ *
+ * 返回值把三种结局都交出去（成功 / 转人工复核 / 抛错），不在这里吞掉：
+ * - `'done'` 与 `'failed_review'` 都**返回结果**（后者已置库、已打过失败日志）；
+ * - 这个函数抛出的错误照旧往外冒（取条文失败、附件文本读失败、写失败态本身失败）——
+ *   由调用方决定怎么办：job 让它冒到任务级（与抽出来之前逐字相同），
+ *   `scripts/summarize-now.mjs` 按条打印后继续跑下一条。
+ *
+ * 失败告警**刻意留在这里之外**（`onRetriesExhausted` 钩子交给调用方）：告警的去重键是
+ * 「本地日历日 × 任务名 × 源」（`src/lib/alerts.ts` 的 `hasAlertSend`），点名工具若顶着
+ * `summarize-notices` 这个任务名发信，会把当天这个源**真正**的那封挤掉 ——
+ * 那是"工具把生产的告警吃掉"，不是它该有的能力。job 传钩子，于是顺序
+ * （置失败态 → 发告警 → 打失败日志）与抽出来之前一字不差。
+ */
+export interface SummarizeOneNoticeDeps {
+  llm: LlmPort;
+  /**
+   * `llmModelName(llm)` 的结果：落库的 `summary_model` 与诊断里的 `model` 都由它来。
+   * 由调用方算一次、整批共用（job 用的那份还要打进"待摘要条目 N 条（model=…）"那一行）。
+   */
+  model: string;
+  /** 日志出口：worker 传 `ctx.logger`（自带 `[worker] 时间戳` 前缀），工具传 stdout */
+  logger: (message: string) => void;
+  /**
+   * 重试耗尽、已置 `failed_review` **之后**、失败日志**之前**的钩子（可选）。
+   * job 在这里发任务失败告警（顺序与抽出来之前一字不差）；工具不传 —— 理由见上面那段。
+   */
+  onRetriesExhausted?: (input: {
+    target: PendingSummaryTarget;
+    error: string;
+  }) => Promise<void> | void;
+}
+
+/** 一条条目的结局（`error` 与日志、告警里那一句**同源**，不另写一遍）。 */
+export interface SummarizeOneNoticeResult {
+  outcome: 'done' | 'failed_review';
+  /** 这一条实际走的喂入档位（受众面定的，见 `summaryTierFor`） */
+  tier: SummaryTier;
+  /** 真喂进提示词的条文汉字数；> 0 = 这一条用到了条文输入 */
+  fedCjk: number;
+  /** 失败时的可读错误；成功时 null */
+  error: string | null;
+}
+
+export async function summarizeOneNotice(
+  target: PendingSummaryTarget,
+  deps: SummarizeOneNoticeDeps,
+): Promise<SummarizeOneNoticeResult> {
+  const { llm, model, logger } = deps;
+  // 条文在进入重试循环**之前**算一次：重试不该重读一遍库、更不该在两次尝试之间
+  // 因为预算边界变化而送出不同输入（同一条目的多次调用必须是同一份提示词）。
+  const { tier, sources: draftSources, report: feedReport } = await feedPlanForSummary(target);
+  const draftChars = draftSources.reduce((sum, item) => sum + countCjk(item.text), 0);
+  // 说明小节数只在"本轮真喂了说明"时才算：没喂却报一个数，等于让页面去解释
+  // 一份模型根本没读过的文件。分母从**全文**算（不是喂进去的那一截），理由见
+  // explanation-coverage.ts：拿喂进去的那一截数分母，窗口外的内容永远不会出现在
+  // "还差多少"那句话里。
+  const fullTexts = await listNoticeAttachmentTexts(target.id);
+  // 改动表述计数（issue #86 第 2 刀）：**分母从全部附件正文算**，不是喂进去的那一截 ——
+  // 与说明小节数同一条规矩（拿喂进去的那一截数分母就是自证：窗口外的改动永远不会
+  // 出现在"还差多少"那句话里）。它不再按体裁门控：那份门控正是 #79 那个空栏的成因。
+  // **正文那一份也要算进分母**（第十六节）：正文本身就是条文的那些条目一份附件都没有，
+  // 分母不算它的话，页面那行会写"附件正文里没有数到成文的修改表述" —— 而正文里明明有。
+  const bodyAsDraft = draftSources.some((source) => source.origin === 'body');
+  /**
+   * 数分母用的那一份文本：**全部附件正文**（不是喂进去的那一截），正文本身就是条文的
+   * 那些条目再把正文接在后面。**同一个局部变量喂给两处** —— 分母（`countChangeMarkers`）
+   * 与那张表的骨架（`buildChangeTable`）：两者若各拼一次文本，页面上"检测到 N 处"
+   * 与"表里有几行"就会各说各话，而两个数看起来都像真的（这一族问题里最难查的一种）。
+   */
+  const changeText = [
+    ...fullTexts.map((row) => row.text),
+    ...(bodyAsDraft ? [target.bodyText ?? ''] : []),
+  ].join(' ');
+  const changeMarkerCount = countChangeMarkers(changeText);
+  const explanationSections = draftSources.some((source) => source.role === 'explanation')
+    ? countExplanationSections(
+        fullTexts
+          .filter((row) => attachmentRole(row.name) === 'explanation')
+          .map((row) => row.text)
+          .join(' '),
+      )
+    : null;
+  try {
+    const { summary, attempts } = await summarizeWithRetry(llm, target, logger, draftSources, tier);
+    // draftSources 一并交给归一化：条文要点必须能反查到出处才落库（issue #57 第 6 步）；
+    // tally 是这一次反查丢掉了多少条（issue #86 第 0 刀）—— 这两个出口走的是同一份实现，
+    // 所以"诊断说没丢"与"实际没丢"不可能分家。
+    const { summary: quoted, tally } = buildQuotedSummaryWithTally(
+      summary,
+      summary.quotes,
+      draftSources,
+      explanationSections,
+      changeMarkerCount,
+    );
+    const kept: SummaryFieldCounts = {
+      keyPoints: quoted.keyPoints.length,
+      explanationPoints: quoted.explanationPoints.length,
+      channels: quoted.channels.length,
+      impacts: quoted.impacts.length,
+      changes: quoted.changes.length,
+    };
+    /**
+     * 表在**反查之后**才造得出来（"哪一行说的是哪一句"要等 `changes` 定下来），
+     * 所以它是落库前补上去的，而不是 `buildQuotedSummaryWithTally` 的返回值。
+     * 它只用到 `quoted.changes` 的 `quote` 与那一份 `changeText` —— 后者正是上面数分母
+     * 用的同一个字符串，两个数因此不可能分家。
+     */
+    const changeTable = buildChangeTable(changeText, quoted.changes);
+    // 诊断与摘要**一起**落库：它描述的就是这一列摘要是哪一次调用产出的
+    const diagnostics = buildSummaryDiagnostics(summary.diagnostics, {
+      model,
+      provider: llm.provider,
+      attempts,
+      kept,
+      quoteNotFound: tally.quoteNotFound,
+      // 喂入清单（第 3 刀）：端口看不到选取过程，只有这里知道"哪一份被预算挤掉了"
+      feed: feedReport,
+    });
+    await saveNoticeSummary({
+      id: target.id,
+      summaryJson: JSON.stringify({ ...quoted, changeTable }),
+      summaryModel: model,
+      diagnosticsJson: JSON.stringify(diagnostics),
+    });
+    // 只有**摘要真的用了**才标记（失败重试耗尽的条目不能留下「条文已接入」的痕迹，
+    // 否则详情页会宣布一件没发生过的事）。
+    // 正文那一份没有对应的附件行（它的 url 就是公示本身的 url），要滤掉 ——
+    // 否则就是拿一个不存在的附件去更新一张表（今天无害，但那是"说得比事实多"）。
+    const fedUrls = draftSources
+      .filter((item) => item.origin !== 'body')
+      .map((item) => item.url);
+    if (fedUrls.length > 0) {
+      await markAttachmentsFedToSummary(target.id, fedUrls);
+    }
+    logger(
+      `条目 ${target.id} 摘要完成（${describeDiagnostics(diagnostics)}）`,
+    );
+    // 索引同步钩子（issue #8）：摘要落库后重刷该条目，摘要文本即刻可被检索；
+    // 失败只降级记日志，由重建任务兜底，不影响摘要主管线
+    try {
+      await syncNoticesToSearchIndex([target.id], logger);
+    } catch (error) {
+      logger(
+        `条目 ${target.id} 检索索引同步失败（由重建任务兜底）：${errorMessage(error)}`,
+      );
+    }
+    return { outcome: 'done', tier, fedCjk: draftChars, error: null };
+  } catch (error) {
+    const message = errorMessage(error);
+    // 拿到响应之后才失败的调用，错误上带着诊断（issue #86）：那正是最需要原始输出的
+    // 场合（"模型输出不是合法 JSON"、"必填段不合格"此前只留下一句 200 字以内的摘要）。
+    // 请求根本没发出去时没有响应可诊断，此时**不写**（undefined ⇒ 不碰那一列）。
+    // 有响应诊断时把这份喂入清单也挂上：事后要问的第一个问题就是"它到底看到了什么"，
+    // 而失败的那几次调用恰恰最需要这个答案（端口看不到选取过程，只有这里知道）。
+    const failedDiagnostics = diagnosticsOfError(error);
+    await markNoticeSummaryForReview(
+      target.id,
+      failedDiagnostics === null
+        ? undefined
+        : JSON.stringify({ ...failedDiagnostics, feed: feedReport }),
+    );
+    // 摘要失败告警（issue #12）：先把"转人工复核"落库，再交给调用方决定要不要发信
+    await deps.onRetriesExhausted?.({ target, error: message });
+    logger(
+      `条目 ${target.id} 摘要失败：已重试 ${MAX_RETRIES} 次仍失败，转人工复核（最后错误：${message}）`,
+    );
+    return { outcome: 'failed_review', tier, fedCjk: draftChars, error: message };
+  }
 }
 
 export const summarizeNoticesJob: Job = {
@@ -284,134 +468,36 @@ export const summarizeNoticesJob: Job = {
     // 重档（公众广域）跑了几条：用户拍板的"分级投入"到底分了多少，这一行是它的量具
     let deepCount = 0;
     for (const target of targets) {
-      // 条文在进入重试循环**之前**算一次：重试不该重读一遍库、更不该在两次尝试之间
-      // 因为预算边界变化而送出不同输入（同一条目的多次调用必须是同一份提示词）。
-      const { tier, sources: draftSources, report: feedReport } = await feedPlanForSummary(target);
-      const draftChars = draftSources.reduce((sum, item) => sum + countCjk(item.text), 0);
-      if (draftChars > 0) fedCount += 1;
-      if (tier === 'deep') deepCount += 1;
-      // 说明小节数只在"本轮真喂了说明"时才算：没喂却报一个数，等于让页面去解释
-      // 一份模型根本没读过的文件。分母从**全文**算（不是喂进去的那一截），理由见
-      // explanation-coverage.ts：拿喂进去的那一截数分母，窗口外的内容永远不会出现在
-      // "还差多少"那句话里。
-      const fullTexts = await listNoticeAttachmentTexts(target.id);
-      // 改动表述计数（issue #86 第 2 刀）：**分母从全部附件正文算**，不是喂进去的那一截 ——
-      // 与说明小节数同一条规矩（拿喂进去的那一截数分母就是自证：窗口外的改动永远不会
-      // 出现在"还差多少"那句话里）。它不再按体裁门控：那份门控正是 #79 那个空栏的成因。
-      // **正文那一份也要算进分母**（第十六节）：正文本身就是条文的那些条目一份附件都没有，
-      // 分母不算它的话，页面那行会写"附件正文里没有数到成文的修改表述" —— 而正文里明明有。
-      const bodyAsDraft = draftSources.some((source) => source.origin === 'body');
       /**
-       * 数分母用的那一份文本：**全部附件正文**（不是喂进去的那一截），正文本身就是条文的
-       * 那些条目再把正文接在后面。**同一个局部变量喂给两处** —— 分母（`countChangeMarkers`）
-       * 与那张表的骨架（`buildChangeTable`）：两者若各拼一次文本，页面上"检测到 N 处"
-       * 与"表里有几行"就会各说各话，而两个数看起来都像真的（这一族问题里最难查的一种）。
+       * 单条的完整链路（取条文 → 重试调用 → 归一化 → 造改动表 → 落库 → 标附件 → 刷索引）
+       * 全在 `summarizeOneNotice` 里，与 `scripts/summarize-now.mjs` 是**同一份实现**。
+       * 这一层只剩"跑哪几条"与四个汇总计数。
+       *
+       * 抽出来之前，`fedCount` / `deepCount` 是在调用**之前**加的，现在改成按返回值加：
+       * 两者唯一的差别只在"调用抛错"那一种情形 —— 而那种情形下这个函数会一路冒到
+       * 任务级、最后那行汇总日志根本不会打，所以对观察者没有任何区别。
        */
-      const changeText = [
-        ...fullTexts.map((row) => row.text),
-        ...(bodyAsDraft ? [target.bodyText ?? ''] : []),
-      ].join(' ');
-      const changeMarkerCount = countChangeMarkers(changeText);
-      const explanationSections = draftSources.some((source) => source.role === 'explanation')
-        ? countExplanationSections(
-            fullTexts
-              .filter((row) => attachmentRole(row.name) === 'explanation')
-              .map((row) => row.text)
-              .join(' '),
-          )
-        : null;
-      try {
-        const { summary, attempts } = await summarizeWithRetry(llm, target, ctx, draftSources, tier);
-        // draftSources 一并交给归一化：条文要点必须能反查到出处才落库（issue #57 第 6 步）；
-        // tally 是这一次反查丢掉了多少条（issue #86 第 0 刀）—— 这两个出口走的是同一份实现，
-        // 所以"诊断说没丢"与"实际没丢"不可能分家。
-        const { summary: quoted, tally } = buildQuotedSummaryWithTally(
-          summary,
-          summary.quotes,
-          draftSources,
-          explanationSections,
-          changeMarkerCount,
-        );
-        const kept: SummaryFieldCounts = {
-          keyPoints: quoted.keyPoints.length,
-          explanationPoints: quoted.explanationPoints.length,
-          channels: quoted.channels.length,
-          impacts: quoted.impacts.length,
-          changes: quoted.changes.length,
-        };
-        /**
-         * 表在**反查之后**才造得出来（"哪一行说的是哪一句"要等 `changes` 定下来），
-         * 所以它是落库前补上去的，而不是 `buildQuotedSummaryWithTally` 的返回值。
-         * 它只用到 `quoted.changes` 的 `quote` 与那一份 `changeText` —— 后者正是上面数分母
-         * 用的同一个字符串，两个数因此不可能分家。
-         */
-        const changeTable = buildChangeTable(changeText, quoted.changes);
-        // 诊断与摘要**一起**落库：它描述的就是这一列摘要是哪一次调用产出的
-        const diagnostics = buildSummaryDiagnostics(summary.diagnostics, {
-          model,
-          provider: llm.provider,
-          attempts,
-          kept,
-          quoteNotFound: tally.quoteNotFound,
-          // 喂入清单（第 3 刀）：端口看不到选取过程，只有这里知道"哪一份被预算挤掉了"
-          feed: feedReport,
-        });
-        await saveNoticeSummary({
-          id: target.id,
-          summaryJson: JSON.stringify({ ...quoted, changeTable }),
-          summaryModel: model,
-          diagnosticsJson: JSON.stringify(diagnostics),
-        });
-        // 只有**摘要真的用了**才标记（失败重试耗尽的条目不能留下「条文已接入」的痕迹，
-        // 否则详情页会宣布一件没发生过的事）。
-        // 正文那一份没有对应的附件行（它的 url 就是公示本身的 url），要滤掉 ——
-        // 否则就是拿一个不存在的附件去更新一张表（今天无害，但那是"说得比事实多"）。
-        const fedUrls = draftSources
-          .filter((item) => item.origin !== 'body')
-          .map((item) => item.url);
-        if (fedUrls.length > 0) {
-          await markAttachmentsFedToSummary(target.id, fedUrls);
-        }
-        succeeded += 1;
-        ctx.logger(
-          `条目 ${target.id} 摘要完成（${describeDiagnostics(diagnostics)}）`,
-        );
-        // 索引同步钩子（issue #8）：摘要落库后重刷该条目，摘要文本即刻可被检索；
-        // 失败只降级记日志，由重建任务兜底，不影响摘要主管线
-        try {
-          await syncNoticesToSearchIndex([target.id], ctx.logger);
-        } catch (error) {
-          ctx.logger(
-            `条目 ${target.id} 检索索引同步失败（由重建任务兜底）：${errorMessage(error)}`,
-          );
-        }
-      } catch (error) {
-        const message = errorMessage(error);
-        // 拿到响应之后才失败的调用，错误上带着诊断（issue #86）：那正是最需要原始输出的
-        // 场合（"模型输出不是合法 JSON"、"必填段不合格"此前只留下一句 200 字以内的摘要）。
-        // 请求根本没发出去时没有响应可诊断，此时**不写**（undefined ⇒ 不碰那一列）。
-        // 有响应诊断时把这份喂入清单也挂上：事后要问的第一个问题就是"它到底看到了什么"，
-        // 而失败的那几次调用恰恰最需要这个答案（端口看不到选取过程，只有这里知道）。
-        const failedDiagnostics = diagnosticsOfError(error);
-        await markNoticeSummaryForReview(
-          target.id,
-          failedDiagnostics === null
-            ? undefined
-            : JSON.stringify({ ...failedDiagnostics, feed: feedReport }),
-        );
-        sentToReview += 1;
-        // 摘要失败告警（issue #12）：转人工复核的同时通知站长，同日 × 任务 × 源去重
-        await sendTaskFailureAlert({
-          jobName: 'summarize-notices',
-          sourceId: target.sourceId,
-          error: `条目 ${target.id} 摘要重试耗尽转人工复核：${message}`,
-          now: ctx.now(),
-          log: ctx.logger,
-        });
-        ctx.logger(
-          `条目 ${target.id} 摘要失败：已重试 ${MAX_RETRIES} 次仍失败，转人工复核（最后错误：${message}）`,
-        );
-      }
+      const result = await summarizeOneNotice(target, {
+        llm,
+        model,
+        logger: ctx.logger,
+        // 告警的**顺序**与位置都与抽出来之前一字不差（置失败态 → 发警 → 打日志），
+        // 只是从共用实现里挪到这个钩子里 —— 理由见 `SummarizeOneNoticeDeps` 的注释：
+        // 工具的失败不该顶着 `summarize-notices` 这个任务名去占掉当日那封告警。
+        onRetriesExhausted: async ({ target: failed, error }) => {
+          await sendTaskFailureAlert({
+            jobName: 'summarize-notices',
+            sourceId: failed.sourceId,
+            error: `条目 ${failed.id} 摘要重试耗尽转人工复核：${error}`,
+            now: ctx.now(),
+            log: ctx.logger,
+          });
+        },
+      });
+      if (result.fedCjk > 0) fedCount += 1;
+      if (result.tier === 'deep') deepCount += 1;
+      if (result.outcome === 'done') succeeded += 1;
+      else sentToReview += 1;
     }
     ctx.logger(
       `摘要任务完成：成功 ${succeeded} 条，转人工复核 ${sentToReview} 条（本轮用到附件条文输入的条目 ${fedCount} 条，其中重档 ${deepCount} 条；附件输入档位 ${attachmentMode()}）`,

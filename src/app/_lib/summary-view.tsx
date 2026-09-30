@@ -16,7 +16,7 @@ import {
   type SummarySection,
   type SummaryStatus,
 } from '@/lib/summary-content';
-import { BODY_DRAFT_LABEL } from '@/lib/attachment-feed';
+import { BODY_DRAFT_LABEL, type FeedReport } from '@/lib/attachment-feed';
 import {
   draftAvailability,
   draftProvenanceLine,
@@ -123,6 +123,7 @@ export function SummaryView({
   summaryJson,
   summaryModel,
   attachmentReport,
+  feedReport,
 }: {
   notice: NoticeRecord;
   summaryJson: string;
@@ -133,6 +134,13 @@ export function SummaryView({
    * 没有事实就不说话，比猜一个分支诚实。
    */
   attachmentReport?: DraftAvailabilityInput | null;
+  /**
+   * 产出这份摘要的那次调用喂进去了什么（issue #86 §19.4 的收尾）。两处覆盖度文案
+   * （「改了哪几处」的表与「编制说明要点」）靠它说清差额能归给谁：清单报了截断才允许提
+   * "没喂进去的那一截"，没报就只归给模型没写，没有清单（v1 的存量行）照实说说不清。
+   * 判据全在 `.ts` 里（页面只传参）：这个文件进不了单测，而那句话正是这一刀要修的东西。
+   */
+  feedReport?: FeedReport | null;
 }): ReactNode {
   const summary: QuotedSummary | null = parseQuotedSummary(safeParseJson(summaryJson));
   if (summary === null) {
@@ -261,15 +269,18 @@ export function SummaryView({
           const { described, factOnly } = changeTableCounts(entries);
           const note =
             table !== null && summary.changeMarkers
-              ? changeTableNote({
-                  markers: summary.changeMarkers.total,
-                  rows: entries.length,
-                  described,
-                  factOnly,
-                  headers: table.headers,
-                }).detail
+              ? changeTableNote(
+                  {
+                    markers: summary.changeMarkers.total,
+                    rows: entries.length,
+                    described,
+                    factOnly,
+                    headers: table.headers,
+                  },
+                  feedReport,
+                ).detail
               : summary.changeMarkers
-                ? changeCoverageVerdict(changes.length, summary.changeMarkers).detail
+                ? changeCoverageVerdict(changes.length, summary.changeMarkers, feedReport).detail
                 : null;
           return (
             <div className="summary-section" data-testid="summary-changes">
@@ -429,7 +440,13 @@ export function SummaryView({
               <h2 className="summary-section-title">编制说明要点</h2>
               {summary.explanationSections !== null ? (
                 <p className="summary-section-note" data-testid="summary-explanation-coverage">
-                  {explanationCoverageVerdict(points.length, summary.explanationSections).detail}
+                  {/* 与「改了哪几处」那一栏同一份判据（issue #86 §19.4 收尾）：差额能归给谁，
+                      由喂入清单说了算 —— 只改一处会让读者以为两栏的可信度不同 */}
+                  {explanationCoverageVerdict(
+                    points.length,
+                    summary.explanationSections,
+                    feedReport,
+                  ).detail}
                 </p>
               ) : null}
               <ul className="summary-points">

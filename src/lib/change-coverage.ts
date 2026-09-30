@@ -1,4 +1,5 @@
-import type { CoverageVerdict } from './explanation-coverage.ts';
+import { coverageGapAttribution, type CoverageVerdict } from './explanation-coverage.ts';
+import type { FeedReport } from './attachment-feed.ts';
 
 /**
  * 「改了哪几处」的覆盖度与改动类型（issue #86 第 2 刀）。
@@ -17,9 +18,15 @@ import type { CoverageVerdict } from './explanation-coverage.ts';
  * （两条臂各两遍）列出的行数分别是 8 / 2 / 3 / 8 —— 差额主要来自**模型没逐条写出来**，
  * 而不是"我们没读到"。原来那句话在这种情形下**是假的**，而它读起来像一句可核对的交代。
  * 现在只说我们真的掌握的：分母是什么（本站读到的全部附件正文）、表里为什么只有这些
- * （模型写出且逐字对得回原文），以及差额的**两种可能**（模型没写 / 本站没读到）—— 不替它们
- * 认领原因。（要说得更准，得让读者侧拿得到 `FeedReport` 的"喂进去几份、几份被截"，
- * 那是另一条链上的事，已登记。）
+ * （模型写出且逐字对得回原文），以及差额能归给谁。
+ *
+ * **2026-09-28 §19.4 收尾：差额归给谁不再靠猜。** 读者侧现在拿得到 `FeedReport`
+ * （`getNoticeSummary` 取 `summary_diagnostics_json` → 详情页 → `SummaryView`），
+ * 于是两句交代共用 `explanation-coverage.ts` 的 `coverageGapAttribution`：
+ * **只有喂入清单真的报了缺口**（某一份被截 / 某一份一个字都没喂进去）时，"差额可能出在
+ * 没喂进去的那一截上"才允许出现；清单说每一份都整份进了窗口就只归给模型没写；
+ * 没有清单（v1 的存量行）照实说给不出可核对的答案。**两处必须一起改** —— 说法不一致
+ * 会让读者以为两栏的可信度不同（见 `explanation-coverage.ts` 文件头）。
  */
 
 /** 改动类型（issue #76；`other` 是兜底桶）。展示名与页面标签一一对应。 */
@@ -121,9 +128,16 @@ export function countChangeMarkers(text: string): ChangeMarkerCount {
  *
  * 三种状态：数不到改动表述 / 列够了 / 列得比数到的少。第三种**不许替差额认领原因**：
  * 我们只知道自己数了多少、列了多少，以及列出来的每一行都过了逐字反查 —— 剩下的既可能是
- * 模型没写，也可能是我们没读到（详见文件头 2026-09-28 那条实测）。
+ * 模型没写，也可能是我们没读到，而**只有本轮的喂入清单能区分这两者**（详见文件头那条实测）。
+ *
+ * `feed`（可选，issue #86 §19.4）：产出这份摘要的那次调用喂了什么。给了就按清单说 ——
+ * 清单没报缺口时**不许**再提"没读到"；不给（v1 的存量行）照实说给不出可核对的答案。
  */
-export function changeCoverageVerdict(listed: number, markers: ChangeMarkerCount): CoverageVerdict {
+export function changeCoverageVerdict(
+  listed: number,
+  markers: ChangeMarkerCount,
+  feed?: FeedReport | null,
+): CoverageVerdict {
   if (markers.total === 0) {
     return { state: 'no_markers', detail: '附件正文里没有数到成文的修改表述，这一栏给不出「共几处」' };
   }
@@ -134,8 +148,8 @@ export function changeCoverageVerdict(listed: number, markers: ChangeMarkerCount
     state: 'partial',
     detail:
       `正文里检测到 ${markers.total} 处修改表述，本页列出 ${listed} 处 —— ` +
-      '检测按本站读到的全部附件正文数；表里只列模型写出、且引用能逐字对回原文的那些，' +
-      '差额既可能来自模型没写，也可能来自本站没读到的那部分',
+      '检测按本站读到的全部附件正文数；表里只列模型写出、且引用能逐字对回原文的那些。' +
+      coverageGapAttribution(feed, '改动表述'),
   };
 }
 
@@ -191,14 +205,21 @@ export interface ChangeTableNote {
  * 数字只报我们真的掌握的：分母（本站读到的全部附件正文里数到几处）、行数、其中几行有说明、
  * 几句是标题。**不报"改了几条"** —— 同一句里可以数出三处（实测：一句总述里三个"修改为"），
  * 分母不是条款数。
+ *
+ * `feed`（可选，issue #86 §19.4）只在**真有"只报事实"的行**时才用得上：那几行的说明为什么缺，
+ * 得说清是"没喂进去"还是"模型没写"——判据与编制说明那一栏共用
+ * （`explanation-coverage.ts` 的 `coverageGapAttribution`）。一行都不缺时不提这个话题。
  */
-export function changeTableNote(input: {
-  markers: number;
-  rows: number;
-  described: number;
-  factOnly: number;
-  headers: number;
-}): ChangeTableNote {
+export function changeTableNote(
+  input: {
+    markers: number;
+    rows: number;
+    described: number;
+    factOnly: number;
+    headers: number;
+  },
+  feed?: FeedReport | null,
+): ChangeTableNote {
   const rows = input.rows;
   const factOnly = input.factOnly;
   if (input.markers === 0) {
@@ -217,5 +238,7 @@ export function changeTableNote(input: {
     parts.push(`；另有 ${input.headers} 句是小标题（不含条款内容），不单独列行`);
   }
   parts.push('。检测按本站读到的全部附件正文数。');
+  // 缺的只是"某几行的说明"⇒ 按喂入清单交代那几行的说明能归给谁（没有缺口就不提这一层）
+  if (factOnly > 0) parts.push(coverageGapAttribution(feed, '改动表述'));
   return { rows, factOnly, detail: parts.join('') };
 }

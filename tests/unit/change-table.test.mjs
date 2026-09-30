@@ -161,6 +161,63 @@ describe('issue #86 §20.3：那一句交代（新增的行数要说得出来）
     assert.doesNotMatch(note.detail, /共 0 处/);
     assert.match(note.detail, /没有数到成文的修改表述/);
   });
+
+  /**
+   * issue #86 §19.4 收尾：缺说明的那几行**能归给谁**，由本轮喂入清单说了算。
+   * 判据与编制说明那一栏共用（`explanation-coverage.ts` 的 `coverageGapAttribution`）——
+   * 两栏说法不一致会让读者以为它们的可信度不同。
+   */
+  const feedOf = (overrides = {}) => ({
+    tier: 'deep',
+    budget: { perSource: 16_000, total: 24_000, minShare: 4_000 },
+    usedCjk: 0,
+    sources: [],
+    starved: [],
+    ...overrides,
+  });
+  const fedSource = (overrides = {}) => ({
+    name: '某某法（修正草案征求意见稿）.docx',
+    role: 'draft',
+    origin: 'attachment',
+    fullCjk: 3_000,
+    fedCjk: 1_992,
+    chars: 4_000,
+    allowance: 16_000,
+    truncated: false,
+    ...overrides,
+  });
+
+  it('清单说有一份被截 ⇒ 缺说明的那几行说清"可能出在没喂进去的那一截里"', () => {
+    const note = changeTableNote(
+      { markers: 14, rows: 10, described: 8, factOnly: 2, headers: 0 },
+      feedOf({ usedCjk: 1_992, sources: [fedSource({ truncated: true })] }),
+    );
+    assert.match(note.detail, /本轮读到 1 份来源，共喂进模型 1992 个汉字/);
+    assert.match(note.detail, /其中 1 份只喂进一部分（被截）/);
+    assert.match(note.detail, /差额可能出在没喂进去的那一截上/);
+    // 表由程序定行 ⇒ 这一句仍然只说"某几行的说明缺着"，不改口成"表少了几行"
+    assert.match(note.detail, /2 行只报「检测到改动表述」这一事实/);
+  });
+
+  it('清单说每一份都整份进了窗口 ⇒ 不许提"没读到"（差额归给模型没写）', () => {
+    const detail = changeTableNote(
+      { markers: 14, rows: 10, described: 8, factOnly: 2, headers: 0 },
+      feedOf({ usedCjk: 1_992, sources: [fedSource()] }),
+    ).detail;
+    assert.match(detail, /每一份都整份进了窗口，没有一份被截/);
+    assert.match(detail, /差额来自模型没有把检测到的改动表述都写出来/);
+    assert.doesNotMatch(detail, /没喂进去的那一截/);
+    assert.doesNotMatch(detail, /本站没读到/);
+  });
+
+  it('一行都不缺（没有"只报事实"的行）⇒ 不提喂入这一层（没缺就不许提缺口）', () => {
+    const detail = changeTableNote(
+      { markers: 3, rows: 3, described: 3, factOnly: 0, headers: 0 },
+      feedOf({ sources: [fedSource({ truncated: true })] }),
+    ).detail;
+    assert.doesNotMatch(detail, /本轮读到/);
+    assert.doesNotMatch(detail, /被截/);
+  });
 });
 
 describe('issue #86 §20.3：页面渲染哪几行（页面与验收脚本共用同一份判据）', () => {
@@ -279,5 +336,66 @@ describe('issue #86 §20.3：落库形状（新增的键要与旧行共存）', 
     const raw = JSON.parse(JSON.stringify(build()));
     raw.changeTable.entries = [{ type: 'described', change: -1 }];
     assert.equal(parseQuotedSummary(raw).changeTable, null);
+  });
+});
+
+/**
+ * 2026-09-30：按句归并的**引号口径**必须与落库反查是同一份（issue #86 第二十一节）。
+ *
+ * 定位用的 needle 一直是 `quoteFingerprint`（从 summary-content import），但 haystack 原先
+ * 只有"去空白"这一层：落库那边把引号字形归一了、归句这边没有，表现是"表里的行与它引用的
+ * 原文对不上" —— 归不到任何一句 ⇒ 那一行被补到表尾，读者看到的顺序莫名其妙，而这件事
+ * 看起来像模型写错了。夹具照生产上丢得最狠的那一条（《公路法（修正草案）》第三十六条）。
+ */
+describe('2026-09-30：按句归并也用同一份引号字形口径', () => {
+  const ROAD = [
+    '一、将第三十六条修改为：“国家采用依法征税的办法筹集公路管理养护资金，本法对收费公路另有规定的除外。”',
+    '二、将第五十九条修改为：“符合下列条件的公路，可以收费。”',
+  ].join('\n');
+  const ROW_36 =
+    '将第三十六条修改为：“国家采用依法征税的办法筹集公路管理养护资金，本法对收费公路另有规定的除外。”';
+  /** 第二句只报事实（没有说明的那一行照样成行）—— 它是"这一行归对了"的对照物 */
+  const FACT_59 = {
+    type: 'fact',
+    clause: '第五十九条',
+    kinds: ['modify'],
+    sentence: '二、将第五十九条修改为：“符合下列条件的公路，可以收费。',
+  };
+
+  it('引用只差引号字形 ⇒ 仍然归得到那一句（归不到就会被挪到表尾）', () => {
+    const variants = [
+      ROW_36, // 原文写法：中文引号
+      ROW_36.replaceAll('“', '"').replaceAll('”', '"'), // ASCII 直引号（生产上丢掉整批的那一遍）
+      ROW_36.replaceAll('“', '「').replaceAll('”', '」'), // 角括号
+      ROW_36.replace('“', '"'), // 一条引用里混用
+    ];
+    for (const quote of variants) {
+      assert.deepEqual(
+        buildChangeTable(ROAD, [row(quote)]).entries,
+        [{ type: 'described', change: 0 }, FACT_59],
+        `${quote} 应当归到第一句`,
+      );
+    }
+  });
+
+  it('原文那侧用 ASCII 直引号也一样（归一是对称的；印出来的仍是原文那句话）', () => {
+    const asciiSource = ROAD.replaceAll('“', '"').replaceAll('”', '"');
+    assert.deepEqual(buildChangeTable(asciiSource, [row(ROW_36)]).entries, [
+      { type: 'described', change: 0 },
+      // 归一只管"对得上对不上"：那一行事实照旧印正文里的原句（字形是原文的字形）
+      { ...FACT_59, sentence: FACT_59.sentence.replaceAll('“', '"') },
+    ]);
+  });
+
+  it('反向：改了一个实词 ⇒ 定位不到（那一行补在表尾，不混进它不属于的那一句）', () => {
+    const altered = ROW_36.replace('依法征税', '依法收税')
+      .replaceAll('“', '"')
+      .replaceAll('”', '"');
+    const entries = buildChangeTable(ROAD, [row(altered)]).entries;
+    assert.deepEqual(
+      entries.map((entry) => (entry.type === 'described' ? `described#${entry.change}` : 'fact')),
+      ['fact', 'fact', 'described#0'],
+      '归属不明的那一行补在表尾 —— 顺序略偏，但绝不消失（一行都不许丢）',
+    );
   });
 });

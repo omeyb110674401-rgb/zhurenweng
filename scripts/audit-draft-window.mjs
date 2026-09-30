@@ -61,6 +61,11 @@ const targets =
           title: notices.title,
           summaryJson: notices.aiSummaryJson,
           audience: notices.audience,
+          // 2026-09-30 修：这两处 select 以前都不查正文，下面按 `bodyText: null` 交给
+          // `feedPlanForSummary`，于是**正文本身就是条文**的条目（cac 那两条已截止的草案）
+          // 在这里一律印「送进提示词的条文：0 份」—— 而它们真跑起来是 1 份 / 9,727 汉字。
+          // 这是"量具自己说谎"那一族：拿它去量那两条会得出"没东西可喂"的假结论。
+          bodyText: notices.bodyText,
         })
         .from(notices)
         .where(inArray(notices.id, ids))
@@ -70,6 +75,7 @@ const targets =
           title: notices.title,
           summaryJson: notices.aiSummaryJson,
           audience: notices.audience,
+          bodyText: notices.bodyText,
         })
         .from(notices)
         .where(sql`ai_summary_json is not null and status <> 'closed'`)
@@ -88,12 +94,14 @@ for (const row of targets) {
   console.log(`\n=== ${row.id}  要点带出处 ${sourcePoints} 条`);
   console.log(`    ${row.title}`);
 
-  // 档位由受众面定（issue #86 第 3 刀）：判据与生产同一份实现，脚本里不另写一遍
+  // 档位由受众面定（issue #86 第 3 刀）：判据与生产同一份实现，脚本里不另写一遍。
+  // `bodyText` 必须真的传下去（2026-09-30）：它决定"正文算不算一份条文"，
+  // 传 null 会让这一类条目在这里显示成"0 份"，而生产上它们喂得进 9,727 个汉字。
   const { tier, sources, report } = await feedPlanForSummary({
     id: row.id,
     title: row.title,
     url: '',
-    bodyText: null,
+    bodyText: row.bodyText,
     sourceId: '',
     genre: null,
     audience: row.audience,

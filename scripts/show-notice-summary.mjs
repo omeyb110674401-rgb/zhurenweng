@@ -16,8 +16,14 @@
  *   - `changeTableNote`（第二十节第 3 小节起：表由程序定行，这一句交代几行有说明、几行只报事实。
  *     **2026-09-28 补**：表换成"行由程序定"之后，这个脚本必须跟着换 —— 它印的是
  *     "读者点开这条会看到什么"，印一张旧形状的表就是这只量具第八次说谎）
+ *   - `explanationCoverageVerdict`（§19.4 收尾起也印：这一栏此前**只印要点、不印那句覆盖度**，
+ *     于是"页面在说'其余的不在本站读到的那一截里'"这件事，验收门上看不见）
  *   - `parseQuotedSummary`（读侧容错：`impacts` / `changes` / `changeMarkers` 三个键都由它
  *     按旧落库形状兜底，判形状异常会让存量条目白屏 —— #85 第三节的教训）
+ *
+ * **这三句交代都要带上本轮的喂入清单**（`summary_diagnostics_json.feed`，§19.4）：它们现在
+ * 说"差额能归给谁"靠的就是它。脚本从落库的诊断里读同一份清单再交给同一批判据，
+ * 页面怎么印它就怎么印 —— 门与页面不一致，这只量具就又开始说谎了。
  *
  * 用法（部署了本仓库的容器里，需要 DATABASE_URL；只 SELECT）：
  *   docker compose run --rm worker node scripts/show-notice-summary.mjs                    # 未截止的公众广域
@@ -33,6 +39,7 @@ import {
 } from '../src/lib/summary-content.ts';
 import { shouldRenderImpacts } from '../src/lib/impact-display.ts';
 import { changeCoverageVerdict, changeTableNote } from '../src/lib/change-coverage.ts';
+import { explanationCoverageVerdict } from '../src/lib/explanation-coverage.ts';
 import { changeTableCounts, changeTableRows } from '../src/lib/change-table.ts';
 import { draftProvenanceLine } from '../src/lib/summary-display.ts';
 import { parseSummaryDiagnostics, describeDiagnostics } from '../src/lib/summary-diagnostics.ts';
@@ -82,6 +89,12 @@ for (const row of rows) {
   const diagnostics = parseSummaryDiagnostics(safeParseJson(row.diagnosticsJson));
   console.log(`  摘要：条文要点 ${parsed.keyPoints.length} / 说明要点 ${parsed.explanationPoints.length} 条`);
   if (diagnostics) console.log(`  诊断：${describeDiagnostics(diagnostics)}`);
+  /**
+   * 本轮的喂入清单（issue #86 §19.4）：下面三句覆盖度交代都要它才说得出"差额能归给谁"。
+   * 页面走的是同一条路（`getNoticeSummary` → `parseSummaryDiagnostics(...).feed`），
+   * 这里读不出来就是 null —— 判据会退回"没有留下喂入记录"，与页面逐字一致。
+   */
+  const feed = diagnostics?.feed ?? null;
 
   // 「可能的争议点」——渲染门控与页面同一份判据
   const impacts = parsed.impacts;
@@ -109,16 +122,19 @@ for (const row of rows) {
     console.log('\n  ── 改了哪几处 ──');
     if (table !== null && markers) {
       console.log(
-        `     ${changeTableNote({
-          markers: markers.total,
-          rows: entries.length,
-          described,
-          factOnly,
-          headers: table.headers,
-        }).detail}`,
+        `     ${changeTableNote(
+          {
+            markers: markers.total,
+            rows: entries.length,
+            described,
+            factOnly,
+            headers: table.headers,
+          },
+          feed,
+        ).detail}`,
       );
     } else if (markers) {
-      console.log(`     ${changeCoverageVerdict(changes.length, markers).detail}`);
+      console.log(`     ${changeCoverageVerdict(changes.length, markers, feed).detail}`);
     } else {
       console.log('     （这一行的改动表述计数没落库，给不出"还差多少"）');
     }
@@ -146,6 +162,17 @@ for (const row of rows) {
 
   if (parsed.explanationPoints.length > 0) {
     console.log(`\n  ── 编制说明要点 ${parsed.explanationPoints.length} 条 ──`);
+    // 那一句覆盖度页面会印（`summary-explanation-coverage`），§19.4 收尾起这里也印：
+    // 验收门看不到它，就等于没人看过页面那一行说了什么。判据与页面同一份 import。
+    if (parsed.explanationSections !== null) {
+      console.log(
+        `     ${explanationCoverageVerdict(
+          parsed.explanationPoints.length,
+          parsed.explanationSections,
+          feed,
+        ).detail}`,
+      );
+    }
     for (const item of parsed.explanationPoints) console.log(`   • ${item.heading}：${item.text}`);
   }
 }

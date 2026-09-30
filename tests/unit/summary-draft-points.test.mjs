@@ -3,6 +3,7 @@ import { describe, it } from 'node:test';
 import {
   buildQuotedSummary,
   findDraftSourceForQuote,
+  normalizeQuoteMarks,
   parseQuotedSummary,
 } from '../../src/lib/summary-content.ts';
 import { draftBlock, explanationBlock, userPrompt } from '../../src/lib/adapters/openai-compatible-llm.ts';
@@ -213,5 +214,112 @@ describe('issue #86 第 3 刀：两段正文的上限随档位（最后一道防
       false,
       '标准档切掉尾部正是它今天的行为（本刀不动它）',
     );
+  });
+});
+
+/**
+ * 2026-09-30 生产实测：**引号字形**是一个"按字形整批丢行"的开关。
+ *
+ * 逐字反查要求模型的 `quote` 在本轮真喂进去的正文里逐字出现，找不到就整行丢弃。附件原文里
+ * 是中文引号 `“ ”`，而模型这一遍吐的是 ASCII 直引号 `"` —— 词句逐字一致、只差字形，那一遍
+ * **9 行全部**被判"对不上"（改动点 0/9，页面上「改了哪几处」只剩事实行）；换一遍模型用中文
+ * 引号，同一份输入就保住 5–8 行。夹具照生产上丢得最狠的那一条搭（《公路法（修正草案）》的
+ * 第三十六条），下面这一组只准放松**字形**这一层 —— 改实词 / 少一段 / 顺序颠倒 / 短于门槛，
+ * 四条反向用例一条都不许变绿（红线见 docs/pending-issues/67-summaries-redraft.md 第八节）。
+ */
+const ROAD_TEXT =
+  '一、将第三十六条修改为：“国家采用依法征税的办法筹集公路管理养护资金，本法对收费公路另有规定的除外。”\n' +
+  '二、将第五十九条修改为：“符合下列条件的公路，可以收费。”';
+const ROAD_CLAUSE_36 = '国家采用依法征税的办法筹集公路管理养护资金，本法对收费公路另有规定的除外。';
+const ROAD_DRAFT = [
+  {
+    name: '公路法（修正草案征求意见稿）.docx',
+    url: 'https://attachments.test/road.docx',
+    text: ROAD_TEXT,
+  },
+];
+/** 同一句话的四种字形写法：中文引号（原文）/ ASCII 直引号（丢行那一遍）/ 角括号 / 一条里混用。 */
+const QUOTE_36_CJK = `将第三十六条修改为：“${ROAD_CLAUSE_36}”`;
+const QUOTE_36_ASCII = QUOTE_36_CJK.replaceAll('“', '"').replaceAll('”', '"');
+const QUOTE_36_CORNER = QUOTE_36_CJK.replaceAll('“', '「').replaceAll('”', '」');
+const QUOTE_36_MIXED = QUOTE_36_CJK.replace('”', '"');
+
+/** 一份只带改动点的"模型输出"（落库那一路的形状）。 */
+function changeOutput(quote, text = '改由国家依法征税筹集公路养护资金') {
+  return {
+    ...BASE_SUMMARY,
+    changes: [{ clause: '第三十六条', kind: 'modify', text, quote }],
+  };
+}
+
+describe('2026-09-30：引号字形归一（只准放松字形，其余判据一个字都不许松）', () => {
+  it('归一化只动引号字符：别的字符一个都不动，而且长度不变', () => {
+    const raw = '“甲”‘乙’「丙」『丁』＂戊＂＇己＇，。《》　（庚）';
+    assert.equal(normalizeQuoteMarks(raw), '"甲"\'乙\'"丙""丁""戊"\'己\'，。《》　（庚）');
+    assert.equal(normalizeQuoteMarks(raw).length, raw.length, '长度必须一样：归句那边靠它回推原文下标');
+    assert.equal(normalizeQuoteMarks('已经归一过的 "甲"'), '已经归一过的 "甲"', '再调用一次不变');
+    assert.notEqual(
+      normalizeQuoteMarks("'甲'"),
+      normalizeQuoteMarks('“甲”'),
+      '单引号族与双引号族不互相等价 —— 混着归一才会造出假的命中',
+    );
+  });
+
+  it('① 只差引号字形 ⇒ 保留（四种写法都命中同一份附件）', () => {
+    for (const quote of [QUOTE_36_CJK, QUOTE_36_ASCII, QUOTE_36_CORNER, QUOTE_36_MIXED]) {
+      assert.equal(
+        findDraftSourceForQuote(quote, ROAD_DRAFT)?.name,
+        '公路法（修正草案征求意见稿）.docx',
+        `${quote} 应当命中`,
+      );
+    }
+    // 走一遍落库形状：改动点与条文要点都过 `findDraftSourceForQuote` 这一道门，
+    // 所以两处都要看得见这件事（生产上丢的就是改动点这一行）。
+    const changes = buildQuotedSummary(changeOutput(QUOTE_36_ASCII), undefined, ROAD_DRAFT);
+    assert.equal(changes.changes.length, 1);
+    assert.equal(changes.changes[0].source, '公路法（修正草案征求意见稿）.docx');
+    assert.equal(
+      changes.changes[0].quote,
+      QUOTE_36_ASCII.replace(/"$/, ''),
+      '落库的是模型给的原话：字形一个字都没被改写（末尾那层包裹引号由 cleanQuote 照旧去掉）',
+    );
+    const points = buildQuotedSummary(
+      modelOutput(['须依法征税筹集养护资金'], [QUOTE_36_ASCII]),
+      { keyPoints: [QUOTE_36_ASCII] },
+      ROAD_DRAFT,
+    );
+    assert.equal(points.keyPoints.length, 1, '条文要点同样不该因为字形被丢');
+  });
+
+  it('② 引用里改了一个实词（依法征税 → 依法收税）⇒ 照样丢', () => {
+    const altered = QUOTE_36_ASCII.replace('依法征税', '依法收税');
+    assert.notEqual(altered, QUOTE_36_ASCII);
+    assert.equal(findDraftSourceForQuote(altered, ROAD_DRAFT), null);
+    const built = buildQuotedSummary(changeOutput(altered), undefined, ROAD_DRAFT);
+    assert.deepEqual(built.changes, [], '反查不过 ⇒ 整行不落库（这一条是红线本身）');
+  });
+
+  it('③ 引用中间少了一段、又不写省略号 ⇒ 照样丢（省略号才允许有缺口）', () => {
+    const shortened = `将第三十六条修改为："国家采用依法征税的办法筹集公路管理养护资金，公路另有规定的除外。"`;
+    assert.equal(findDraftSourceForQuote(shortened, ROAD_DRAFT), null);
+    const built = buildQuotedSummary(changeOutput(shortened), undefined, ROAD_DRAFT);
+    assert.deepEqual(built.changes, []);
+  });
+
+  it('③′ 省略号切出来的那一段原文里根本没有 ⇒ 照样丢（有缺口不等于可以编一段）', () => {
+    const fabricated = `${QUOTE_36_ASCII}…"这一段原文里根本不存在。"`;
+    assert.equal(findDraftSourceForQuote(fabricated, ROAD_DRAFT), null);
+  });
+
+  it('④ 两段都逐字、但顺序颠倒 ⇒ 照样丢（省略号只允许"按原顺序跳读"）', () => {
+    const reversed = `“符合下列条件的公路，可以收费。”…“${ROAD_CLAUSE_36}”`;
+    assert.equal(findDraftSourceForQuote(reversed, ROAD_DRAFT), null);
+  });
+
+  it('⑤ 某一段短于 8 字 ⇒ 照样丢，哪怕那一小段真的在原文里', () => {
+    assert.ok(ROAD_TEXT.includes('第三十六条'), '这一小段确实逐字在原文里 —— 丢它靠的是门槛，不是"对不上"');
+    assert.notEqual(findDraftSourceForQuote(ROAD_CLAUSE_36, ROAD_DRAFT), null, '长的那一段单独查是命中的');
+    const shortSegment = `"第三十六条"…"${ROAD_CLAUSE_36}"`;
+    assert.equal(findDraftSourceForQuote(shortSegment, ROAD_DRAFT), null);
   });
 });

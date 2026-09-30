@@ -180,6 +180,18 @@ export interface NoticeSummaryInfo {
   summaryStatus: SummaryStatus;
   aiSummaryJson: string | null;
   summaryModel: string | null;
+  /**
+   * 产出这份摘要的那一次调用的诊断（issue #86 第 0 刀那一列）。
+   *
+   * 它原先不在这里：诊断只给后台复核那条链用，读者侧一个字也拿不到。§19.4 收尾时接上它，
+   * 是因为详情页两处覆盖度文案要说清"本轮喂了几份、几份被截"—— 那件事只有这一列里有
+   * （`summary-diagnostics.ts` 的 `feed`），而**没有它就只能猜**：猜错的那一次
+   * （把"模型没写"说成"本站没读到"）已经被实测抓住。
+   *
+   * 读侧一律过 `parseSummaryDiagnostics`（形状不认识返回 null），这里只负责原样交出去：
+   * 形状的真相在 `summary-diagnostics.ts` 一处，仓储层不再抄一遍。
+   */
+  summaryDiagnosticsJson: string | null;
 }
 
 export async function getNoticeSummary(id: string): Promise<NoticeSummaryInfo | null> {
@@ -189,6 +201,8 @@ export async function getNoticeSummary(id: string): Promise<NoticeSummaryInfo | 
       summaryStatus: notices.summaryStatus,
       aiSummaryJson: notices.aiSummaryJson,
       summaryModel: notices.summaryModel,
+      // issue #86 §19.4：读者侧要拿它说"本轮喂了几份、几份被截"（那一列 v2 起带 feed）
+      summaryDiagnosticsJson: notices.summaryDiagnosticsJson,
     })
     .from(notices)
     .where(eq(notices.id, id))
@@ -199,6 +213,7 @@ export async function getNoticeSummary(id: string): Promise<NoticeSummaryInfo | 
     summaryStatus: row.summaryStatus as SummaryStatus,
     aiSummaryJson: row.aiSummaryJson,
     summaryModel: row.summaryModel,
+    summaryDiagnosticsJson: row.summaryDiagnosticsJson,
   };
 }
 

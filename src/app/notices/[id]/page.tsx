@@ -12,6 +12,7 @@ import { SummaryNotGenerated, SummaryPlaceholder, SummaryUnavailable, SummaryVie
 import { buildNoticeBrief, mergeSubmissionChannels } from '@/lib/notice-brief';
 import { channelGuidance } from '@/lib/channel-guidance';
 import { parseQuotedSummary } from '@/lib/summary-content';
+import { parseSummaryDiagnostics } from '@/lib/summary-diagnostics';
 import { summaryDisplayState } from '@/lib/summary-display';
 import { buildNoticeJsonLd, serializeJsonLd } from '@/lib/notice-jsonld';
 import { effectiveStatus } from '@/lib/notice-status';
@@ -112,6 +113,19 @@ export default async function NoticeDetailPage({ params }: NoticeDetailPageProps
       : notice.attachments.length === 0
         ? { total: 0, fedChars: 0, okFiles: 0 }
         : null;
+  /**
+   * 产出这份摘要的那一次调用**喂进去了什么**（issue #86 §19.4 那条债的收尾）。
+   *
+   * 读者侧此前拿不到这一列（诊断只为后台复核那条链服务），于是两处覆盖度文案只能在
+   * "模型没写"与"我们没读到"之间猜 —— 猜错过一次，而它读起来像一句可核对的交代。
+   * 判据不在这里：形状由 `parseSummaryDiagnostics` 认（认不出来就是 null），
+   * 那句交代由 `explanation-coverage.ts` 的 `coverageGapAttribution` 写。页面只负责把
+   * `feed` 原样传下去 —— 读不出来时是 null，页面回到"没有留下喂入记录"的说法，
+   * 不编一个空清单出来（那会让读者以为"我们什么都没喂"）。
+   */
+  const feedReport =
+    parseSummaryDiagnostics(safeParseJson(summaryInfo?.summaryDiagnosticsJson ?? null))?.feed ??
+    null;
   // 摘要区该说什么（issue #58）：判定收在纯函数里，页面只按态选块。注意传的是
   // **库列** notice.status 而不是上面的展示状态 —— 摘要任务的入队过滤看的就是它。
   const summaryDisplay = summaryDisplayState({
@@ -241,6 +255,7 @@ export default async function NoticeDetailPage({ params }: NoticeDetailPageProps
             summaryJson={summaryInfo.aiSummaryJson}
             summaryModel={summaryInfo.summaryModel}
             attachmentReport={draftReport}
+            feedReport={feedReport}
           />
         ) : (
           <>

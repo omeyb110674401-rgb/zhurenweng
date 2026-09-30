@@ -29,7 +29,7 @@
 import { Client } from 'pg';
 import { createLlmPort } from '../src/lib/ports.ts';
 import { feedPlanForSummary } from '../worker/jobs/summarize-notices.ts';
-import { buildQuotedSummaryWithTally, llmModelName } from '../src/lib/summary-content.ts';
+import { buildQuotedSummaryWithTally, llmModelName, findDraftSourceForQuote, quoteSegments, MIN_VERIFIABLE_QUOTE_CHARS } from '../src/lib/summary-content.ts';
 import { countChangeMarkers, changeCoverageVerdict } from '../src/lib/change-coverage.ts';
 import { countExplanationSections } from '../src/lib/explanation-coverage.ts';
 import { attachmentRole } from '../src/lib/attachment-select.ts';
@@ -43,6 +43,20 @@ const idPrefix = idIndex === -1 ? null : (argv[idIndex + 1] ?? null);
 const limitIndex = argv.indexOf('--limit');
 const limit = limitIndex === -1 ? 3 : Number(argv[limitIndex + 1]) || 3;
 const showRaw = !argv.includes('--no-raw');
+/**
+ * `--drops`：把**被逐字反查丢掉**的那些改动行逐段拆开，指出它死在哪一段。
+ *
+ * 为什么需要它（2026-09-30 的分布实验）：同一条公路法跑三遍，改动行落库数是
+ * **8 / 5 / 2**，而"反查丢掉"分别是 1 / 4 / 7 —— 丢掉的是**说明**（页面上那一行只剩
+ * 「本站检测到这一处改动表述，但没能给出可核对的说明」）。也就是说这张表的主要损失
+ * 不在"模型没写"，而在"写出来的引没过关"，而此前**没有任何量具**能回答"为什么没过关"。
+ *
+ * 判据**复用管线自己那一份**（`findDraftSourceForQuote` 与 `quoteSegments`），
+ * 做法是把每一段单独当成一条引用再查一次 —— 单段引用若查得到就说明这一段没问题，
+ * 于是"死在哪一段、是短于 8 字还是文字对不上"一眼可见。**不在这里另写一套包含判断**：
+ * 两套判据漂移的话，这个探针就会开始解释一个不存在的死因。
+ */
+const showDrops = argv.includes('--drops');
 
 if (!process.env.DATABASE_URL) {
   console.error('需要 DATABASE_URL（这个探针要在部署了本仓库的容器里跑，它读的是生产库）');
@@ -239,6 +253,33 @@ for (const row of targets.rows) {
   } else {
     console.log('\n  ── 改了哪几处：本页不渲染（一行都没反查到） ──');
     console.log(`     全文里检测到的改动表述：${changeMarkers.total} 处 ${JSON.stringify(changeMarkers.byKind)}`);
+  }
+
+  if (showDrops) {
+    // 落库那一份之外的**全部**改动行（`result.changes` 是适配器归一化后的原样产出，
+    // 还没有过反查这一关）—— 逐段指出它死在哪一段。
+    const emitted = Array.isArray(result.changes) ? result.changes : [];
+    const keptQuotes = new Set(summary.changes.map((item) => item.quote));
+    const dropped = emitted.filter((row) => typeof row?.quote === 'string' && !keptQuotes.has(row.quote));
+    console.log(`\n  ── 改动行为什么被丢（模型吐了 ${emitted.length} 行，落库 ${summary.changes.length} 行） ──`);
+    if (dropped.length === 0) {
+      console.log('     （这一遍没有被丢掉的改动行）');
+    }
+    for (const row of dropped) {
+      console.log(`   ✗ ${row.clause || '—'} ｜ ${row.kind || '?'} ｜ ${row.text || ''}`);
+      const segments = quoteSegments(row.quote);
+      for (const [index, segment] of segments.entries()) {
+        const hit = findDraftSourceForQuote(segment, sources);
+        const why =
+          segment.length < MIN_VERIFIABLE_QUOTE_CHARS
+            ? `不到 ${MIN_VERIFIABLE_QUOTE_CHARS} 字门槛（${segment.length} 字）`
+            : hit
+              ? `这一段能查到（${hit.name}）`
+              : '这一段在任何一份来源里都查不到';
+        console.log(`       第 ${index + 1} 段｜${why}：${segment}`);
+      }
+      if (segments.length === 0) console.log('       引用整条是空的');
+    }
   }
 
   if (summary.explanationPoints.length > 0) {

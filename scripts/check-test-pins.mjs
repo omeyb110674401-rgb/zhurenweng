@@ -91,6 +91,15 @@ const TARGETS = {
   // issue #86 第二十节第 3 小节：那张表**行由程序定**（按句归并、缺口成行、标题不成行）。
   // 页面只按下标取，所以判据全在这个纯函数文件里 —— 页面 .tsx 进不了自证框架。
   changeTable: 'src/lib/change-table.ts',
+  // issue #86 §19.4 收尾（2026-09-30）：读者侧接上 FeedReport。**两处接线**（详情页把清单
+  // 传给摘要卡、摘要卡把它交给两处覆盖度判据）落在 `.tsx`，而 e2e 跑的是 `.next` 构建产物、
+  // 撤 SSR 侧源码不会红 —— 所以那两处由 `tests/unit/feed-intake-note.test.mjs` 按**源码接线**
+  // 钉住（判据本身仍在 .ts 里，另有用例）。这两个键就是给它们用的。
+  summaryView: 'src/app/_lib/summary-view.tsx',
+  summaryGate: 'scripts/show-notice-summary.mjs',
+  // 2026-09-30：点名补摘要的工具（`--ids`，默认只读）。它是一条**生产写入**通道，
+  // 所以"默认不写库""已有摘要要 --replace""覆盖前先备份"这三条各自要被撤一次。
+  summarizeNow: 'scripts/summarize-now.mjs',
   // issue #86 第 3 刀：喂入侧的档位与预算。这一处撤掉之后**一个字都不会报错** ——
   // 档位判错就是"还是老样子"（回到标准档，页面照常出摘要），喂少了只是模型看到的东西变少，
   // 而那正是这一刀要消灭的静默失败，所以它必须有"撤掉实现必须变红"的钉子。
@@ -460,7 +469,7 @@ const CASES = [
     file: 'summarize',
     // #86 第十六节把这一行换成了 `fedUrls`（正文那一份没有对应的附件行，要滤掉）——
     // 判据一个字没变：摘要真用了附件，就必须把附件标成已喂。
-    from: '        if (fedUrls.length > 0) {',
+    from: '    if (fedUrls.length > 0) {',
     to: '        if (false) {',
     pattern: '附件条文进摘要',
     test: 'tests/e2e/summary-draft-input.test.mjs',
@@ -1258,7 +1267,7 @@ const CASES = [
     // "没人看过"与"什么都没说"分得开。
     label: '诊断不落库（摘要照常写，但"这一次调用怎么了"永远查不到）',
     file: 'summarize',
-    from: '          diagnosticsJson: JSON.stringify(diagnostics),',
+    from: '      diagnosticsJson: JSON.stringify(diagnostics),',
     to: '          diagnosticsJson: null,',
     pattern: 'issue #86：摘要调用的诊断随摘要落库',
     test: 'tests/e2e/summary-genre-and-explanations.test.mjs',
@@ -1348,7 +1357,7 @@ const CASES = [
   {
     label: '诊断不数影响判读的条数（"模型吐了几条判读"这件事又变得查不到）',
     file: 'summarize',
-    from: '          impacts: quoted.impacts.length,',
+    from: '      impacts: quoted.impacts.length,',
     to: '          impacts: 0,',
     pattern: '诊断里数得出',
     test: 'tests/e2e/summary-genre-and-explanations.test.mjs',
@@ -1378,7 +1387,7 @@ const CASES = [
   {
     label: '覆盖度分母不落库（页面那行"检测到几处"永远说不出来）',
     file: 'summarize',
-    from: '          changeMarkerCount,',
+    from: '      changeMarkerCount,',
     to: '          null,',
     pattern: '覆盖度分母数的是全文',
     test: 'tests/e2e/summary-genre-and-explanations.test.mjs',
@@ -1386,7 +1395,7 @@ const CASES = [
   {
     label: '诊断不数改动点的条数（"模型吐了几处改动"这件事又变得查不到）',
     file: 'summarize',
-    from: '          changes: quoted.changes.length,',
+    from: '      changes: quoted.changes.length,',
     to: '          changes: 0,',
     pattern: '诊断写下来了',
     test: 'tests/e2e/summary-genre-and-explanations.test.mjs',
@@ -1412,13 +1421,171 @@ const CASES = [
   {
     // 2026-09-28：这句话原先**替差额认领了一个我们不知道的原因**（"其余的不在本站读到的那一截
     // 文本里"），而公路法那条实测里正文整份都在窗口内、同一输入四遍列出 8/2/3/8 行 —— 主因是
-    // 模型没写。撤掉这一次改口，句子就退回去说那件我们并不知道的事，而页面照常渲染。
-    label: '覆盖度又替差额认领原因（"其余的不在本站读到的那一截文本里"）',
+    // 模型没写。
+    //
+    // **2026-09-30 搬了家**：这一句随"读者侧接上 FeedReport"那一刀挪进了两处共用的
+    // `coverageGapAttribution`（explanation-coverage.ts），于是靶点从 change-coverage.ts 换成
+    // 那个"清单报过缺口吗"的判据 —— 它恒真，就等于又回到"把差额推给我们没读到的那一截"。
+    label: '覆盖度又替差额认领原因（不管清单怎么说，都把差额推给"没喂进去的那一截"）',
+    file: 'explanationCoverage',
+    from: '  return starved.length > 0 || sources.some((item) => item.truncated);',
+    to: '  return true;',
+    pattern: '不许再提',
+    test: 'tests/unit/explanation-points.test.mjs',
+  },
+  {
+    // 同一条规矩的另一半（2026-09-30）：**没有喂入清单时要说"给不出可核对的答案"**，
+    // 而不是退回去说一句读起来像交代、其实我们并不知道的话。存量 v1 行（生产里是多数）
+    // 与人工录入摘要都走这一支。
+    label: '没有喂入记录时又替差额认领原因（页面照常渲染，读者以为那是一句可核对的交代）',
+    file: 'explanationCoverage',
+    from: "    return '这条摘要没有留下本轮的喂入记录，差额出在哪一环本站给不出可核对的答案。';",
+    to: "    return '其余的不在本站读到的那一截里';",
+    pattern: '没有喂入清单',
+    test: 'tests/unit/explanation-points.test.mjs',
+  },
+  {
+    // 2026-09-30：清单**报了**截断却不说 —— 那就把"我们没读到"这一种可能藏了起来，
+    // 而它是真的（这一支正是该说它的地方）。
+    label: '被截了也不说（"我们没读到"这一种可能被藏起来）',
+    file: 'explanationCoverage',
+    from: '  const cut = sources.filter((item) => item.truncated).length;',
+    to: '  const cut = 0;',
+    pattern: '说清读到几份',
+    test: 'tests/unit/explanation-points.test.mjs',
+  },
+  {
+    // 2026-09-30：编制说明那一栏按 role 过滤，防的是"某份**条文**被截"被读成"说明被截"。
+    label: '编制说明那一栏拿整次调用的数字说话（某份条文被截被读成说明被截）',
+    file: 'explanationCoverage',
+    from: '  if (role === undefined) return { sources: feed.sources, starved: feed.starved };',
+    to: '  if (true) return { sources: feed.sources, starved: feed.starved };',
+    pattern: '被截的是条文类附件',
+    test: 'tests/unit/explanation-points.test.mjs',
+  },
+  {
+    label: '详情页不把喂入清单传给摘要卡（读者侧又拿不到"这一轮喂了什么"）',
+    file: 'noticePage',
+    from: '            feedReport={feedReport}',
+    to: '            feedReport={null}',
+    pattern: '详情页读出 feed',
+    test: 'tests/unit/feed-intake-note.test.mjs',
+  },
+  {
+    // 页面是 `.tsx`：e2e 跑的是构建产物，撤源码不会红，所以这一条钉的是**接线**
+    // （判据本身在 explanation-coverage.ts 里，由上面几条钉）。判据与接线分开钉，
+    // 才不会出现"判据对、页面没接上"这种看不见的断线。
+    label: '摘要卡把清单交给了改动那一栏、却没给编制说明那一栏（两栏说法又不一致）',
+    file: 'summaryView',
+    from: '                    feedReport,',
+    to: '',
+    pattern: '摘要卡把清单交给两处覆盖度判据',
+    test: 'tests/unit/feed-intake-note.test.mjs',
+  },
+  {
+    label: '摘要卡读了清单却不用（覆盖度那两句又退回"凭猜"）',
+    file: 'summaryView',
+    from: '                ? changeCoverageVerdict(changes.length, summary.changeMarkers, feedReport).detail',
+    to: '                ? changeCoverageVerdict(changes.length, summary.changeMarkers).detail',
+    pattern: '摘要卡把清单交给两处覆盖度判据',
+    test: 'tests/unit/feed-intake-note.test.mjs',
+  },
+  {
+    label: '仓储层不再查诊断那一列（读者侧永远只有"没有喂入记录"）',
+    file: 'summariesRepo',
+    from: '      summaryDiagnosticsJson: notices.summaryDiagnosticsJson,',
+    to: '      summaryDiagnosticsJson: null,',
+    pattern: '仓储层把诊断那一列查出来',
+    test: 'tests/unit/feed-intake-note.test.mjs',
+  },
+  {
+    label: '验收门不再从落库诊断取清单（门印的与读者看到的又不同源）',
+    file: 'summaryGate',
+    from: '  const feed = diagnostics?.feed ?? null;',
+    to: '  const feed = null;',
+    pattern: '验收门',
+    test: 'tests/unit/feed-intake-note.test.mjs',
+  },
+  {
+    label: '"缺说明的那几行"不再交代能归给谁（缺口又变得看不见）',
     file: 'changeCoverage',
-    from: "      '差额既可能来自模型没写，也可能来自本站没读到的那部分',",
-    to: "      '其余的不在本站读到的那一截文本里',",
-    pattern: '不替差额认领原因',
-    test: 'tests/unit/summary-changes.test.mjs',
+    from: "  if (factOnly > 0) parts.push(coverageGapAttribution(feed, '改动表述'));",
+    to: '  // 撤掉实现：不交代缺说明的那几行能归给谁',
+    pattern: '清单说有一份被截',
+    test: 'tests/unit/change-table.test.mjs',
+  },
+  // 2026-09-30：点名补摘要那条通道（`scripts/summarize-now.mjs`）。它绕开两道门
+  // （队列排除已截止条目、重跑工具拒绝已截止条目），所以它的**闸门本身**必须有钉子：
+  // 撤掉之后的表现都不是崩溃，而是"悄悄地多写了一条生产摘要"。
+  {
+    label: '点名补摘要：落库时把摘要正文扔掉（退出码照样 0，库里多一行空壳）',
+    file: 'summarize',
+    from: '      summaryJson: JSON.stringify({ ...quoted, changeTable }),',
+    to: '      summaryJson: JSON.stringify({}),',
+    pattern: '的那条产出摘要',
+    test: 'tests/e2e/summarize-now.test.mjs',
+  },
+  {
+    label: '正文自带条文的条目不再当作一份来源（那两条已截止草案白跑一次调用）',
+    file: 'summarize',
+    from: "  if (!planned.some((item) => item.role !== 'explanation') && bodyLooksLikeDraft(bodyText)) {",
+    to: '  if (false) {',
+    pattern: '默认只读',
+    test: 'tests/e2e/summarize-now.test.mjs',
+  },
+  {
+    label: '点名的工具改成默认写库（"先看清会发生什么"这一步不再无害）',
+    file: 'summarizeNow',
+    from: "const apply = argv.includes('--apply');",
+    to: 'const apply = true;',
+    pattern: '默认只读',
+    test: 'tests/e2e/summarize-now.test.mjs',
+  },
+  {
+    label: '已有摘要不再默认拒绝（一次点名就盖掉可能经过人工复核的摘要）',
+    file: 'summarizeNow',
+    from: 'if (wouldOverwrite.length > 0 && !replace) {',
+    to: 'if (false) {',
+    pattern: '已有摘要的条目',
+    test: 'tests/e2e/summarize-now.test.mjs',
+  },
+  {
+    label: '覆盖前的备份行不带旧摘要（旧值再也找不回来）',
+    file: 'summarizeNow',
+    from: '        previousSummaryJson: raw.summaryJson,',
+    to: '        previousSummaryJson: null,',
+    pattern: '已有摘要的条目',
+    test: 'tests/e2e/summarize-now.test.mjs',
+  },
+  {
+    label: '缺省的调用上限不再生效（一次能点出任意多条境外调用）',
+    file: 'summarizeNow',
+    from: 'if (idArgs.length > limit) {',
+    to: 'if (false) {',
+    pattern: '缺省不让一次点超过 5 条',
+    test: 'tests/e2e/summarize-now.test.mjs',
+  },
+  // 2026-09-30：引号字形归一（生产实测：附件原文是中文引号、模型某几遍吐 ASCII 直引号，
+  // 词句逐字一致却整行被判"对不上" —— 那一遍 9 行全丢，页面上「改了哪几处」只剩事实行）。
+  // 这是**放宽**一条核对口径，所以它比别的钉子更要紧：放松过头的表现是"编造的引用也能落库"，
+  // 而反向那几条（改实词 / 少一段 / 短于 8 字 / 顺序颠倒）已经在单测里钉住了。
+  {
+    label: '引号字形不再归一（模型吐 ASCII 直引号 ⇒ 整行被判对不上；生产上那一遍 9 行全丢）',
+    file: 'summaryContent',
+    from: "  return stripQuoteWhitespace(normalizeQuoteMarks(text)).replace(/^[\"'“「『]|[\"'”」』]$/g, '');",
+    to: "  return stripQuoteWhitespace(text).replace(/^[\"'“「『]|[\"'”」』]$/g, '');",
+    pattern: '只差引号字形',
+    test: 'tests/unit/summary-draft-points.test.mjs',
+  },
+  {
+    // 归句那一侧必须与落库反查共用同一份口径：只有一边归一的话，表里的行会归不到它引用的
+    // 那一句上，最后被挪到表尾 —— 读者看到的是"顺序莫名其妙"，看起来像模型写错了。
+    label: '归句的 haystack 不归一引号字形（表里的行与它引用的原文对不上，被挪到表尾）',
+    file: 'changeTable',
+    from: '  const normalized = normalizeQuoteMarks(source);',
+    to: '  const normalized = source;',
+    pattern: '引用只差引号字形',
+    test: 'tests/unit/change-table.test.mjs',
   },
   {
     // §20：逐处找出来的顺序是**按位置**的，探针与（将来的）按条目列表都靠它把"处"归到句上。
@@ -1470,7 +1637,7 @@ const CASES = [
   {
     label: '喂入清单不落库（"模型没读到"与"我们没喂"又变得分不出来）',
     file: 'summarize',
-    from: '          feed: feedReport,',
+    from: '      feed: feedReport,',
     to: '          feed: undefined,',
     pattern: '公众广域走重档',
     test: 'tests/e2e/summary-feed-tier.test.mjs',
@@ -1667,7 +1834,7 @@ const CASES = [
   {
     label: '表不落库（页面永远拿不到"行由程序定"，这一版改动等于没做）',
     file: 'summarize',
-    from: '          summaryJson: JSON.stringify({ ...quoted, changeTable }),',
+    from: '      summaryJson: JSON.stringify({ ...quoted, changeTable }),',
     to: '          summaryJson: JSON.stringify(quoted),',
     pattern: '改动表连同',
     test: 'tests/e2e/summary-genre-and-explanations.test.mjs',
