@@ -1,5 +1,5 @@
 /**
- * 实验探针（issue #86 第五节）：用 **git 里那份旧提示词**（`44dba1a^`）重跑一条修正草案，
+ * 实验探针（issue #86 第五节）：用 **git 里那份旧提示词**（`37ae7fa^`）重跑一条修正草案，
  * 回答一个挂了两轮的问题 —— 「改动点」当年到底是
  * **(a) 模型返回了空数组**，还是 **(b) 引用没通过逐字反查被丢掉**？
  *
@@ -33,7 +33,7 @@ const idPrefix = idIndex === -1 ? '9bd57185' : (argv[idIndex + 1] ?? '9bd57185')
 const showInput = !argv.includes('--no-input');
 
 /**
- * 旧提示词（`44dba1a^:src/lib/adapters/openai-compatible-llm.ts` 的第 69–90 行）**逐字**抄来。
+ * 旧提示词（`37ae7fa^:src/lib/adapters/openai-compatible-llm.ts` 的第 69–90 行）**逐字**抄来。
  * 差一个字都可能改变模型的行为，而这次实验的全部意义就在于"复现当年那一跑"。
  */
 const OLD_SYSTEM_PROMPT = [
@@ -59,7 +59,7 @@ const OLD_SYSTEM_PROMPT = [
   '7. explanationPoints 只依据「编制说明」段落（说明讲为什么制定、依据什么、主要改了什么、向谁征求意见，不是规定本身）：heading 照抄该小节自己的标题，引用只能取自说明段落；keyPoints / changes 的引用只能取自条文段落 —— 本站按段落分别反查，串了整条丢弃。说明里没有分层小标题时输出空数组，不要自己造小节名。',
 ].join('\n');
 
-/** 旧实现的「逐字反查」规则（`44dba1a^:src/lib/summary-content.ts`，行为逐条抄来）。 */
+/** 旧实现的「逐字反查」规则（`37ae7fa^:src/lib/summary-content.ts`，行为逐条抄来）。 */
 function quoteFingerprint(text) {
   return text.replace(/[\s\u3000]+/g, '').replace(/^["'“「『]|["'”」』]$/g, '');
 }
@@ -74,7 +74,7 @@ function findSourceForQuote(quote, sources) {
   return null;
 }
 
-/** 旧实现的改动表述计数（`44dba1a^:src/lib/amendment-coverage.ts`）—— 覆盖度那行的分母。 */
+/** 旧实现的改动表述计数（`37ae7fa^:src/lib/amendment-coverage.ts`）—— 覆盖度那行的分母。 */
 const KIND_PATTERNS = {
   modify: /修改为|修改如下|作.{0,4}修改/g,
   add: /增加一条|新增.{0,8}条/g,

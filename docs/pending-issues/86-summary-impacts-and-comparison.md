@@ -79,7 +79,7 @@ L1 今天已经有了（且做得很扎实，是本站最值钱的东西）。**
 
 ### 2.3 一个被这次测量揭出来的静默缺陷（已核对到源码）
 
-删掉的「改动点」是这样反查它自己的引用的（`44dba1a^:src/lib/summary-content.ts:293`）：
+删掉的「改动点」是这样反查它自己的引用的（`37ae7fa^:src/lib/summary-content.ts:293`）：
 
 ```ts
 changes: buildChanges(summary, draftSide),     // draftSide = sources.filter(role !== 'explanation')
@@ -98,7 +98,7 @@ changes: buildChanges(summary, draftSide),     // draftSide = sources.filter(rol
 > 原因（那一跑的引用全部命中条文侧）；候选②（不容忍省略号）**被证实且可量化**（丢了 2/10）。
 > 而零产出的真正来源是**一次集合混淆** —— 那 5 条候选从来没被重跑过。先读第九节再读本节。
 
-**第二个独立的根因候选，在提示词自己身上**（2026-09-27 考古 `44dba1a^` 时发现）：
+**第二个独立的根因候选，在提示词自己身上**（2026-09-27 考古 `37ae7fa^` 时发现）：
 提示词给模型看的字段示例里**写着一个真的省略号**——`"clause":"…","quote":"描述这处改动的逐字原文，160 字以内"`，
 而规则 6 又举了「第三条修改为：……」这样的例子；可是反查用的是**去空白后的 `String.includes` 子串匹配，
 没有任何省略号或标点容忍**（`quoteFingerprint` + `findDraftSourceForQuote`，今天仍在
@@ -255,7 +255,7 @@ changes: buildChanges(summary, draftSide),     // draftSide = sources.filter(rol
    现成的判据脚本是 `scripts/audit-draft-window.mjs` —— 它调的就是 worker 自己那份
    `draftSourcesForSummary`，打印**实际送进提示词的那一截**；
    `scripts/reset-summaries-for-redraft.mjs` 的只读模式也会打印"会被喂进条文的 N 份 / M 字符"。
-2. 用 **git 里那份旧提示词**（`44dba1a^`）重跑这条 —— 看模型返回的是**空数组**，
+2. 用 **git 里那份旧提示词**（`37ae7fa^`）重跑这条 —— 看模型返回的是**空数组**，
    还是有内容但被反查丢掉。**这一步同时回答了"改动点当年为什么是 0"这个悬案**，
    也顺带验证 2.3 那两条根因候选（池子排除说明 / 省略号不容忍）各自占多少。
 3. 用**新提示词**（说明侧抽取 + 影响判读）重跑同一条 —— 看能不能产出"原→改"与影响判读。
@@ -293,7 +293,7 @@ changes: buildChanges(summary, draftSide),     // draftSide = sources.filter(rol
 - 第二节每个数字都是 **2026-09-27 在生产上现量的**（`deploy/audit-comparison-basis.sql`，
   全 SELECT；脚本本身随本文件入库，可重跑）。
 - 2.3 那两条根因都是**假说**，不是结论：
-  - "反查池排除说明"由源码（`44dba1a^:src/lib/summary-content.ts:293`）与"对照措辞在说明里"
+  - "反查池排除说明"由源码（`37ae7fa^:src/lib/summary-content.ts:293`）与"对照措辞在说明里"
     （实测）共同支持，但**解释不了** `9bd57185` / `a59a6796` 这两条两侧都有对照措辞的情况；
   - "提示词教了校验器拒收的形状"（示例里的省略号 vs 子串匹配）是从**提示词与校验器两处源码**
     推出来的，**没有一条产出样本**证明模型真的那样引用过 —— 它只是一个模型很自然会走到的形状。
@@ -307,7 +307,7 @@ changes: buildChanges(summary, draftSide),     // draftSide = sources.filter(rol
   所以 48 是**上界**。
 - 三层结构里的措辞、块级免责声明、人工复核前置，都是**未被读者验证的设计选择**，
   不是实测结论。它们成立与否要靠第五节的人工阅读 + 上线后的点击数据。
-- 第 2.3 / 2.5 节引用的"删掉的那版长什么样"，来自一次**只读的 git 考古**（在 `44dba1a^` 上
+- 第 2.3 / 2.5 节引用的"删掉的那版长什么样"，来自一次**只读的 git 考古**（在 `37ae7fa^` 上
   逐文件 `git show`，未改任何文件、未切分支、未跑构建），引用的是真实代码而非转述。
 
 ---
@@ -378,8 +378,8 @@ pin 131 → **136 条全部实测"撤掉实现变红"**；tsc / eslint 干净。
 
 探针 `scripts/probe-amendment-changes.mjs`（**只读**：仅 SELECT、不写库）：
 输入窗口**复用 worker 自己那份 `draftSourcesForSummary`**（自己另拼一份"差不多的输入"，
-结论就只对探针成立）；系统提示词是 `44dba1a^` 的**逐字**原文；判据（指纹反查、改动表述计数）
-也是从 `44dba1a^` 逐条抄来的。对象是本文件第 2.2 节点名的金丝雀
+结论就只对探针成立）；系统提示词是 `37ae7fa^` 的**逐字**原文；判据（指纹反查、改动表述计数）
+也是从 `37ae7fa^` 逐条抄来的。对象是本文件第 2.2 节点名的金丝雀
 `9bd5718592f32ab6`《中华人民共和国公路法（修正草案征求意见稿）》。
 
 ### 9.2 结果

@@ -252,7 +252,7 @@ P1 要的是一次判断，而这次只是"改了实现就要同步用例"的维
 | 步骤 | 结果 |
 | --- | --- |
 | 写库前的备份 | 手动跑 `deploy/daily-backup.sh`：`zhurenweng-2026-09-26-051920.dump`（1,278,995 字节），6 项计数校验全过（notices 192 / 有摘要 84 / 附件 110 / 抽取正文 1,491,761 字符 / 订阅 1 / 源 10）。当天 03:30 的自然备份也在 |
-| 同步 | `sync-files-local.sh` 传 22 个文件（`4c8ea7d..HEAD` 的全部改动，**除了** 636KB 的 `docs/zhurenweng-iteration.html` —— 它只有文档意义，走分块通道要十几个来回；这一条差异记在这里，免得下次做全树比对时被当成漏传） |
+| 同步 | `sync-files-local.sh` 传 22 个文件（`7504795..HEAD` 的全部改动，**除了** 636KB 的 `docs/zhurenweng-iteration.html` —— 它只有文档意义，走分块通道要十几个来回；这一条差异记在这里，免得下次做全树比对时被当成漏传） |
 | 独立复核 | 另写一段只读脚本取服务器那 22 个文件的 sha256 与本地对拍（本地按 `\r\n`→`\n` 归一）：**22/22 一致** |
 | 重建重启 | `docker compose build web worker`（next build 52s）→ `up -d`。镜像 web `9033d6f5584c → a59f64d83d14`、worker `a844be13ce4a → 334932dfb41c`（后续又因 `--ids` 改了脚本再重建过一次 worker，见 7.3） |
 
