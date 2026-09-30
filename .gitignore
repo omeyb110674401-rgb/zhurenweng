@@ -12,6 +12,10 @@ data/
 .env
 .env.local
 
+# 生产实例 id（`deploy/sync-files-local.sh` 从 $ZW_INSTANCE 或这个文件读）——
+# 这是个公开仓库，实例 id 不写在被跟踪的文件里。自己用时：把 id 写进这个文件
+deploy/.instance-id
+
 # misc
 *.tsbuildinfo
 *.log

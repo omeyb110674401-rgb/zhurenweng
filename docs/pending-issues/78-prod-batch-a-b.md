@@ -130,6 +130,8 @@ changes 实际条数 = 0      explanationPoints 实际条数 = 0      amendmentC
 
 `reminder_sends` 0 → 5，`notice_notifications` 保持 0 —— **预测的 5 与 0 都对上了**。
 判据 `deploy/audit-email-paths.sql` 与健康清单的"历史发出 5 封"互相独立地印证了同一件事。
+（上面日志里收件人邮箱的本地部分**打了码** —— 2026-09-30 上线前扫查时改的，理由见
+`73-subscription-value-measured.md` 里那条说明。）
 
 **收件人是站长本人**（订阅地址与 `ALERT_EMAIL`、`SMTP_USER` 同一），所以这不是给第三方发信；
 但**"邮件真的在 QQ 邮箱里能看到"这一条只有站长能确认**（#73 第 39 行把它写成了判据的一半）。

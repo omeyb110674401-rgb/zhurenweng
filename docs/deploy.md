@@ -28,13 +28,14 @@ docker version && docker compose version
 
 ## 2. 获取代码
 
-**A. 服务器直接克隆** —— **当前不可用**：2026-09-21 起 GitHub 账号 `omeyb110674401-rgb`
-被停用（仓库页与 codeload 均 404）。恢复推送通道或换托管后再启用。
+**A. 服务器直接克隆** —— 2026-09-21 → 09-30 期间**不可用**（账号 `omeyb110674401-rgb` 被停用，
+仓库页与 codeload 均 404），**2026-09-30 已恢复**；但生产上一直是下面 B/C 两路在用，
+这条路只作备用（git 历史里没有生产需要的 `.env`，克隆完仍要单独配）。
 ```bash
 git clone https://github.com/omeyb110674401-rgb/zhurenweng.git /opt/zhurenweng
 ```
 
-**B. 本机打包上传**（整包通道，当前可用；在开发机 Git Bash 执行）
+**B. 本机打包上传**（整包通道；在开发机 Git Bash 执行）
 ```bash
 cd /d/Projects
 tar --exclude=node_modules --exclude=.next --exclude=.git --exclude=data -czf zhurenweng.tar.gz zhurenweng
@@ -44,6 +45,7 @@ ssh root@<公网IP> "mkdir -p /opt/zhurenweng && tar -xzf /opt/zhurenweng.tar.gz
 
 **C. 增量同步单个文件**（已上线后改几个文件时用，**当前主用通道**）
 ```bash
+export ZW_INSTANCE=<实例 id>      # 或写进 deploy/.instance-id（已 gitignore，不进公开仓库）
 bash deploy/sync-files-local.sh src/app/page.tsx src/lib/dates.ts
 ```
 逐文件校验 sha256；传完仍需在服务器上重建镜像：

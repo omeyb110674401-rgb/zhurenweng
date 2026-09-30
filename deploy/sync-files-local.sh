@@ -1,13 +1,18 @@
 #!/bin/bash
-# 增量把本地改动过的文件推到生产服务器（GitHub 不可用时的部署通道）。
+# 增量把本地改动过的文件推到生产服务器（**当前主用**的部署通道）。
 #
-# 背景：常规部署走 `deploy/deploy-*.sh`，它从 codeload.github.com 取源码包 ——
-# 2026-09-21 起该账号被 GitHub 停用（codeload 与仓库页均 404），这条通道断了。
-# 本脚本改用「本地文件 → base64 → workbench exec 写入服务器」的增量通道：
-# 只传改动过的文件，逐文件校验 sha256，因此不受仓库可达性影响。
+# 来历：常规部署原本走 `deploy/deploy-*.sh`（从 codeload.github.com 取源码包），
+# 2026-09-21 账号被 GitHub 停用后那条通道断了，于是改用「本地文件 → base64 →
+# workbench exec 写入服务器」的增量通道：只传改动过的文件、逐文件校验 sha256，
+# 不受仓库可达性影响。**2026-09-30 账号已恢复**（`gh auth status` 与 `git ls-remote` 实测可达），
+# 但这条通道继续主用 —— 它比整包覆盖精准，改动面多大就传多少。
 #
 # 用法（在开发机仓库根目录）：
+#   export ZW_INSTANCE=<实例 id>          # 或写进 deploy/.instance-id（已 gitignore）
 #   bash deploy/sync-files-local.sh src/db/repo/notices.ts tests/e2e/category-filter.test.mjs
+#
+# 为什么实例 id 不写死在这里：**本仓库是公开仓库**，实例 id 不该跟着源码一起公开
+# （2026-09-30 上线前扫出来的）。没给就当场报错，不静默用一个过期默认值。
 #
 # 传输编码：默认「文件 → gzip -9 → base64」，远端 `base64 -d | gzip -d` 还原。
 # 为什么要压缩：单条 workbench exec 命令受 Windows 命令行长度上限（约 32KB）约束，
@@ -20,7 +25,16 @@
 #   workbench exec -i <实例> --timeout 600 -c "cd /opt/zhurenweng && nohup docker compose build web worker > /tmp/build.log 2>&1 &"
 set -euo pipefail
 
-INSTANCE="REDACTED_INSTANCE_ID"
+INSTANCE="${ZW_INSTANCE:-}"
+INSTANCE_FILE="$(dirname "$0")/.instance-id"
+if [ -z "$INSTANCE" ] && [ -f "$INSTANCE_FILE" ]; then
+  INSTANCE="$(tr -d ' \t\r\n' < "$INSTANCE_FILE")"
+fi
+if [ -z "$INSTANCE" ]; then
+  echo "缺生产实例 id：设 ZW_INSTANCE，或把 id 写进 $INSTANCE_FILE（该文件已 gitignore）。" >&2
+  echo "为什么不在脚本里写死：这是个公开仓库，实例 id 不该跟着源码一起公开。" >&2
+  exit 1
+fi
 REMOTE_ROOT="/opt/zhurenweng"
 # 单条命令里 base64 载荷的字符上限（给命令模板与路径留余量）
 MAX_CMD_CHARS=20000

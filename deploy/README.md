@@ -1,6 +1,6 @@
 # 部署脚本
 
-两种通道，**当前只有第二种可用**。
+三种通道，**当前主用第一种**（2026-09-30 GitHub 账号恢复后第二种重新可用，但仍不主用）。
 
 ## 1. `sync-files-local.sh` —— 当前主用（增量）
 
@@ -8,9 +8,18 @@
 不受仓库可达性影响，改几个文件就传几个文件。
 
 ```bash
+export ZW_INSTANCE=<实例 id>      # 或把它写进 deploy/.instance-id（已 gitignore）
 bash deploy/sync-files-local.sh src/app/page.tsx src/lib/dates.ts
 # 然后在服务器上重建镜像并重启 web（脚本头部注释给了命令）
 ```
+
+**实例 id 不写死在脚本里**（2026-09-30 改）：本仓库是公开仓库，实例 id 不该跟着源码一起公开。
+`ZW_INSTANCE` 优先，其次读 `deploy/.instance-id`，两个都没有就当场报错（不静默用一个过期默认值 ——
+那会连到一台不是你要的机器上）。
+
+**它只在开发机跑**（服务器上没有 `workbench` 这个命令），所以下次做全树对拍时，这个文件会显示成
+`diff`（生产上那份还是旧版），**那是预期的、不必同步** —— 真正被镜像读的代码在 `src/`、`worker/`、
+`drizzle/`、`scripts/` 里。记在这里，免得下次把它当成"漏传了一个文件"。
 
 **⚠️ 大文件要分块传**（2026-09-28 实测）：整份 base64 塞进一条 `workbench exec -c` 命令时，
 Windows 的命令行长度上限会拦下来，报的是 **`程序"workbench.exe"无法运行: The filename or
@@ -50,14 +59,16 @@ docker compose run --rm worker node scripts/<脚本>.mjs
 docker compose up -d worker          # 让常驻容器也换到新镜像，否则下次拉起的还是旧的
 ```
 
-## 2. `deploy-NN.sh` —— 历史脚本，已不可用
+## 2. `deploy-NN.sh` —— 历史脚本，整包覆盖通道
 
 `deploy-23/24/25/29/30/31/32.sh` 是各 issue 上线时的一次性脚本，都从
 `codeload.github.com` 取源码包整包覆盖。
 
-**2026-09-21 起 GitHub 账号 `omeyb110674401-rgb` 被停用**（仓库页与 codeload
-均 404），这条通道断了，这批脚本原样跑会失败。保留它们只是为了留档「当时怎么
-部署的」，不要照着执行 —— 恢复推送通道（或换托管）后再评估是否复用。
+**2026-09-21 → 2026-09-30 之间这条通道断过**：账号 `omeyb110674401-rgb` 被 GitHub 停用，
+仓库页与 codeload 均 404，这批脚本照原样跑会失败。**现在账号已恢复**（`gh auth status` /
+`git ls-remote` 实测可达），codeload 通道原则上又能用了。但**仍然不要照跑**：它们是各轮的
+历史留档（里面写死的 URL、文件名、迁移序号都停在那一天），而增量通道更精准。
+真要复用，先按当前 `HEAD` 重写一遍再跑，别拿旧脚本赌它对不对。
 
 `deploy-33.sh` 已删除：它写于通道断掉之后，从未被使用过，且被同批次的
 `sync-files-local.sh` 取代（详见 `docs/pending-issues/50-*.md`）。

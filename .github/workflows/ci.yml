@@ -5,6 +5,15 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+  # 需要单独验一次时**手动触发**，不要为了"让它跑起来"而造一次推送（2026-09-30 用户要求：
+  # 不要高频使用 CI）。本地那套门比 CI 更全（多一条撤实现自证），所以 CI 是第二意见，不是主门。
+  workflow_dispatch:
+
+# 同一分支上后一次推送直接取消前一次还没跑完的 run。提交是**按批推**的，一批只该有一次 run；
+# 没有这段的话，一天里连推几批就会把 runner 排满（2026-09-21 之前每次推送都各跑一次）。
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   # 这个 job 曾叫 Lint 却只跑单测：`npm run lint` 与类型检查**从未在 CI 里跑过**，

@@ -54,6 +54,24 @@ README 原来有两处把它写成现在时：「CI（GitHub Actions）运行 li
 这不是文字问题：#54 那条"`npm run lint` 在 main 上红着没人发现"就是 CI 停摆的直接后果 ——
 文档写着有兜底，实际没有，人就会少跑一次。
 
+### 三.1 更正（2026-09-30）：账号恢复，但"CI 在跑"这句话仍然不成立
+
+用户告知 GitHub 账号已恢复，当场实测确认：`gh auth status` 正常（token 带
+`repo` / `read:org` / `gist` / `admin:public_key`，协议 ssh）、`gh repo view` 拿得到仓库、
+`git ls-remote --heads origin` 返回 `b8293ad…refs/heads/main`。但**远端还是 09-21 那个提交**
+（`pushedAt = 2026-09-21T03:00:44Z`），本地 `HEAD` 比它多 **156 个提交**，也就是说：
+
+- 通道恢复了（本文写的"推不出去"不再成立）；
+- **可 CI 仍然一次都没跑过新代码** —— Actions 里最后一次 run 就是 `2026-09-21T03:00:46Z`
+  那次 success，对应 `b8293ad`。
+- 所以本文第二节的那句判据（"恢复托管后第一件事是看 Actions 里有没有真的绿一次"）
+  **仍未被满足**；README 已按"账号恢复了、但还没推、所以不写 CI 在跑"的口径改写，
+  等真正推上去拿到 Actions 读数再更新成实际值。
+
+用户同时给了一条约束：**不要再高频使用 CI**。落地方式：提交按批推（一次推送 = 一次 CI run）、
+不拿 CI 当测试渠道（本地门更全，多一条撤实现自证）、需要单独验一次走 `workflow_dispatch`；
+`ci.yml` 已加 `concurrency` + `cancel-in-progress`（同一分支后一次推送取消前一次没跑完的 run）。
+
 ## 四、这一轮做完的事
 
 - 新增 `deploy/audit-email-paths.sql`（只读，三段前提 + 两段产出，能区分"坏了"和"没东西可发"）；
