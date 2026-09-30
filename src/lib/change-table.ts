@@ -184,8 +184,13 @@ export function buildChangeTable(text: string, changes: { quote: string }[]): Ch
       return;
     }
     const kinds: ChangeMarkerKind[] = [];
-    for (const kind of hitsOf[spanIndex]) {
-      if (!kinds.includes(kind.kind)) kinds.push(kind.kind);
+    const marks: string[] = [];
+    for (const marker of hitsOf[spanIndex]) {
+      if (!kinds.includes(marker.kind)) kinds.push(marker.kind);
+      // 字面也带上（2026-09-30）：我们数到的是**字眼**，页面就照字眼说
+      // （「本站在这一句里数到了「删除」」），不替文件下结论说"这里有一处改动" ——
+      // 生产实测 58 处删除类命中里 48 处是条文里的动词或对照表单元格。
+      if (!marks.includes(marker.text)) marks.push(marker.text);
     }
     const hits = sentenceOfChange
       .map((owner, index) => ({ owner, index }))
@@ -196,6 +201,7 @@ export function buildChangeTable(text: string, changes: { quote: string }[]): Ch
         type: 'fact',
         clause: clauseOfSentence(sentence),
         kinds,
+        marks,
         sentence,
       });
       return;

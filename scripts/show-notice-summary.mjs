@@ -38,7 +38,7 @@ import {
   IMPACT_KIND_LABELS,
 } from '../src/lib/summary-content.ts';
 import { shouldRenderImpacts } from '../src/lib/impact-display.ts';
-import { changeCoverageVerdict, changeTableNote } from '../src/lib/change-coverage.ts';
+import { changeCoverageVerdict, changeFactNote, changeTableNote } from '../src/lib/change-coverage.ts';
 import { explanationCoverageVerdict } from '../src/lib/explanation-coverage.ts';
 import { changeTableCounts, changeTableRows } from '../src/lib/change-table.ts';
 import { draftProvenanceLine } from '../src/lib/summary-display.ts';
@@ -141,8 +141,7 @@ for (const row of rows) {
     for (const entry of entries) {
       if (entry.type === 'fact') {
         console.log(
-          `   • ${entry.clause || '—'} ｜ ${entry.kinds.join('+') || '—'} ｜ ` +
-            '本站检测到这一处改动表述，但没能给出可核对的说明',
+          `   • ${entry.clause || '—'} ｜ ${entry.kinds.join('+') || '—'} ｜ ${changeFactNote(entry)}`,
         );
         console.log(`     原文（本句）：${entry.sentence}`);
         continue;

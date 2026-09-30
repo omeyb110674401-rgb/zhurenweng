@@ -3,6 +3,7 @@ import { explanationCoverageVerdict } from '@/lib/explanation-coverage';
 import {
   CHANGE_KIND_LABELS,
   changeCoverageVerdict,
+  changeFactNote,
   changeTableNote,
 } from '@/lib/change-coverage';
 import { changeTableCounts, changeTableRows } from '@/lib/change-table';
@@ -323,7 +324,8 @@ export function SummaryView({
                                 : '—'}
                             </td>
                             <td data-testid="summary-change-fact-note">
-                              本站检测到这一处改动表述，但没能给出可核对的说明
+                              {/* 措辞在 lib/change-coverage.ts 的 changeFactNote 里（页面与验收门共用一份） */}
+                              {changeFactNote(entry)}
                             </td>
                             <td>
                               <p>{entry.sentence}</p>

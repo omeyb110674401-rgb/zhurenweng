@@ -8,7 +8,7 @@ import {
   isHeaderSentence,
   sentenceSpans,
 } from '../../src/lib/change-table.ts';
-import { changeTableNote, countChangeMarkers } from '../../src/lib/change-coverage.ts';
+import { changeFactNote, changeTableNote, countChangeMarkers } from '../../src/lib/change-coverage.ts';
 import { buildQuotedSummary, parseQuotedSummary } from '../../src/lib/summary-content.ts';
 
 /**
@@ -139,12 +139,12 @@ describe('issue #86 §20.3：那一句交代（新增的行数要说得出来）
     const note = changeTableNote({ markers: 14, rows: 10, described: 8, factOnly: 2, headers: 1 });
     assert.equal(note.rows, 10);
     assert.equal(note.factOnly, 2);
-    assert.match(note.detail, /检测到 14 处修改表述/);
+    assert.match(note.detail, /按「修改为 \/ 删去 \/ 增加一条 \/ 作为第X条」这类字眼数到 14 处/);
     assert.match(note.detail, /按句归并成 10 行/);
     assert.match(note.detail, /8 行附了逐字原文与可核对的说明/);
-    assert.match(note.detail, /2 行只报「检测到改动表述」这一事实/);
+    assert.match(note.detail, /2 行只报「这一句里数到了改动字眼」这一事实/);
     assert.match(note.detail, /另有 1 句是小标题（不含条款内容），不单独列行/);
-    assert.match(note.detail, /检测按本站读到的全部附件正文数/);
+    assert.match(note.detail, /分母按本站读到的全部附件正文数/);
     // 分母不是"改了几条"：一句里可以数出三处，这个数不许被说成条款数
     assert.doesNotMatch(note.detail, /共 ?\d+ ?条(?:改动|修改)/);
   });
@@ -152,7 +152,7 @@ describe('issue #86 §20.3：那一句交代（新增的行数要说得出来）
   it('每一行都有说明 ⇒ 不说"其中几行只报事实"（没缺就不许提缺口）', () => {
     const note = changeTableNote({ markers: 3, rows: 3, described: 3, factOnly: 0, headers: 0 });
     assert.match(note.detail, /3 行都附了逐字原文与可核对的说明/);
-    assert.doesNotMatch(note.detail, /只报/);
+    assert.doesNotMatch(note.detail, /只报「这一句里数到了改动字眼」/);
     assert.doesNotMatch(note.detail, /小标题/);
   });
 
@@ -160,6 +160,30 @@ describe('issue #86 §20.3：那一句交代（新增的行数要说得出来）
     const note = changeTableNote({ markers: 0, rows: 0, described: 0, factOnly: 0, headers: 0 });
     assert.doesNotMatch(note.detail, /共 0 处/);
     assert.match(note.detail, /没有数到成文的修改表述/);
+  });
+
+  /**
+   * 2026-09-30：只报事实那一行的措辞**必须照我们真的做的事说**。
+   *
+   * 完整表上线当天在生产上量到：58 处删除类命中里 **48 处是条文里的动词**或修订对照表的
+   * 单元格（"采取删除、屏蔽、断开链接…"、"本标准 删除 删除"）。原来那句
+   * 「本站检测到这一处改动表述」把"匹配到字眼"说成了"这里有一处改动" —— 读者会据此以为
+   * 那一行真的是改动。新措辞报出**数到的是哪个字眼**，而原句就印在同一行的右边。
+   */
+  it('只报事实那一行说"数到了哪个字眼"，不说"检测到改动"（数到的是字眼，不是改动）', () => {
+    const withMarks = changeFactNote({ kinds: ['delete'], marks: ['删除'] });
+    assert.match(withMarks, /本站在这一句里数到了「删除」，但没能给出可核对的说明/);
+    assert.doesNotMatch(withMarks, /检测到这一处改动表述/);
+    // 旧落库行没有 marks ⇒ 退回按类型名说，绝不为它们编一个字面出来
+    const legacy = changeFactNote({ kinds: ['delete'], marks: [] });
+    assert.match(legacy, /数到了「删除」这类字眼/);
+    assert.doesNotMatch(legacy, /检测到这一处改动表述/);
+    assert.equal(
+      changeFactNote({ kinds: ['modify', 'add'], marks: ['修改为', '增加一条'] }).includes(
+        '「修改为」、「增加一条」',
+      ),
+      true,
+    );
   });
 
   /**
@@ -196,7 +220,7 @@ describe('issue #86 §20.3：那一句交代（新增的行数要说得出来）
     assert.match(note.detail, /其中 1 份只喂进一部分（被截）/);
     assert.match(note.detail, /差额可能出在没喂进去的那一截上/);
     // 表由程序定行 ⇒ 这一句仍然只说"某几行的说明缺着"，不改口成"表少了几行"
-    assert.match(note.detail, /2 行只报「检测到改动表述」这一事实/);
+    assert.match(note.detail, /2 行只报「这一句里数到了改动字眼」这一事实/);
   });
 
   it('清单说每一份都整份进了窗口 ⇒ 不许提"没读到"（差额归给模型没写）', () => {
@@ -205,7 +229,7 @@ describe('issue #86 §20.3：那一句交代（新增的行数要说得出来）
       feedOf({ usedCjk: 1_992, sources: [fedSource()] }),
     ).detail;
     assert.match(detail, /每一份都整份进了窗口，没有一份被截/);
-    assert.match(detail, /差额来自模型没有把检测到的改动表述都写出来/);
+    assert.match(detail, /差额来自模型没有把检测到的改动字眼都写出来/);
     assert.doesNotMatch(detail, /没喂进去的那一截/);
     assert.doesNotMatch(detail, /本站没读到/);
   });
@@ -326,7 +350,7 @@ describe('issue #86 §20.3：落库形状（新增的键要与旧行共存）', 
     assert.deepEqual(parsed.changeTable, {
       entries: [
         { type: 'described', change: 0 },
-        { type: 'fact', clause: '第五条', kinds: ['modify'], sentence: QUOTE_5 },
+        { type: 'fact', clause: '第五条', kinds: ['modify'], marks: [], sentence: QUOTE_5 },
       ],
       headers: 0,
     });
@@ -359,6 +383,8 @@ describe('2026-09-30：按句归并也用同一份引号字形口径', () => {
     type: 'fact',
     clause: '第五十九条',
     kinds: ['modify'],
+    // 字面也带上（2026-09-30）：页面照字眼说那句话，不替文件下结论
+    marks: ['修改为'],
     sentence: '二、将第五十九条修改为：“符合下列条件的公路，可以收费。',
   };
 

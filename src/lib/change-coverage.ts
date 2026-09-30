@@ -142,14 +142,15 @@ export function changeCoverageVerdict(
     return { state: 'no_markers', detail: '附件正文里没有数到成文的修改表述，这一栏给不出「共几处」' };
   }
   if (listed >= markers.total) {
-    return { state: 'complete', detail: `已列出正文里检测到的全部 ${markers.total} 处修改表述` };
+    return { state: 'complete', detail: `已列出正文里数到的全部 ${markers.total} 处改动字眼` };
   }
   return {
     state: 'partial',
     detail:
-      `正文里检测到 ${markers.total} 处修改表述，本页列出 ${listed} 处 —— ` +
-      '检测按本站读到的全部附件正文数；表里只列模型写出、且引用能逐字对回原文的那些。' +
-      coverageGapAttribution(feed, '改动表述'),
+      `正文里按改动字眼数到 ${markers.total} 处，本页列出 ${listed} 处 —— ` +
+      '分母按本站读到的全部附件正文数（是**字眼计数**，不是逐条核过的改动清单）；' +
+      '表里只列模型写出、且引用能逐字对回原文的那些。' +
+      coverageGapAttribution(feed, '改动字眼'),
   };
 }
 
@@ -172,7 +173,48 @@ export function changeCoverageVerdict(
  */
 export type ChangeTableEntry =
   | { type: 'described'; change: number }
-  | { type: 'fact'; clause: string; kinds: ChangeMarkerKind[]; sentence: string };
+  | {
+      type: 'fact';
+      clause: string;
+      kinds: ChangeMarkerKind[];
+      /**
+       * 这一句里数到的**字面**（如「修改为」「删去」，去重、按出现顺序）。
+       *
+       * 2026-09-30 加：完整表上线当天在生产上量到，58 处删除类命中里 **48 处是条文里的动词**
+       * 或对照表单元格（"采取删除、屏蔽、断开链接…"、"违规删除…信用信息"、"本标准 删除 删除"）。
+       * 也就是说我们数的是**字眼**，不是"这一定是一处改动"。那一栏的措辞必须照着这个事实说：
+       * 页面上它印成「本站在这一句里数到了「删除」，但没能给出可核对的说明」—— 读者一眼就能
+       * 核对我们数到的是什么（原句就印在右边），而不是被我们告知"这里有一处改动"。
+       *
+       * 旧行没有这个字段：渲染时退回按 `kinds` 的展示名说（「删除」这类字眼），
+       * 于是**不需要重跑**那些已经落库的摘要。
+       */
+      marks: string[];
+      sentence: string;
+    };
+
+/**
+ * 只报事实那一行的「改了什么」格该印什么（页面、验收门与探针**共用一份措辞**）。
+ *
+ * 措辞照**我们真的做的事**说：数到的是字眼，不是"这里有一处改动"。2026-09-30 生产实测，
+ * 58 处删除类命中里 48 处是条文里的动词（"采取删除、屏蔽…"）或修订对照表的单元格
+ * （"本标准 删除 删除"）—— 写成"检测到改动"就是替文件下了一个我们没核过的结论。
+ * 原句就印在同一行的右边，读者一眼能核对我们数到的是什么。
+ *
+ * 旧落库行没有 `marks`（那是后加的字段）⇒ 退回按类型名说（「删除」这类字眼），
+ * 于是那些行**不需要重跑**也能拿到诚实措辞。
+ */
+export function changeFactNote(entry: {
+  kinds: ChangeMarkerKind[];
+  marks?: string[] | null;
+}): string {
+  const marks = entry.marks ?? [];
+  const subject =
+    marks.length > 0
+      ? marks.map((mark) => `「${mark}」`).join('、')
+      : `「${entry.kinds.map((kind) => CHANGE_KIND_LABELS[kind]).join('、')}」这类字眼`;
+  return `本站在这一句里数到了${subject}，但没能给出可核对的说明`;
+}
 
 /** 「改了哪几处」的整张表：程序定的行序 + 几个不单独成行的标题句。 */
 export interface ChangeTable {
@@ -225,20 +267,29 @@ export function changeTableNote(
   if (input.markers === 0) {
     return { rows, factOnly, detail: '附件正文里没有数到成文的修改表述，这一栏给不出「共几处」' };
   }
-  const parts = [`正文里检测到 ${input.markers} 处修改表述；本页按句归并成 ${rows} 行`];
+  /**
+   * 分母的说法必须与事实相符（2026-09-30 改口）：我们数的是**字眼**，不是"文件里真的有 N 处改动"。
+   * 生产实测：58 处删除类命中里 48 处是条文里的动词或对照表单元格。原先那句
+   * 「正文里检测到 N 处修改表述」把"匹配到字眼"说成了"检测到改动"——
+   * 而读者会据此以为下面那些行都真的是改动。
+   */
+  const parts = [
+    `正文里按「修改为 / 删去 / 增加一条 / 作为第X条」这类字眼数到 ${input.markers} 处；` +
+      `本页按句归并成 ${rows} 行`,
+  ];
   if (factOnly === 0) {
     parts.push(`，${input.described} 行都附了逐字原文与可核对的说明`);
   } else {
     parts.push(
       ` —— ${input.described} 行附了逐字原文与可核对的说明，` +
-        `${factOnly} 行只报「检测到改动表述」这一事实`,
+        `${factOnly} 行只报「这一句里数到了改动字眼」这一事实（原句照登，请自己判断）`,
     );
   }
   if (input.headers > 0) {
     parts.push(`；另有 ${input.headers} 句是小标题（不含条款内容），不单独列行`);
   }
-  parts.push('。检测按本站读到的全部附件正文数。');
+  parts.push('。分母按本站读到的全部附件正文数，它是**字眼计数**，不是逐条核过的改动清单。');
   // 缺的只是"某几行的说明"⇒ 按喂入清单交代那几行的说明能归给谁（没有缺口就不提这一层）
-  if (factOnly > 0) parts.push(coverageGapAttribution(feed, '改动表述'));
+  if (factOnly > 0) parts.push(coverageGapAttribution(feed, '改动字眼'));
   return { rows, factOnly, detail: parts.join('') };
 }

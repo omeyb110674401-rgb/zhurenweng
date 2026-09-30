@@ -231,6 +231,9 @@ for (const row of targets) {
       } else {
         console.log(
           `   ${clauseOf(sentence) || '—'} ｜ （${hits.map((hit) => hit.kind).join('+')}） ｜ ` +
+            // 2026-09-30 留档：这一行是 §20.5 那一版的**原样**（当时给用户过目、并据此拍板）。
+            // 页面现在的措辞见 lib/change-coverage.ts 的 changeFactNote —— 数到的是字眼，
+            // 不替文件下结论说"这里有一处改动"。
             '本站检测到这一处改动表述，但没能给出可核对的说明',
         );
         console.log(`     原文：${sentence.slice(0, 120)}${sentence.length > 120 ? '…' : ''}`);

@@ -162,7 +162,7 @@ describe('issue #76：详情页体裁角标', () => {
     assert.ok(html.includes('第二条修改为：从事前款活动应当取得许可。'), '那一行的逐字原文');
     assert.ok(html.includes('出处：附件《某某法（修正草案征求意见稿）.docx》'), '出处照旧由程序算');
     assert.match(html, /data-testid="summary-change-coverage"/, '覆盖度那行要跟着旧计数一起渲染');
-    assert.ok(html.includes('检测到 3 处'), '分母来自落库的 changeMarkers');
+    assert.ok(html.includes('按改动字眼数到 3 处'), '分母来自落库的 changeMarkers（它是字眼计数）');
     assert.ok(html.includes('本页列出 1 处'), '列得比数到的少就照实说少');
   });
 
@@ -223,7 +223,12 @@ describe('issue #76：详情页体裁角标', () => {
       '两行只有事实：检测到表述、但模型没写出可核对的说明',
     );
     assert.equal(html.split('data-testid="summary-change-row-described"').length - 1, 1);
-    assert.ok(html.includes('本站检测到这一处改动表述，但没能给出可核对的说明'), '照实说没能给出说明');
+    assert.ok(html.includes('本站在这一句里数到了「删除」'), '照实说数到了哪个字眼');
+    assert.ok(html.includes('，但没能给出可核对的说明'), '并说清没能给出说明');
+    assert.ok(
+      !html.includes('检测到这一处改动表述'),
+      '旧措辞把"匹配到字眼"说成了"这里有一处改动"，不许回来',
+    );
     assert.ok(html.includes(FACT_HEAD), '只报事实的行要把那一句原文印出来给读者自己看');
     assert.ok(html.includes(FACT_DELETE));
     assert.ok(
@@ -236,9 +241,9 @@ describe('issue #76：详情页体裁角标', () => {
     const atDelete = html.indexOf(FACT_DELETE);
     assert.ok(atHead < atDescribed && atDescribed < atDelete, '按表里的行序渲染');
     assert.match(html, /data-testid="summary-change-coverage"/);
-    assert.ok(html.includes('检测到 4 处修改表述'), '分母照旧来自落库的 changeMarkers');
+    assert.ok(html.includes('这类字眼数到 4 处'), '分母照旧来自落库的 changeMarkers（字眼计数）');
     assert.ok(html.includes('按句归并成 3 行'), '表由程序定，所以说得清"归并成几行"');
-    assert.ok(html.includes('2 行只报「检测到改动表述」这一事实'), '几行缺说明要说出来');
+    assert.ok(html.includes('2 行只报「这一句里数到了改动字眼」这一事实'), '几行缺说明要说出来');
     assert.ok(html.includes('另有 1 句是小标题'), '不单独成行的标题句也要交代');
     assert.ok(!html.includes('本页列出'), '旧措辞（"列出几处"）不许再出现 —— 那一版表会少行');
   });

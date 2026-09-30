@@ -1509,7 +1509,7 @@ const CASES = [
   {
     label: '"缺说明的那几行"不再交代能归给谁（缺口又变得看不见）',
     file: 'changeCoverage',
-    from: "  if (factOnly > 0) parts.push(coverageGapAttribution(feed, '改动表述'));",
+    from: "  if (factOnly > 0) parts.push(coverageGapAttribution(feed, '改动字眼'));",
     to: '  // 撤掉实现：不交代缺说明的那几行能归给谁',
     pattern: '清单说有一份被截',
     test: 'tests/unit/change-table.test.mjs',
@@ -1585,6 +1585,17 @@ const CASES = [
     from: '  const normalized = normalizeQuoteMarks(source);',
     to: '  const normalized = source;',
     pattern: '引用只差引号字形',
+    test: 'tests/unit/change-table.test.mjs',
+  },
+  {
+    // 2026-09-30：只报事实那一行的措辞。**它替文件下过一个我们没核过的结论** ——
+    // 生产实测 58 处删除类命中里 48 处是条文里的动词（"采取删除、屏蔽…"）或对照表单元格
+    // （"本标准 删除 删除"）。撤掉这一句，页面就会重新对读者说"这里检测到一处改动"。
+    label: '只报事实那一行又写成"检测到这一处改动表述"（数到的是字眼，不是改动）',
+    file: 'changeCoverage',
+    from: '  return `本站在这一句里数到了${subject}，但没能给出可核对的说明`;',
+    to: "  return '本站检测到这一处改动表述，但没能给出可核对的说明';",
+    pattern: '数到的是字眼',
     test: 'tests/unit/change-table.test.mjs',
   },
   {

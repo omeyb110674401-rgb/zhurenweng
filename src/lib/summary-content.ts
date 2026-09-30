@@ -779,10 +779,21 @@ function parseStoredChangeTable(value: unknown): ChangeTable | null {
     if (sentence === '') continue;
     const declared = Array.isArray(entry.kinds) ? entry.kinds : [];
     const kinds = CHANGE_MARKER_KINDS.filter((kind) => declared.includes(kind));
+    /**
+     * 字面（2026-09-30 加的字段）：**旧行没有它**，而页面要照字眼说那句话
+     * （「本站在这一句里数到了「删除」」）。缺就给空数组 —— 渲染层退回按 `kinds`
+     * 的展示名说（「删除」这类字眼），于是**存量行不必重跑**也能拿到诚实措辞。
+     */
+    const marks = Array.isArray(entry.marks)
+      ? entry.marks
+          .filter((mark): mark is string => typeof mark === 'string' && mark.trim() !== '')
+          .map((mark) => mark.trim())
+      : [];
     entries.push({
       type: 'fact',
       clause: typeof entry.clause === 'string' ? entry.clause.trim() : '',
       kinds: [...kinds],
+      marks,
       sentence,
     });
   }

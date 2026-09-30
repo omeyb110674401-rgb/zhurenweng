@@ -177,10 +177,10 @@ describe('issue #86：覆盖度那三句话（分母是全文，不是喂进去�
     assert.ok(markers.total >= 2, `夹具里该数得到改动表述，实际 ${markers.total}`);
     const verdict = changeCoverageVerdict(1, markers);
     assert.equal(verdict.state, 'partial');
-    assert.match(verdict.detail, new RegExp(`检测到 ${markers.total} 处`));
+    assert.match(verdict.detail, new RegExp(`按改动字眼数到 ${markers.total} 处`));
     assert.match(verdict.detail, /本页列出 1 处/);
     // 分母是什么、表里为什么只有这些 —— 这两件是我们真的知道的
-    assert.match(verdict.detail, /检测按本站读到的全部附件正文数/);
+    assert.match(verdict.detail, /分母按本站读到的全部附件正文数/);
     assert.match(verdict.detail, /表里只列模型写出、且引用能逐字对回原文的那些/);
     // 这一行是 v1 的存量形状（诊断里没有 feed）⇒ 照实说给不出答案，而不是把差额推给"我们没读到"
     assert.match(verdict.detail, /没有留下本轮的喂入记录/);
@@ -238,7 +238,7 @@ describe('issue #86：覆盖度那三句话（分母是全文，不是喂进去�
     };
     const detail = changeCoverageVerdict(1, markers, feed).detail;
     assert.match(detail, /每一份都整份进了窗口，没有一份被截/);
-    assert.match(detail, /差额来自模型没有把检测到的改动表述都写出来/);
+    assert.match(detail, /差额来自模型没有把检测到的改动字眼都写出来/);
     assert.doesNotMatch(detail, /没喂进去的那一截/);
     assert.doesNotMatch(detail, /其余的不在本站读到的那一截/);
     assert.doesNotMatch(detail, /本站没读到/);

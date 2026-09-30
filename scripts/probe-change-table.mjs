@@ -24,7 +24,7 @@ import { listNoticeAttachmentTexts } from '../src/db/repo/attachments.ts';
 import { feedPlanForSummary } from '../worker/jobs/summarize-notices.ts';
 import { parseQuotedSummary } from '../src/lib/summary-content.ts';
 import { buildChangeTable, changeTableCounts, sentenceSpans } from '../src/lib/change-table.ts';
-import { changeTableNote, countChangeMarkers, findChangeMarkers } from '../src/lib/change-coverage.ts';
+import { changeFactNote, changeTableNote, countChangeMarkers, findChangeMarkers } from '../src/lib/change-coverage.ts';
 import { draftProvenanceLine } from '../src/lib/summary-display.ts';
 import { AUDIENCE_LABELS } from '../src/lib/audience.ts';
 import { safeParseJson } from '../src/db/types.ts';
@@ -124,7 +124,7 @@ for (const row of targets) {
   for (const entry of entries) {
     if (entry.type === 'fact') {
       console.log(
-        `   • ${entry.clause || '—'} ｜（${entry.kinds.join('+')}）｜ 本站检测到这一处改动表述，但没能给出可核对的说明`,
+        `   • ${entry.clause || '—'} ｜（${entry.kinds.join('+')}）｜ ${changeFactNote(entry)}`,
       );
       console.log(`     原文：${entry.sentence.slice(0, 120)}${entry.sentence.length > 120 ? '…' : ''}`);
       continue;
