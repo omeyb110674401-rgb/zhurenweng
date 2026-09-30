@@ -233,22 +233,25 @@ SOURCES_FIXTURE_BASE=http://127.0.0.1:4170 APP_BASE_URL=http://localhost:3000 WO
 
 数据库迁移在应用首连时自动应用（`drizzle/<driver>/`）。
 
-- **CI 的现状**（issue #70 的如实记录 + 2026-09-30 更正）：`.github/workflows/ci.yml` 配的是
+- **CI 的现状（2026-09-30 实测：第一次真跑）**：`.github/workflows/ci.yml` 配的是
   「lint + tsc + 单测」与「e2e」两个 job，触发条件是 `push` / `pull_request`。
   2026-09-21 账号被停用后提交推不出去，这套 CI **从那天起一次都没跑过** —— #70 记下这句话时
-  它是**从"没有推送"推出来的，不是从 Actions 页面看到的**。**2026-09-30 账号已恢复**
-  （`gh auth status` 正常、`git ls-remote` 拿得到远端 `main`），本地积压的提交等待一次性推送。
-  在这一批真推上去、并在 Actions 里看到那次结果之前，本文件**不写"CI 在跑"**。
-  真正的门仍然是**本地手动跑 + 在 commit message 里写清数**：`npx tsc --noEmit`、
-  `npm run build`、`npm run lint`、`node --test "tests/unit/**/*.test.mjs"`、`npm run e2e`，
-  外加 `node scripts/check-test-pins.mjs`（撤掉实现要真会红的自证清单 —— **这一条 CI 里没有**）。
+  它是**从"没有推送"推出来的，不是从 Actions 页面看到的**。**2026-09-30 账号恢复，积压的
+  158 个提交一次性推上去，Actions 里第一次真的跑完了这一次**（run `36718224937`，`main`，
+  `push`）：**`E2E` 3m14s 通过、`Lint & typecheck & unit` 43s 通过**，两个 job 都是 success。
+  从这一天起 CI 是真的在跑 —— 但**它仍然不是主门**：本地那套门比它更全
+  （多一条 `check-test-pins` 撤实现自证，CI 里没有），结果照样写进 commit message。
+  那次 run 只留了两条**告警**（不是失败）：`actions/checkout@v4` 与 `actions/setup-node@v4`
+  仍在 Node 20 上、被 runner 强制跑在 Node 24；`ubuntu-latest` 2026-10-19 起迁 Ubuntu 26。
+  两条都已登记待办。
 
 - **CI 的用法约定（2026-09-30 用户要求：不要高频使用 CI）**：提交**按批推**，一次推送只触发
-  一次 CI（`push` 事件按"推"计、不按提交数计，所以积压 156 个提交一次推也只跑一次）；
-  **不拿 CI 当测试渠道**（本地门更全，CI 是跨平台的第二意见）；需要单独验一次就用
-  `workflow_dispatch` 手动触发，**不要为了"让它跑起来"而造一次推送**。`ci.yml` 里加了
-  `concurrency` + `cancel-in-progress`：同一分支上后一次推送会取消前一次还没跑完的 run，
-  免得一天连推几批把 runner 排满。
+  一次 CI（`push` 事件按"推"计、不按提交数计 —— 积压 158 个提交一次推，Actions 里就只多出
+  一个 run，**实测如此**）；**不拿 CI 当测试渠道**（本地门更全，CI 是跨平台的第二意见）；
+  需要单独验一次就用 `workflow_dispatch` 手动触发，**不要为了"让它跑起来"而造一次推送**；
+  纯文档提交可以带 `[skip ci]`（本次就用了：README 这一处更新没有触发第二次 run）。
+  `ci.yml` 里加了 `concurrency` + `cancel-in-progress`：同一分支上后一次推送会取消前一次
+  还没跑完的 run，免得一天连推几批把 runner 排满。
 
 - **手工补迁移时，`meta/_journal.json` 的 `when` 必须严格递增**（issue #66）：drizzle
   对**存量库**只执行 `when` 晚于「最后一条已应用记录」的迁移，写早了就**静默跳过** ——

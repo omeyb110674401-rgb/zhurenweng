@@ -65,11 +65,27 @@ README 原来有两处把它写成现在时：「CI（GitHub Actions）运行 li
 - **可 CI 仍然一次都没跑过新代码** —— Actions 里最后一次 run 就是 `2026-09-21T03:00:46Z`
   那次 success，对应 `b8293ad`。
 - 所以本文第二节的那句判据（"恢复托管后第一件事是看 Actions 里有没有真的绿一次"）
-  **仍未被满足**；README 已按"账号恢复了、但还没推、所以不写 CI 在跑"的口径改写，
-  等真正推上去拿到 Actions 读数再更新成实际值。
+  当时**仍未被满足**。
 
-用户同时给了一条约束：**不要再高频使用 CI**。落地方式：提交按批推（一次推送 = 一次 CI run）、
-不拿 CI 当测试渠道（本地门更全，多一条撤实现自证）、需要单独验一次走 `workflow_dispatch`；
+**三.2 判据已满足（2026-09-30 当天稍后）**：用户拍板先重写历史（把两个新暴露的串从
+`b8293ad..main` 全部提交的 blob 里抹掉，见 FOLLOWUPS「上线前扫查」那一行），再一次性推。
+推送是**普通 fast-forward**（`b8293ad..b32c201`，158 个提交），Actions 里随即出现**唯一一个**
+新 run —— 与"一次推送 = 一次 run"的约定逐字吻合。**这次 run 是绿的**：
+
+| job | 结论 | 耗时 |
+| --- | --- | --- |
+| `E2E` | success | 3m14s |
+| `Lint & typecheck & unit` | success | 43s |
+
+（run `36718224937`，`main`，`push`，2026-09-30T12:57:37Z 触发。两条告警不是失败：
+`actions/checkout@v4` 与 `actions/setup-node@v4` 仍标 Node 20、被 runner 强制跑 Node 24；
+`ubuntu-latest` 2026-10-19 起迁 Ubuntu 26 —— 两条都已登记。）
+
+所以第二节那句判据**到此成立**：CI 真的跑过、且是绿的。但**它仍不是主门** ——
+本地那套门比它更全（多一条 `check-test-pins` 撤实现自证，CI 里没有）。
+
+用户给的那条约束（**不要再高频使用 CI**）落地方式：提交按批推（一次推送 = 一次 CI run）、
+不拿 CI 当测试渠道、需要单独验一次走 `workflow_dispatch`、纯文档提交可带 `[skip ci]`；
 `ci.yml` 已加 `concurrency` + `cancel-in-progress`（同一分支后一次推送取消前一次没跑完的 run）。
 
 ## 四、这一轮做完的事
