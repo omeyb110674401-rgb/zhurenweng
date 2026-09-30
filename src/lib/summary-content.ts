@@ -7,7 +7,14 @@ import type {
   SummaryChannelKind,
 } from './ports.ts';
 import type { SummaryDiagnostics } from './summary-diagnostics.ts';
-import { CHANGE_KIND_LABELS, type ChangeKind, type ChangeMarkerCount } from './change-coverage.ts';
+import {
+  CHANGE_KIND_LABELS,
+  CHANGE_MARKER_KINDS,
+  type ChangeKind,
+  type ChangeMarkerCount,
+  type ChangeTable,
+  type ChangeTableEntry,
+} from './change-coverage.ts';
 
 /**
  * AI 摘要的领域形状（issue #4 建立，issue #55 重构为「参与导引」口径）——
@@ -188,6 +195,15 @@ export interface QuotedSummary {
   changes: QuotedAmendmentChange[];
   /** 全部附件正文里数到的改动表述数（覆盖度那句"共 N 处"的分母）；null = 没数过 */
   changeMarkers: ChangeMarkerCount | null;
+  /**
+   * 「改了哪几处」那张表的**行序与缺口**（issue #86 第二十节第 3 小节）；null = 没造过。
+   *
+   * 与 `changes` 的关系是"骨架与肉"：`changes` 是模型写出、且过了逐字反查的说明行，
+   * 这张表决定**页面上按什么顺序出现哪些行**（含只有事实、没有说明的那几行）。
+   * 它是落库**之后**由 worker 补上的（要等 `changes` 定下来才知道每行说的是哪一句），
+   * 所以 `buildQuotedSummary` 给的是 null —— 页面见 null 就退回"只列模型写出的行"。
+   */
+  changeTable: ChangeTable | null;
   /** 说明全文里检测到的小节数（覆盖度那行的分母，带"约"）；null = 没喂说明 */
   explanationSections: number | null;
   /** deadline.text 为 ISO 日期（YYYY-MM-DD）或 null */
@@ -271,22 +287,41 @@ export function normalizeChannels(
 }
 
 /**
+ * 去掉全部空白（含全角空格）。
+ *
+ * 抽出来是因为**两处判据共用它**：引用指纹（下面那个）与「改了哪几处」的按句归并
+ * （`change-table.ts` 要在去空白后的正文里定位引用）。各写一份正则，漂移的表现是
+ * "表里的行与它引用的原文对不上" —— 看起来像模型写错了，其实是我们的两把尺子不一样。
+ */
+export function stripQuoteWhitespace(text: string): string {
+  return text.replace(/[\s\u3000]+/g, '');
+}
+
+/**
  * 引用与条文比对用的「指纹」：去掉全部空白与包裹引号。
  *
  * 为什么要去空白：附件抽取出来的文本带 PDF/DOCX 的换行与缩进，模型引用时常把它们压成
  * 一行 —— 按原样 indexOf 会把**真的逐字引用**判成对不上，那种误杀等于让附件白读一遍。
  * 去掉空白只可能让比对**变松**（不会凭空造出匹配），代价是可接受的方向。
+ *
+ * 导出给 `change-table.ts` 用（第二十节第 3 小节）：它要在同一份正文里按引用各段的起点
+ * 把一行归到某一句上，用的必须是**落库那一关的同一把尺子** —— 各写一份的表现是
+ * "表里的行与它引用的原文对不上"，看起来像模型写错了。
  */
-function quoteFingerprint(text: string): string {
-  return text.replace(/[\s\u3000]+/g, '').replace(/^["'“「『]|["'”」』]$/g, '');
+export function quoteFingerprint(text: string): string {
+  return stripQuoteWhitespace(text).replace(/^["'“「『]|["'”」』]$/g, '');
 }
 
 /**
  * 短于这个字数的"引用"不构成可核对的出处。
  * 像「第三条」「本办法」这种片段在任何公文里都能蒙中，标它「摘自附件《X》」等于给一句
  * 没有信息量的话盖上"有据可查"的章 —— 宁可丢条目，不标假出处。
+ *
+ * 导出来给 `change-table.ts` 用：它靠引用各段的起点把一行归到某一句上，而"起点"只有当
+ * 这一段够长时才是可靠的（短段在长文里到处都是）。两处共用一个门槛，才不会出现
+ * "落库时够长、归句时又不算"这种自相矛盾。
  */
-const MIN_VERIFIABLE_QUOTE_CHARS = 8;
+export const MIN_VERIFIABLE_QUOTE_CHARS = 8;
 
 /**
  * 引用里的省略号（issue #86 第 1 刀）。
@@ -437,6 +472,9 @@ export function buildQuotedSummaryWithTally(
       impacts,
       changes,
       changeMarkers: changeMarkers ?? null,
+      // 表由 worker 在 `changes` 定下来之后补（见 QuotedSummary.changeTable 的注释）：
+      // 它是"行序 + 缺口"，而缺口要在反查之后才知道 —— 在这里算不了。
+      changeTable: null,
       explanationSections: explanationSections ?? null,
       deadline: {
         text:
@@ -676,6 +714,51 @@ function parseStoredMarkers(value: unknown): ChangeMarkerCount | null {
 }
 
 /**
+ * 落库的「改了哪几处」表 → 内存形状（issue #86 第二十节第 3 小节）。
+ *
+ * 宽容度与其它几段一致：**这个键是后加的，旧行没有它不是形状异常**（返回 null，
+ * 页面退回"只列模型写出的行"），单行形状不对就跳过那一行 —— 一行脏数据不该把整张表
+ * 变成占位块，更不该让存量条目白屏（#85 第三节的教训）。
+ *
+ * `described` 只存下标，所以这里**不检查下标是否越界**：越界与否要等拿到 `changes` 才知道，
+ * 那是渲染层一行 `undefined` 判断的事 —— 在这个纯解析函数里检查，就得把 `changes` 传进来，
+ * 于是"解析形状"和"核对内容"混成一件事。
+ */
+function parseStoredChangeTable(value: unknown): ChangeTable | null {
+  if (typeof value !== 'object' || value === null) return null;
+  const raw = value as Record<string, unknown>;
+  if (!Array.isArray(raw.entries)) return null;
+  const entries: ChangeTableEntry[] = [];
+  for (const item of raw.entries) {
+    if (typeof item !== 'object' || item === null) continue;
+    const entry = item as Record<string, unknown>;
+    if (entry.type === 'described') {
+      if (typeof entry.change !== 'number' || !Number.isInteger(entry.change) || entry.change < 0) {
+        continue;
+      }
+      entries.push({ type: 'described', change: entry.change });
+      continue;
+    }
+    if (entry.type !== 'fact') continue;
+    const sentence = typeof entry.sentence === 'string' ? entry.sentence.trim() : '';
+    if (sentence === '') continue;
+    const declared = Array.isArray(entry.kinds) ? entry.kinds : [];
+    const kinds = CHANGE_MARKER_KINDS.filter((kind) => declared.includes(kind));
+    entries.push({
+      type: 'fact',
+      clause: typeof entry.clause === 'string' ? entry.clause.trim() : '',
+      kinds: [...kinds],
+      sentence,
+    });
+  }
+  if (entries.length === 0) return null;
+  return {
+    entries,
+    headers: typeof raw.headers === 'number' && raw.headers > 0 ? raw.headers : 0,
+  };
+}
+
+/**
  * 安全校验 ai_summary_json（详情页渲染与检索索引前的防御性解析）：
  * 形状不符合 QuotedSummary 时返回 null，页面回退到占位文案，绝不让脏数据抛错打断渲染。
  *
@@ -752,6 +835,8 @@ export function parseQuotedSummary(value: unknown): QuotedSummary | null {
     // 改动点与它的分母是"删过又装回来"的键：三种历史形状（有值 / 空数组 / 根本没有）都要吃下
     changes: parseStoredChanges(record.changes),
     changeMarkers: parseStoredMarkers(record.changeMarkers),
+    // 表是最后加上的键：旧行没有 ⇒ null（页面退回"只列模型写出的行"）
+    changeTable: parseStoredChangeTable(record.changeTable),
     explanationSections: typeof record.explanationSections === 'number' ? record.explanationSections : null,
     deadline,
     howToComment,

@@ -1,6 +1,11 @@
 import type { ReactNode } from 'react';
 import { explanationCoverageVerdict } from '@/lib/explanation-coverage';
-import { CHANGE_KIND_LABELS, changeCoverageVerdict } from '@/lib/change-coverage';
+import {
+  CHANGE_KIND_LABELS,
+  changeCoverageVerdict,
+  changeTableNote,
+} from '@/lib/change-coverage';
+import { changeTableCounts, changeTableRows } from '@/lib/change-table';
 
 import { safeParseJson, type NoticeRecord } from '@/db/types';
 import {
@@ -234,20 +239,44 @@ export function SummaryView({
          * ③ 校验器容忍省略号（实验量到 20% 的产出丢在那儿）。
          *
          * 最后一列是**逐字原文**，与左边的说明同屏 —— 说明本身不可核对（那是模型对着原句
-         * 写的一句话），所以绝不让它脱离原文单独成立。覆盖度那行说清"检测到 N 处、本页列出
-         * M 处"，并**只说我们知道的**：差额既可能来自模型没写，也可能来自本站没读到 ——
-         * 2026-09-28 实测（正文整份都在窗口内，同一输入四遍列出 8/2/3/8 行）证明前一种才是
-         * 主因，原先那句"其余的不在本站读到的那一截文本里"是在替差额认领一个我们不知道的原因。
+         * 写的一句话），所以绝不让它脱离原文单独成立。
+         *
+         * **2026-09-28 第二十节第 3 小节：行改由程序定。** 上面这套地基有一处漏洞是实测出来的
+         * （§19.3）：表里只有模型写出来的行，同一份输入跑四遍是 8 / 2 / 3 / 8 行，而读者
+         * **看不出少了** —— 覆盖度那行只说"检测到 14 处、列出 2 处"，没有任何办法把缺的找出来。
+         * 现在按句（官方那串"一、二、三…"的条目）归并：每一句一行，模型写得出可核对说明的
+         * 照旧渲染，写不出的那一行只报「本站检测到这一处改动表述，但没能给出可核对的说明」，
+         * 标题句（不含条款内容、下面挂着子条目）不单独成行。抖动于是从"表少了一半"（不可见）
+         * 变成"某几行的说明暂时缺着"（可见）。判据在 `lib/change-table.ts`，页面只按下标取。
          */}
         {(() => {
           const changes = summary.changes;
-          if (changes.length === 0) return null;
+          const table = summary.changeTable;
+          if (changes.length === 0 && table === null) return null;
+          /**
+           * 表里的行由**程序**定（`summary.changeTable`，见 lib/change-table.ts）；没有这张表
+           * 的老行退回旧样子：只列模型写出的那几行。判据与验收脚本共用 `changeTableRows`。
+           */
+          const entries = changeTableRows(changes, table);
+          const { described, factOnly } = changeTableCounts(entries);
+          const note =
+            table !== null && summary.changeMarkers
+              ? changeTableNote({
+                  markers: summary.changeMarkers.total,
+                  rows: entries.length,
+                  described,
+                  factOnly,
+                  headers: table.headers,
+                }).detail
+              : summary.changeMarkers
+                ? changeCoverageVerdict(changes.length, summary.changeMarkers).detail
+                : null;
           return (
             <div className="summary-section" data-testid="summary-changes">
               <h2 className="summary-section-title">改了哪几处</h2>
-              {summary.changeMarkers ? (
+              {note ? (
                 <p className="summary-section-note" data-testid="summary-change-coverage">
-                  {changeCoverageVerdict(changes.length, summary.changeMarkers).detail}
+                  {note}
                 </p>
               ) : null}
               <div
@@ -266,25 +295,54 @@ export function SummaryView({
                     </tr>
                   </thead>
                   <tbody>
-                    {changes.map((change, index) => (
-                      <tr key={index}>
-                        {/* 原文没写条号时留一个破折号，而不是空着 —— 空格子看起来像渲染坏了 */}
-                        <th scope="row">{change.clause === '' ? '—' : change.clause}</th>
-                        <td>{CHANGE_KIND_LABELS[change.kind]}</td>
-                        <td>{change.text}</td>
-                        <td>
-                          <p>{change.quote}</p>
-                          <p className="draft-point-source" data-testid="summary-change-source">
-                            {change.source
-                              ? draftProvenanceLine(
-                                  change.source,
-                                  '出处：未标注（这条的引用没能反查到本轮喂入的附件）',
-                                )
-                              : '出处：未标注（这条的引用没能反查到本轮喂入的附件）'}
-                          </p>
-                        </td>
-                      </tr>
-                    ))}
+                    {entries.map((entry, index) => {
+                      if (entry.type === 'fact') {
+                        /*
+                         * 只报事实的那一行（issue #86 第二十节第 3 小节）：程序在这一句里数到了
+                         * 改动表述，但模型没写出可核对的说明（或那一行没通过逐字反查）。
+                         * 这一行的**存在本身**就是交代 —— 从前的表里它整个不存在，读者看不出少了。
+                         * 「改了什么」那一格照实说"没能给出说明"，绝不拿原句去冒充说明。
+                         */
+                        return (
+                          <tr key={index} data-testid="summary-change-row-fact">
+                            <th scope="row">{entry.clause === '' ? '—' : entry.clause}</th>
+                            <td>
+                              {entry.kinds.length > 0
+                                ? entry.kinds.map((kind) => CHANGE_KIND_LABELS[kind]).join('、')
+                                : '—'}
+                            </td>
+                            <td data-testid="summary-change-fact-note">
+                              本站检测到这一处改动表述，但没能给出可核对的说明
+                            </td>
+                            <td>
+                              <p>{entry.sentence}</p>
+                            </td>
+                          </tr>
+                        );
+                      }
+                      const change = changes[entry.change];
+                      // 下标越界（理论上不该有）：宁可少一行，也不能印一行空白
+                      if (!change) return null;
+                      return (
+                        <tr key={index} data-testid="summary-change-row-described">
+                          {/* 原文没写条号时留一个破折号，而不是空着 —— 空格子看起来像渲染坏了 */}
+                          <th scope="row">{change.clause === '' ? '—' : change.clause}</th>
+                          <td>{CHANGE_KIND_LABELS[change.kind]}</td>
+                          <td>{change.text}</td>
+                          <td>
+                            <p>{change.quote}</p>
+                            <p className="draft-point-source" data-testid="summary-change-source">
+                              {change.source
+                                ? draftProvenanceLine(
+                                    change.source,
+                                    '出处：未标注（这条的引用没能反查到本轮喂入的附件）',
+                                  )
+                                : '出处：未标注（这条的引用没能反查到本轮喂入的附件）'}
+                            </p>
+                          </td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>

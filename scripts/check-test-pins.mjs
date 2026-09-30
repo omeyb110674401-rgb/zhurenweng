@@ -88,6 +88,9 @@ const TARGETS = {
   impactDisplay: 'src/lib/impact-display.ts',
   // issue #86 第 2 刀：「改了哪几处」的覆盖度（改动表述计数 + 三态判词）
   changeCoverage: 'src/lib/change-coverage.ts',
+  // issue #86 第二十节第 3 小节：那张表**行由程序定**（按句归并、缺口成行、标题不成行）。
+  // 页面只按下标取，所以判据全在这个纯函数文件里 —— 页面 .tsx 进不了自证框架。
+  changeTable: 'src/lib/change-table.ts',
   // issue #86 第 3 刀：喂入侧的档位与预算。这一处撤掉之后**一个字都不会报错** ——
   // 档位判错就是"还是老样子"（回到标准档，页面照常出摘要），喂少了只是模型看到的东西变少，
   // 而那正是这一刀要消灭的静默失败，所以它必须有"撤掉实现必须变红"的钉子。
@@ -432,9 +435,12 @@ const CASES = [
     test: 'tests/unit/summary-draft-points.test.mjs',
   },
   {
+    // 2026-09-28：去空白这一步抽成了 `stripQuoteWhitespace`（引用指纹与「改了哪几处」的
+    // 按句归并**共用一份口径**），所以靶点跟着挪到那一行 —— 撤掉它，指纹就退回逐字符比对，
+    // PDF 换行让真引用永远对不上。
     label: '出处比对退化成逐字符比对（PDF 换行让真引用永远对不上）',
     file: 'summaryContent',
-    from: "  return text.replace(/[\\s\\u3000]+/g, '').replace(/^[\"'“「『]|[\"'”」』]$/g, '');",
+    from: "  return text.replace(/[\\s\\u3000]+/g, '');",
     to: '  return text;',
     pattern: '引用必须逐字落在喂给模型的条文里',
     test: 'tests/unit/summary-draft-points.test.mjs',
@@ -1614,6 +1620,73 @@ const CASES = [
     to: '   - **复述条文也算影响**（2026-09-28',
     pattern: '复述条文不算影响',
     test: 'tests/unit/summary-impacts.test.mjs',
+  },
+  // issue #86 第二十节第 3 小节：那张表**行由程序定**。这一族改动全都有一个共同点 ——
+  // 撤掉之后页面照常渲染、日志一个字不报，只是表又退回"只有模型写出来的行"，
+  // 而那种缺**读者看不出来**（这正是要改它的原因）。所以下面五条一条都不能少。
+  {
+    label: '缺口不落库（模型没写说明的那几句从表里消失，读者看不出少了）',
+    file: 'changeTable',
+    from: "        type: 'fact',",
+    to: "        type: 'described',",
+    pattern: '每一句一行',
+    test: 'tests/unit/change-table.test.mjs',
+  },
+  {
+    label: '标题句也印成一行（把分母里混着的那个小标题摆到读者面前）',
+    file: 'changeTable',
+    from: '    if (isHeaderSentence(sentence, [nextInDocument, nextWithMarkers])) {',
+    to: '    if (false) {',
+    pattern: '每一句一行',
+    test: 'tests/unit/change-table.test.mjs',
+  },
+  {
+    label: '归句退化回"取它起始的那一句"（附件里一换行，那一行说明就被挪到表尾）',
+    file: 'changeTable',
+    from: '    return withMarkers.length > 0 ? withMarkers[0] : touched[0];',
+    to: '    return touched[0];',
+    pattern: '换行压成一行',
+    test: 'tests/unit/change-table.test.mjs',
+  },
+  {
+    label: '表尾不再兜底未归属的行（一行说明可以整个从页面上消失）',
+    file: 'changeTable',
+    from: '    if (!used.has(index)) entries.push({ type: \'described\', change: index });',
+    to: '    if (false) entries.push({ type: \'described\', change: index });',
+    pattern: '一行都不许丢',
+    test: 'tests/unit/change-table.test.mjs',
+  },
+  {
+    label: '没有表的老行不再退回旧形状（存量摘要那一段会变成空白）',
+    file: 'changeTable',
+    from: '  if (table !== null && table.entries.length > 0) return table.entries;',
+    to: '  if (true) return table?.entries ?? [];',
+    pattern: '没有表就走旧形状',
+    test: 'tests/unit/change-table.test.mjs',
+  },
+  {
+    label: '表不落库（页面永远拿不到"行由程序定"，这一版改动等于没做）',
+    file: 'summarize',
+    from: '          summaryJson: JSON.stringify({ ...quoted, changeTable }),',
+    to: '          summaryJson: JSON.stringify(quoted),',
+    pattern: '改动表连同',
+    test: 'tests/e2e/summary-genre-and-explanations.test.mjs',
+  },
+  {
+    label: '读侧不再解析这张表（落库了也读不回来，页面照旧只列模型写出的行）',
+    file: 'summaryContent',
+    from: '  if (!Array.isArray(raw.entries)) return null;',
+    to: '  if (true) return null;',
+    pattern: 'build → parse 等价',
+    test: 'tests/unit/change-table.test.mjs',
+  },
+  {
+    label: '那句交代不再提"有几行只报事实"（缺说明这件事又变得看不见）',
+    file: 'changeCoverage',
+    from: '    return { rows, factOnly, detail: \'附件正文里没有数到成文的修改表述，这一栏给不出「共几处」\' };',
+    to: '    return { rows, factOnly, detail: `已列出全部 ${rows} 行` };',
+    pattern: '数不到改动表述',
+    test: 'tests/unit/change-table.test.mjs',
   },
 ];
 

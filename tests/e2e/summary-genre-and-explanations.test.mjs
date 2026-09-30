@@ -6,7 +6,8 @@ import { after, before, describe, it } from 'node:test';
 import Database from 'better-sqlite3';
 
 import { describeDiagnostics, parseSummaryDiagnostics } from '../../src/lib/summary-diagnostics.ts';
-import { countChangeMarkers } from '../../src/lib/change-coverage.ts';
+import { countChangeMarkers, findChangeMarkers } from '../../src/lib/change-coverage.ts';
+import { sentenceSpans } from '../../src/lib/change-table.ts';
 
 /**
  * 端到端（issue #76 起步，issue #85 起只剩"体裁 + 编制说明要点"这两半）：
@@ -620,5 +621,47 @@ describe('issue #86：改动点落库（引用池与覆盖度分母）', () => {
       '判据是"有没有可核对的依据"，不是"体裁标签等不等于修正案"',
     );
     assert.ok(json.changes[0].source, '每行仍要由程序反查出出处');
+  });
+
+  /**
+   * issue #86 第二十节第 3 小节：那张表**落库了没有**，以及它的形状对不对。
+   *
+   * 为什么在 e2e 里钉这一处：造表的是 worker（`worker/jobs/summarize-notices.ts`），
+   * 而 e2e 的 worker 子进程跑的就是源码 —— 撤掉"把表写进 JSON"这一行，这里当场变红；
+   * 换成单测就钉不住（单测是自己调 `buildChangeTable`，验证不了"有没有落库"）。
+   *
+   * 判据一律 import 管线自己的实现（`sentenceSpans` / `findChangeMarkers` / `countChangeMarkers`），
+   * 脚本里不另写一份 —— 这一段要回答的是"表与它声称覆盖的那些句子，是不是同一份判据算出来的"。
+   */
+  it('改动表连同"缺口"一起落库，且行序与句子全部对得上（行由程序定）', () => {
+    const { json } = readSummary(AMENDED_ID);
+    assert.ok(json.changeTable, '表必须落库：它是页面上"行由程序定"的唯一依据');
+    const text = `${AMENDED_TEXT} ${EXPLANATION_TEXT}`;
+    const withMarkers = sentenceSpans(text)
+      .map((span) => text.slice(span.start, span.end).trim())
+      .filter((sentence) => sentence !== '' && findChangeMarkers(sentence).length > 0);
+
+    const entries = json.changeTable.entries;
+    const described = entries.filter((entry) => entry.type === 'described');
+    const factOnly = entries.filter((entry) => entry.type === 'fact');
+    assert.equal(described.length, json.changes.length, '每一行改动说明都要在表里有位置，且只出现一次');
+    assert.deepEqual(
+      [...described.map((entry) => entry.change)].sort((a, b) => a - b),
+      json.changes.map((_, index) => index),
+      '下标覆盖 0..n-1 各一次：少一个就是有一行说明被表丢了',
+    );
+    assert.ok(factOnly.length > 0, '这份夹具里有一句改动表述没有任何一行覆盖它（说明里那句"删除了…"）');
+    for (const entry of factOnly) {
+      assert.ok(
+        countChangeMarkers(entry.sentence).total > 0,
+        `只报事实的行必须真的数到了改动表述：${entry.sentence}`,
+      );
+      assert.ok(containsVerbatim(text, entry.sentence), '那一行印的原文必须逐字来自我们读到的正文');
+    }
+    assert.equal(
+      entries.length + json.changeTable.headers,
+      withMarkers.length,
+      '表里的行 + 不单独成行的标题句 = 正文里所有带改动表述的句子（多一句少一句都是漏）',
+    );
   });
 });

@@ -33,6 +33,15 @@
  *       # id 可写前 8 位（前缀必须唯一，匹配到多条会当场报错退出）。
  *
  * 清空只把它们放回 pending；真正重跑要等下一轮摘要任务（或重启 worker 立刻跑一轮）。
+ *
+ * ⚠️ **点名重跑的条目要落在队列前 50 名内**（2026-09-30 实测补记）：队列口径是
+ * `ai_summary_json IS NULL AND summary_status='pending' AND status <> 'closed'`，按
+ * `fetched_at, id` 升序取前 50（见 `listNoticesForSummary`）。两个坑：① 排除条件是
+ * **`'closed'`** 而不是 `'expired'` —— 按后者量会把已截止条目算进队列，得出一个"队列堵了"
+ * 的假数（doc 86 §22.4 里我就这样骗过自己一次，还差点去加一个"点名插队"的能力）；
+ * ② 每轮抓取会刷新 `fetched_at`，所以一条刚被重抓的老条目会排到队尾。**重跑前先量位置**，
+ * 别信"清空了就会跑"。
+ *
  * 恢复：`#BACKUP {"id":…,"previousSummaryJson":…}` 每行一条，按 id 写回 `notices.ai_summary_json`
  * 并把 `summary_status` 置回 `done` 即可。
  */

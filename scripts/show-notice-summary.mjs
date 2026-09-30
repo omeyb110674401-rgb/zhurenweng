@@ -13,6 +13,9 @@
  *     `附件《本页正文（公告里直接给出的条文）》` —— 页面是对的、量具在说谎，
  *     正是 #82/#85/#86 反复出现的那一族，第六次）
  *   - `changeCoverageVerdict`（"还差多少"那三句话）
+ *   - `changeTableNote`（第二十节第 3 小节起：表由程序定行，这一句交代几行有说明、几行只报事实。
+ *     **2026-09-28 补**：表换成"行由程序定"之后，这个脚本必须跟着换 —— 它印的是
+ *     "读者点开这条会看到什么"，印一张旧形状的表就是这只量具第八次说谎）
  *   - `parseQuotedSummary`（读侧容错：`impacts` / `changes` / `changeMarkers` 三个键都由它
  *     按旧落库形状兜底，判形状异常会让存量条目白屏 —— #85 第三节的教训）
  *
@@ -29,7 +32,8 @@ import {
   IMPACT_KIND_LABELS,
 } from '../src/lib/summary-content.ts';
 import { shouldRenderImpacts } from '../src/lib/impact-display.ts';
-import { changeCoverageVerdict } from '../src/lib/change-coverage.ts';
+import { changeCoverageVerdict, changeTableNote } from '../src/lib/change-coverage.ts';
+import { changeTableCounts, changeTableRows } from '../src/lib/change-table.ts';
 import { draftProvenanceLine } from '../src/lib/summary-display.ts';
 import { parseSummaryDiagnostics, describeDiagnostics } from '../src/lib/summary-diagnostics.ts';
 import { AUDIENCE_LABELS } from '../src/lib/audience.ts';
@@ -94,15 +98,41 @@ for (const row of rows) {
     console.log('\n  ── 可能的争议点：本页不渲染（一条都没有） ──');
   }
 
-  // 「改了哪几处」——表 + 覆盖度那三句话
+  // 「改了哪几处」——表 + 交代那一句（与页面同源：`changeTableNote` / `changeCoverageVerdict`
+  // 都是 import 的，脚本不另写一份 —— 这个脚本是验收门，它印的必须是**读者真会看到的**）
   const changes = parsed.changes;
   const markers = parsed.changeMarkers;
-  if (changes.length > 0) {
-    const verdict = markers ? changeCoverageVerdict(changes.length, markers) : null;
+  const table = parsed.changeTable;
+  const entries = changeTableRows(changes, table);
+  if (entries.length > 0) {
+    const { described, factOnly } = changeTableCounts(entries);
     console.log('\n  ── 改了哪几处 ──');
-    if (verdict) console.log(`     ${verdict.detail}`);
-    else console.log('     （这一行的改动表述计数没落库，给不出"还差多少"）');
-    for (const item of changes) {
+    if (table !== null && markers) {
+      console.log(
+        `     ${changeTableNote({
+          markers: markers.total,
+          rows: entries.length,
+          described,
+          factOnly,
+          headers: table.headers,
+        }).detail}`,
+      );
+    } else if (markers) {
+      console.log(`     ${changeCoverageVerdict(changes.length, markers).detail}`);
+    } else {
+      console.log('     （这一行的改动表述计数没落库，给不出"还差多少"）');
+    }
+    for (const entry of entries) {
+      if (entry.type === 'fact') {
+        console.log(
+          `   • ${entry.clause || '—'} ｜ ${entry.kinds.join('+') || '—'} ｜ ` +
+            '本站检测到这一处改动表述，但没能给出可核对的说明',
+        );
+        console.log(`     原文（本句）：${entry.sentence}`);
+        continue;
+      }
+      const item = changes[entry.change];
+      if (!item) continue;
       console.log(`   • ${item.clause || '—'} ｜ ${item.kind} ｜ ${item.text}`);
       console.log(`     原文：${item.quote}`);
       console.log(`     ${draftProvenanceLine(item.source, '出处：（无出处）')}`);

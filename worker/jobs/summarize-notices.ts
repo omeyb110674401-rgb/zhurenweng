@@ -27,6 +27,7 @@ import {
 import { listNoticeAttachmentTexts } from '../../src/db/repo/attachments.ts';
 import { countExplanationSections } from '../../src/lib/explanation-coverage.ts';
 import { countChangeMarkers } from '../../src/lib/change-coverage.ts';
+import { buildChangeTable } from '../../src/lib/change-table.ts';
 import type { DraftSource } from '../../src/lib/ports.ts';
 import { llmReady, llmUnavailableReason } from '../../src/lib/llm-availability.ts';
 import { sendTaskFailureAlert } from '../../src/lib/alerts.ts';
@@ -300,9 +301,17 @@ export const summarizeNoticesJob: Job = {
       // **正文那一份也要算进分母**（第十六节）：正文本身就是条文的那些条目一份附件都没有，
       // 分母不算它的话，页面那行会写"附件正文里没有数到成文的修改表述" —— 而正文里明明有。
       const bodyAsDraft = draftSources.some((source) => source.origin === 'body');
-      const changeMarkerCount = countChangeMarkers(
-        [...fullTexts.map((row) => row.text), ...(bodyAsDraft ? [target.bodyText ?? ''] : [])].join(' '),
-      );
+      /**
+       * 数分母用的那一份文本：**全部附件正文**（不是喂进去的那一截），正文本身就是条文的
+       * 那些条目再把正文接在后面。**同一个局部变量喂给两处** —— 分母（`countChangeMarkers`）
+       * 与那张表的骨架（`buildChangeTable`）：两者若各拼一次文本，页面上"检测到 N 处"
+       * 与"表里有几行"就会各说各话，而两个数看起来都像真的（这一族问题里最难查的一种）。
+       */
+      const changeText = [
+        ...fullTexts.map((row) => row.text),
+        ...(bodyAsDraft ? [target.bodyText ?? ''] : []),
+      ].join(' ');
+      const changeMarkerCount = countChangeMarkers(changeText);
       const explanationSections = draftSources.some((source) => source.role === 'explanation')
         ? countExplanationSections(
             fullTexts
@@ -330,6 +339,13 @@ export const summarizeNoticesJob: Job = {
           impacts: quoted.impacts.length,
           changes: quoted.changes.length,
         };
+        /**
+         * 表在**反查之后**才造得出来（"哪一行说的是哪一句"要等 `changes` 定下来），
+         * 所以它是落库前补上去的，而不是 `buildQuotedSummaryWithTally` 的返回值。
+         * 它只用到 `quoted.changes` 的 `quote` 与那一份 `changeText` —— 后者正是上面数分母
+         * 用的同一个字符串，两个数因此不可能分家。
+         */
+        const changeTable = buildChangeTable(changeText, quoted.changes);
         // 诊断与摘要**一起**落库：它描述的就是这一列摘要是哪一次调用产出的
         const diagnostics = buildSummaryDiagnostics(summary.diagnostics, {
           model,
@@ -342,7 +358,7 @@ export const summarizeNoticesJob: Job = {
         });
         await saveNoticeSummary({
           id: target.id,
-          summaryJson: JSON.stringify(quoted),
+          summaryJson: JSON.stringify({ ...quoted, changeTable }),
           summaryModel: model,
           diagnosticsJson: JSON.stringify(diagnostics),
         });

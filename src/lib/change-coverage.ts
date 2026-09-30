@@ -40,10 +40,19 @@ export const CHANGE_KIND_LABELS: Record<ChangeKind, string> = {
 };
 
 /**
+ * 正文里**数得到**的改动表述类型（`other` 不在其中：它是模型给的分类兜底桶，
+ * 不是任何一种公文写法）。顺序 = `countChangeMarkers` 的汇总顺序，也是页面上的展示顺序。
+ */
+export const CHANGE_MARKER_KINDS = ['modify', 'add', 'delete', 'renumber'] as const;
+
+/** 一处在正文里数到的改动表述的类型 */
+export type ChangeMarkerKind = (typeof CHANGE_MARKER_KINDS)[number];
+
+/**
  * 各类改动在正文里的写法。刻意写成"官方会怎么写"，不是"我们想找什么"：
  * 「修改为 / 修改如下 / 删去 / 增加一条 / 作为第X条」都是公文的固定说法。
  */
-const KIND_PATTERNS: Record<Exclude<ChangeKind, 'other'>, RegExp> = {
+const KIND_PATTERNS: Record<ChangeMarkerKind, RegExp> = {
   modify: /修改为|修改如下|作.{0,4}修改/g,
   add: /增加一条|新增.{0,8}条/g,
   delete: /删去|删除/g,
@@ -58,7 +67,7 @@ export interface ChangeMarkerCount {
 
 /** 一处在正文里数到的改动表述（位置由 `findChangeMarkers` 给，供探针与"按处列表"用）。 */
 export interface ChangeMarker {
-  kind: Exclude<ChangeKind, 'other'>;
+  kind: ChangeMarkerKind;
   /** 命中在原文里的起始下标 */
   index: number;
   /** 命中的字面（如「修改为」「增加一条」） */
@@ -128,4 +137,85 @@ export function changeCoverageVerdict(listed: number, markers: ChangeMarkerCount
       '检测按本站读到的全部附件正文数；表里只列模型写出、且引用能逐字对回原文的那些，' +
       '差额既可能来自模型没写，也可能来自本站没读到的那部分',
   };
+}
+
+/**
+ * 「改了哪几处」那张表里的一行是**怎么来的**（issue #86 第二十节第 3 小节）。
+ *
+ * 为什么要多这一层：这张表原先**只有模型写出来的行**，于是同一个输入跑两遍可以只有 2 行
+ * （实测 8 / 2 / 3 / 8），而读者从页面上**看不出来**少了什么 —— 覆盖度那行只说"检测到 14 处、
+ * 列出 2 处"，读者没有任何办法把缺的那些找出来。现在**行由程序定**：每一句官方条目一行，
+ * 模型写得出可核对说明的照旧渲染，写不出的那一行只报事实。抖动于是从
+ * "表少了一半"（不可见）变成"某几行的说明暂时缺着"（可见）。
+ *
+ * 两个来源的证据地位不同，所以用联合类型分开，而不是塞一个可空的 `text`：
+ * - `described`：指向 `QuotedSummary.changes` 的下标。那一行经过逐字反查，是事实 + 说明；
+ * - `fact`：程序自己数出来的（原句 + 数到的改动表述类型），**没有**模型的说明 ——
+ *   页面据 `type` 决定"改了什么"那一格印什么，不靠"text 是不是空串"来猜。
+ *
+ * 只存下标不存文本：`described` 那一行的每个字在 `changes` 里已经有了，复制一份就是给
+ * "同一件事两处记载、迟早分家"留门。
+ */
+export type ChangeTableEntry =
+  | { type: 'described'; change: number }
+  | { type: 'fact'; clause: string; kinds: ChangeMarkerKind[]; sentence: string };
+
+/** 「改了哪几处」的整张表：程序定的行序 + 几个不单独成行的标题句。 */
+export interface ChangeTable {
+  entries: ChangeTableEntry[];
+  /**
+   * 命中改动表述、但按标题判据**不单独成行**的句子数。
+   *
+   * 存下来是为了让页面那句交代说得完整：只说"列出 N 行"而不提这几句，
+   * 读者无法判断表是不是全的（而"检测到 14 处"这个分母里本来就混着标题 —— 见 §20.1）。
+   */
+  headers: number;
+}
+
+/** 那张表要对读者交代的东西（`detail` 是页面与验收脚本共用的一句话）。 */
+export interface ChangeTableNote {
+  /** 表里列出的行数 */
+  rows: number;
+  /** 其中只报了事实（模型没写出可核对说明）的行数 */
+  factOnly: number;
+  detail: string;
+}
+
+/**
+ * 「改了哪几处」那张表对读者的交代（issue #86 第二十节第 3 小节）。
+ *
+ * **刻意不复用 `CoverageVerdict`**：那个类型里的 `partial` 意思是"列得比数到的少"，
+ * 而这一版表**不可能少列**（行由程序定）。缺的只可能是某几行的说明 —— 两件事共用一个状态名，
+ * 下一个读代码的人迟早把它们当成一件事（"两份词表打架"是 #79 的教训）。
+ *
+ * 数字只报我们真的掌握的：分母（本站读到的全部附件正文里数到几处）、行数、其中几行有说明、
+ * 几句是标题。**不报"改了几条"** —— 同一句里可以数出三处（实测：一句总述里三个"修改为"），
+ * 分母不是条款数。
+ */
+export function changeTableNote(input: {
+  markers: number;
+  rows: number;
+  described: number;
+  factOnly: number;
+  headers: number;
+}): ChangeTableNote {
+  const rows = input.rows;
+  const factOnly = input.factOnly;
+  if (input.markers === 0) {
+    return { rows, factOnly, detail: '附件正文里没有数到成文的修改表述，这一栏给不出「共几处」' };
+  }
+  const parts = [`正文里检测到 ${input.markers} 处修改表述；本页按句归并成 ${rows} 行`];
+  if (factOnly === 0) {
+    parts.push(`，${input.described} 行都附了逐字原文与可核对的说明`);
+  } else {
+    parts.push(
+      ` —— ${input.described} 行附了逐字原文与可核对的说明，` +
+        `${factOnly} 行只报「检测到改动表述」这一事实`,
+    );
+  }
+  if (input.headers > 0) {
+    parts.push(`；另有 ${input.headers} 句是小标题（不含条款内容），不单独列行`);
+  }
+  parts.push('。检测按本站读到的全部附件正文数。');
+  return { rows, factOnly, detail: parts.join('') };
 }

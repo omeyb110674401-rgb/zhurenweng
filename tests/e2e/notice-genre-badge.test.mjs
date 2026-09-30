@@ -167,6 +167,83 @@ describe('issue #76：详情页体裁角标', () => {
   });
 
   /**
+   * issue #86 第二十节第 3 小节：**行由程序定**的那张表怎么渲染。
+   *
+   * 为什么这一条非有不可：这一版改动把"哪些行"从模型手里拿走（`changeTable`），
+   * 而页面的判据在 `.tsx` 里 —— 钉不住（`check-test-pins.mjs` 的第 1 条硬规则：e2e 跑的是
+   * `.next` 构建产物，改 `src/app/**` 对它无效，撤了也不红）。所以这一条用**注入**把
+   * 三种行同屏摆出来：有说明的、只报事实的、以及不单独成行的标题。
+   *
+   * 注入的 `changeMarkers.total` 刻意**大于**行数（4 处 / 3 行）：读者看到的必须是
+   * "检测到 4 处表述"与"归并成 3 行"两个数并列，而不是把 4 说成 3。
+   */
+  it('有表就按表的行序渲染：只报事实的行也在，标题句不在，措辞换成"按句归并"', async () => {
+    const FACT_HEAD = '将“交通主管部门”统一修改为“交通运输主管部门”，将“贫困地区”修改为“欠发达地区”。';
+    const FACT_DELETE = '删去第七条第二款。';
+    const DESCRIBED_QUOTE = '第二条修改为：从事前款活动应当取得许可。';
+    const db = new Database(dbFile);
+    try {
+      const original = db
+        .prepare('select ai_summary_json as json from notices where title = ?')
+        .get(AMENDMENT_TITLE)?.json;
+      assert.ok(original, '前提：这条要有摘要');
+      const withTable = JSON.parse(original);
+      withTable.changes = [
+        {
+          clause: '第二条',
+          kind: 'modify',
+          text: '取得许可后方可从事',
+          quote: DESCRIBED_QUOTE,
+          source: '某某法（修正草案征求意见稿）.docx',
+          sourceUrl: null,
+        },
+      ];
+      withTable.changeMarkers = { total: 4, byKind: { modify: 2, add: 1, delete: 1, renumber: 0 } };
+      withTable.changeTable = {
+        entries: [
+          { type: 'fact', clause: '', kinds: ['modify'], sentence: FACT_HEAD },
+          { type: 'described', change: 0 },
+          { type: 'fact', clause: '第七条', kinds: ['delete'], sentence: FACT_DELETE },
+        ],
+        headers: 1,
+      };
+      db.prepare('update notices set ai_summary_json = ? where title = ?').run(
+        JSON.stringify(withTable),
+        AMENDMENT_TITLE,
+      );
+    } finally {
+      db.close();
+    }
+
+    const html = await detailOf(AMENDMENT_TITLE);
+    assert.match(html, /data-testid="summary-change-table"/);
+    assert.equal(
+      html.split('data-testid="summary-change-row-fact"').length - 1,
+      2,
+      '两行只有事实：检测到表述、但模型没写出可核对的说明',
+    );
+    assert.equal(html.split('data-testid="summary-change-row-described"').length - 1, 1);
+    assert.ok(html.includes('本站检测到这一处改动表述，但没能给出可核对的说明'), '照实说没能给出说明');
+    assert.ok(html.includes(FACT_HEAD), '只报事实的行要把那一句原文印出来给读者自己看');
+    assert.ok(html.includes(FACT_DELETE));
+    assert.ok(
+      !html.includes('对部分条文作以下修改：</td>') && !html.includes('下面的子条目不单独成行'),
+      '标题句不单独成行（headers 那一句只在交代里出现）',
+    );
+    // 行序 = 表里的行序（程序定的），不是模型给出的顺序
+    const atHead = html.indexOf(FACT_HEAD);
+    const atDescribed = html.indexOf(DESCRIBED_QUOTE);
+    const atDelete = html.indexOf(FACT_DELETE);
+    assert.ok(atHead < atDescribed && atDescribed < atDelete, '按表里的行序渲染');
+    assert.match(html, /data-testid="summary-change-coverage"/);
+    assert.ok(html.includes('检测到 4 处修改表述'), '分母照旧来自落库的 changeMarkers');
+    assert.ok(html.includes('按句归并成 3 行'), '表由程序定，所以说得清"归并成几行"');
+    assert.ok(html.includes('2 行只报「检测到改动表述」这一事实'), '几行缺说明要说出来');
+    assert.ok(html.includes('另有 1 句是小标题'), '不单独成行的标题句也要交代');
+    assert.ok(!html.includes('本页列出'), '旧措辞（"列出几处"）不许再出现 —— 那一版表会少行');
+  });
+
+  /**
    * issue #79 的教训：**空壳比没有更坏**。一段"标题写着「改了哪几处」、内容却是空的"栏目，
    * 传达的不是"这次没改动"，而是"这一栏没东西可看" —— 后者不该占一个标题。
    * 所以判据是"一行都没有 ⇒ 整块不渲染"，而不是"计数为 0 就不渲染"。
@@ -180,6 +257,8 @@ describe('issue #76：详情页体裁角标', () => {
       const cleared = JSON.parse(original);
       cleared.changes = [];
       cleared.changeMarkers = { total: 3, byKind: { modify: 1, add: 1, delete: 1, renumber: 0 } };
+      // 表也要清掉：留着它，页面就会按"行由程序定"渲染出上面那条用例注入的行
+      delete cleared.changeTable;
       db.prepare('update notices set ai_summary_json = ? where title = ?').run(
         JSON.stringify(cleared),
         AMENDMENT_TITLE,
