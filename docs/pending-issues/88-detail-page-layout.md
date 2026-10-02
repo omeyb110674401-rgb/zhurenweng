@@ -267,3 +267,23 @@
 1. 门：`tsc` / `eslint` / pin 撤实现自证 / 单测 / e2e 全绿
 2. **人工过一遍新产出**（用户已定的验收方式）：读 3–5 条，确认「影响：主体 · 方面」是**从条文判出来的**、不是标题复述
 3. 量：新产出的 `who` 长度分布（≤20 字占比）与 `point` 覆盖率
+
+## 八、开发机上的工具（**不在仓库里**，但下一刀要用）
+
+这些脚本放在 `.git/` 下（未被跟踪），上下文压缩或换机器后会不知道它们存在 —— 记在这里：
+
+| 脚本 | 干什么 | 关键注意 |
+| --- | --- | --- |
+| `.git/zw-measure.mjs` | **CDP 直连 headless Chrome 读渲染后的几何**：横向溢出 / 主栏右栏宽 / 首屏能不能看到判读 / 行宽 / CTA 计数 / 某个 testid 在不在 | `node .git/zw-measure.mjs <url> 1440,900 375,800`；硬编码 Windows 上的 Chrome 路径；**这一刀的两个缺陷都是它抓的**，e2e 抓不到（没有浏览器） |
+| `.git/zw-shot.ps1` | 固定视口截图 | `-Url <url> -Out <**绝对路径**>.png -Size '1440,900'`。**相对路径会静默不出产物** |
+| `.git/zw-dump-notice.mjs` + `.git/zw-dump-run.sh` | 只读导出线上某条公示的**完整行**（含 `ai_summary_json`），供本地渲染用真实内容 | 先 `zw-push-tmp.ps1` 推到 `/tmp/zw-probe/.git/`，再 `workbench exec … sh /tmp/zw-probe/.git/zw-dump-run.sh <id>` |
+| `.git/zw-seed-local.mjs` | 把导出的行写进**本地** `data/zhurenweng.db`（e2e 用各自的临时库，互不影响） | 两个坑都修过：导出 JSON 带 PowerShell 的 BOM（要剥）、`notices.source_id` 有外键（要先补一行 `sources`） |
+| `.git/zw-push-tmp.ps1` | 把开发机文件推到服务器 `/tmp/zw-probe` | `-Dest /tmp/zw-probe -Files @(…)` |
+| `.git/zw-sync.ps1` / `zw-sync-big.ps1` | 同步到 `/opt/zhurenweng`（逐文件 sha256） | 大于约 24 KB 的走 `zw-sync-big.ps1`（分块），否则报"文件名或扩展名太长" |
+| `.git/zw-manifest.ps1` / `.git/zw-compare.sh` | 现算部署面清单并在服务器上对拍 | manifest 是 **PowerShell**，别用 `node` 跑（跑错了会拿旧清单对拍出"全一致"的假结论 —— 本轮踩过） |
+| `.git/zw-file-issues.mjs` / `zw-link-issues.mjs` | 按 FOLLOWUPS 行批量建 issue 并回写编号 | 见 2026-09-30 那批（#33–#46） |
+
+**本地起服务的正确姿势**（做视觉验收时）：
+`DB_DRIVER=sqlite DATABASE_URL=data/zhurenweng.db LLM_PROVIDER=stub MAILER_PROVIDER=stub npx next start -p 3000`
+（`next build` 与 `next dev` 抢同一个 `.next`；**跑 e2e 之前必须停掉本地服务**。
+另外 `next dev` 会把 `next-env.d.ts` 改成 `./.next/dev/types/…`，提交前要还原 —— 那是开发模式噪音。）
