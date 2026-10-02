@@ -1916,6 +1916,88 @@ const CASES = [
     pattern: '数不到改动表述',
     test: 'tests/unit/change-table.test.mjs',
   },
+  // ── 2026-10-02 第二刀「影响点」三件（issue #88 第七节 7.5 / 7.6）──────────────
+  // 这一刀加的每一件都属于"撤掉之后页面上少一句话、而没有任何东西会报错"：
+  // 概览行少一支判空 ⇒ 多印一行光秃秃的「影响：」；impactLine 丢了 point 的拼接 ⇒
+  // 新加的"方面"整半句静默消失；解析层把 point 当必填 ⇒ 存量 39 条判读一起消失；
+  // 提示词删掉 point 的约束 ⇒ 下一轮生成全都不守 12 字，而 stub 路径根本不经过提示词。
+  // 两条接线（页面 .tsx）另配源码断言：e2e 跑的是 `.next` 构建产物，撤源码不红（规则 1）。
+  {
+    // 靶点：`whoLine` 的判空那一支（`topWho.length === 0 ? null : …`）。
+    // 撤掉它 ⇒ 一条主体都没写出来时也印一行「影响：」—— 那是空壳，不是信息。
+    // 取这个片段的第一处出现是安全的：`countsLine` 判的是 `impacts.length === 0`，
+    // 与它不是同一个表达式（本脚本规则 4）。
+    //
+    // pattern 为什么指**全部 who 为空**那条：撤掉判空之后，"有主体"的那些用例照样绿
+    // （它们本来就不走这一支），只有"一条主体都写不出来"的那条会翻红。
+    label: '概览的主体行不再判空（一条主体都没写出来也印一行「影响：」）',
+    file: 'impactDisplay',
+    from: '      topWho.length === 0',
+    to: '      false',
+    pattern: '全部 who 为空',
+    test: 'tests/unit/impact-overview.test.mjs',
+  },
+  {
+    // 靶点：`impactLine` 里把 point 拼进去的那一行。撤掉它 ⇒ 退回"只显示 who"，
+    // 而这一刀新加的正是"方面" —— 页面上看不出少了什么（那一行本来就有内容）。
+    //
+    // pattern 指**两半都有**那条：只有 point / 都空那几条在撤掉后照样绿（它们不走这一支）。
+    label: '每条的「影响」行不再拼 point（新加的"方面"整半句静默消失）',
+    file: 'impactDisplay',
+    from: 'return `影响：${who} · ${point}`;',
+    to: 'return `影响：${who}`;',
+    pattern: '两半都有',
+    test: 'tests/unit/impact-overview.test.mjs',
+  },
+  {
+    // 靶点：解析影响判读时那一行 `const impact = item as Record<string, unknown>;`
+    // （本文件里只此一处）。在它后面插一句"point 必须是字符串"= 把可缺的键变成必填。
+    //
+    // 为什么不直接撤 `point:` 那一行：`buildImpacts` 与 `parseStoredImpacts` 里那两行
+    // **逐字相同**，而 `String#replace` 只换第一处 —— 撤到的是 buildImpacts 那一份，
+    // 用例照样绿（规则 4 的坑）。所以靶点取它上一行那个唯一的锚点。
+    label: '解析层把 point 当必填（旧行没有这个键就整条判读丢掉，存量 39 条一起消失）',
+    file: 'summaryContent',
+    from: '    const impact = item as Record<string, unknown>;',
+    to: '    const impact = item as Record<string, unknown>;\n    if (typeof impact.point !== \'string\') continue;',
+    pattern: '旧行没有 point 键',
+    test: 'tests/unit/summary-impacts.test.mjs',
+  },
+  {
+    // 靶点：要求里 point 那一条 bullet 的**实质约束**（12 字上限、是"方面"不是主体）。
+    // 撤掉它 ⇒ 提示词只剩字段示例里那句"这个字段放什么"，而"不许怎么写"没了 ——
+    // 模型守不守长度再没有判据，而 stub 路径不经过提示词，没有任何别的门看得见。
+    //
+    // pattern 指**要求那一条**：字段示例（那一行 JSON）里也有"12 字以内"，
+    // 所以判据按"要求那一段的 bullet"取（测试里也是这么写的），否则撤了也不红。
+    label: '提示词里 point 的实质约束被删（下一轮生成不守 12 字，测试路径根本看不见）',
+    file: 'llmAdapter',
+    from: '；**12 字以内**、一个名词短语，不写句子、不写主体、不把 who 换个说法再写一遍；',
+    to: '；一个名词短语就行；',
+    pattern: 'point 的要求里写着 12 字上限',
+    test: 'tests/unit/summary-impacts.test.mjs',
+  },
+  {
+    // 接线：判据对而页面没接上，是这一类改动最常见的断线，而它在 e2e 里看不见
+    // （详情页 `.tsx` 跑的是 `.next` 构建产物，撤源码不重建、页面照旧）。
+    // 靶点取**那一行调用**，不是 `impactLine` 这个名字 —— 名字在 import 与注释里也有，
+    // 撤一个名字等于什么都没撤（规则 4）。
+    label: '页面不再用 impactLine（每条判读那一行退回页面自己拼）',
+    file: 'summaryView',
+    from: 'const line = impactLine(impact);',
+    to: 'const line = impact.who ? `影响：${impact.who}` : null;',
+    pattern: '页面真的用了 impactLine 与 impactOverview',
+    test: 'tests/unit/who-display.test.mjs',
+  },
+  {
+    // 同上，第二处接线：块首概览那两行**没有模型兜底**，页面里算错就是错的。
+    label: '页面不再用 impactOverview（块首概览退回页面自己算）',
+    file: 'summaryView',
+    from: 'const overview = impactOverview(impacts);',
+    to: 'const overview = { countsLine: null, whoLine: null };',
+    pattern: '页面真的用了 impactLine 与 impactOverview',
+    test: 'tests/unit/who-display.test.mjs',
+  },
 ];
 
 let red = 0;

@@ -88,6 +88,8 @@ describe('2026-10-02 两栏版式：摘要卡的段落顺序与门控接线（�
         'summary-who',
         'summary-impacts',
         'summary-impacts-note',
+        'summary-impacts-overview',
+        'summary-impacts-overview-who',
         'summary-impact-kind',
         'summary-impact-who',
         'summary-impact-source',
@@ -117,7 +119,7 @@ describe('2026-10-02 两栏版式：摘要卡的段落顺序与门控接线（�
         'summary-placeholder',
         'summary-review-note',
       ],
-      '段落顺序：这是什么 → 影响谁 → 可能的争议点 → 逾期会怎样 → 条文要点 → 改了哪几处 → 编制说明要点 → 截止日期 → 如何提意见',
+      '段落顺序：这是什么 → 影响谁 → 可能的争议点（免责声明 → 概览行 → 主体行 → 逐条）→ 逾期会怎样 → 条文要点 → 改了哪几处 → 编制说明要点 → 截止日期 → 如何提意见',
     );
   });
 
@@ -149,6 +151,35 @@ describe('2026-10-02 两栏版式：摘要卡的段落顺序与门控接线（�
       source,
       /shouldRenderWho\(\{ audience: notice\.audience, who: summary\.who \}\)/,
       '「影响谁」必须走 lib/impact-display.ts 的判据，而不是在 .tsx 里另写一个 if',
+    );
+  });
+
+  /**
+   * issue #88 第二刀：「影响点」三件的两处接线（每一条的「影响：主体 · 方面」行、块首概览）。
+   *
+   * 与上面那条 shouldRenderWho 同一手法、同一理由：判据写在 `lib/impact-display.ts` 里
+   * （另有用例逐条钉着），而**页面有没有用它**在 e2e 里看不见 —— 详情页 `.tsx` 跑的是
+   * `.next` 构建产物，撤掉源码不重建，页面照旧。判据对而页面没接上，正是这类改动最常见的断线。
+   *
+   * 判据取**调用**（名字后面跟左括号）而不是名字本身：两个名字在 import 行与注释里都出现过，
+   * 撤一个名字等于什么都没撤。`from '@/lib/impact-display'` 那一句则拦住"页面里另写一个同名函数"。
+   */
+  it('页面真的用了 impactLine 与 impactOverview（判据写对了却没接上，是这一类改动最常见的断线）', () => {
+    assert.match(
+      source,
+      /impactLine\(/,
+      '每条判读那行「影响：主体 · 方面」必须走 impactLine —— 页面自己判 `impact.who ?` '
+        + '会把"有方面没主体"的新形状整行吞掉',
+    );
+    assert.match(
+      source,
+      /impactOverview\(/,
+      '块首概览（计数行 + 主体行）必须走 impactOverview —— 那两行没有模型兜底，页面里拼错就是错的',
+    );
+    assert.match(
+      source,
+      /import \{[^}]*impactLine[^}]*impactOverview[^}]*\} from '@\/lib\/impact-display'/,
+      '两个判据都要从 lib/impact-display.ts 引入（页面里另写一个同名函数不算接上）',
     );
   });
 });

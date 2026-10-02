@@ -136,7 +136,7 @@ export const IMPACT_KIND_LABELS: Record<ImpactKind, string> = {
  * 它与别的段落形状一样（都带 `quote` 与程序反查出来的 `source`），但两者的**证据地位不同**：
  * - `quote` / `source` 是**可核对的**：逐字、由 `findDraftSourceForQuote` 反查出处，
  *   反查不到整条不落库（与 keyPoints 同一条不变量）；
- * - `text` / `who` / `kind` 是**推断**，不可核对。所以页面把两者排在同一行里，
+ * - `text` / `who` / `point` / `kind` 是**推断**，不可核对。所以页面把两者排在同一行里，
  *   绝不让推断脱离原文单独成立，并且这一段有**块级**免责声明（不只是卡片头部那行）。
  *
  * 引用可以在**任何一份**喂进去的附件里反查（不做段落隔离，理由见 `buildImpacts`）。
@@ -145,6 +145,14 @@ export interface QuotedImpactPoint {
   quote: string;
   /** 可能受影响的具体主体；模型写不出具体主体时为空串（页面据空不渲染那半句） */
   who: string;
+  /**
+   * 受影响的东西/方面（issue #88 第二刀）；模型写不出时为空串。
+   *
+   * 与 `who` 的关系是"谁 · 他的什么被动了"（用户给的原话：「不愿实名发言的用户 · 匿名发声空间」），
+   * 页面用 ` · ` 连起来渲染，两半各自可为空 —— 所以**旧行没有这个键时必须是空串而不是丢弃整条**：
+   * 存量判读只有"谁"，读者照样该看得到那半句（88 号文档 7.4）。
+   */
+  point: string;
   /** 可能带来什么：一句话的推断 */
   text: string;
   kind: ImpactKind;
@@ -600,6 +608,10 @@ function buildImpacts(
       quote,
       text,
       who: typeof impact.who === 'string' ? impact.who.trim() : '',
+      // point（issue #88 第二刀）照带：这一段与 who 一样是"缺了就不渲染那半句"的可选半边，
+      // 不参与"缺引用/缺正文就跳过"的判据（那两个缺了整条都没有意义）。
+      // 这里也不按长度过滤 —— 见 parseStoredImpacts 的同一条注释。
+      point: typeof impact.point === 'string' ? impact.point.trim() : '',
       kind: (['risk', 'loophole', 'burden', 'other'] as string[]).includes(declared)
         ? (declared as ImpactKind)
         : 'other',
@@ -674,6 +686,13 @@ function parseStoredExplanationPoints(value: unknown): QuotedExplanationPoint[] 
  * 与说明要点同样的宽容口径：**旧行没有这个字段 ⇒ 空数组，不算形状异常**。
  * 这一条不是形式主义：`impacts` 是本轮新增的键，而存量 84 条摘要全都没有它；
  * 解析若把它当必填，存量条目会从「有摘要」掉回「待人工复核」占位（#85 第三节的教训）。
+ *
+ * `point`（issue #88 第二刀）沿用同一条口径，而且是**两件事**：
+ * 1. **旧行没有 `point` ⇒ 空串**，绝不因为缺这个键丢条目 —— 生产库里 39 条判读全都没有它
+ *    （88 号文档 7.2 实测），丢一条就是读者少看到一条挂着原文的推断；
+ * 2. **不按长度拒绝**（88 号文档 7.4）：存量 `who` 实测 3–29 字、形态不统一，`point` 同理，
+ *    超长值照实显示。按长度砍等于"静默丢真内容"—— 页面上看不出少了什么，
+ *    而提示词该不该改也再没有证据。
  */
 function parseStoredImpacts(value: unknown): QuotedImpactPoint[] {
   if (!Array.isArray(value)) return [];
@@ -692,6 +711,9 @@ function parseStoredImpacts(value: unknown): QuotedImpactPoint[] {
       quote,
       text,
       who: typeof impact.who === 'string' ? impact.who.trim() : '',
+      // 缺 point（存量 39 条判读、以及模型没写出"方面"的新条目）⇒ 空串。
+      // 不 trim 之外不做任何加工：不截断、不因超长跳过 —— 理由见上面那段注释。
+      point: typeof impact.point === 'string' ? impact.point.trim() : '',
       kind: (['risk', 'loophole', 'burden', 'other'] as string[]).includes(declared)
         ? (declared as ImpactKind)
         : 'other',

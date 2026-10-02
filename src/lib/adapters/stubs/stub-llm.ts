@@ -155,6 +155,12 @@ export class StubLlm implements LlmPort {
         impacts.push({
           quote: line,
           who: `【stub】受《${source.name.slice(0, 12)}》影响的从业者与公众（固定测试文案）`,
+          // point 留空（issue #88 第二刀）：类型新增了这个必填字段，而 stub 的职责是让
+          // "每条判读都能反查到出处"这条不变量走真路径，不是替模型编内容 —— 这里造一个假的
+          // "方面"，渲染侧那句「影响：主体 · 方面」在 e2e 里就钉在一段谁也核对不了的假文本上。
+          // 空串反而有用：它走的正是存量 39 条判读的真实形状（88 号文档 7.2 实测它们都没有
+          // point），于是"只有 who 时只显示 who"那条分支在 e2e 里也走得到。
+          point: '',
           text: `【stub】这一处可能带来的影响（固定测试文案）：${line.slice(0, 16)}…`,
           kind: impacts.length === 0 ? 'risk' : 'loophole',
         });

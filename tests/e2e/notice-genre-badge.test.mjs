@@ -332,12 +332,67 @@ describe('issue #86：详情页「可能的争议点」与受众面门控', () =
     assert.match(html, /data-testid="summary-impacts-note"/);
     assert.ok(html.includes('推断'), '块级免责声明必须写清"这是推断、不是官方表述"');
     assert.ok(html.includes('可能的不利后果'), '类型标签照 IMPACT_KIND_LABELS 渲染');
-    assert.ok(html.includes('可能受影响：以车辆通行费筹集养护资金的地方政府'));
+    // 2026-10-02 第二刀：这一行从「可能受影响：<主体>」改成「影响：<主体> · <方面>」。
+    // 这条 fixture **没有 point**（存量 39 条判读的真实形状）⇒ 只渲染 who 那半句，
+    // 也就是下面这一行 —— 顺带钉住"旧行没有 point 也照常渲染"这条读侧容错。
+    assert.ok(
+      html.includes('影响：以车辆通行费筹集养护资金的地方政府'),
+      '第二刀的行文案：who 与 point 用「 · 」连接，只有 who 时只显示 who',
+    );
+    assert.ok(
+      !html.includes('可能受影响：'),
+      '旧措辞不许再出现（它与新行同时存在时，读者会以为是两件事）',
+    );
+    assert.match(html, /data-testid="summary-impacts-overview"/);
+    assert.ok(
+      html.includes('共 1 处：1 处可能的不利后果'),
+      '概览的计数行：N 是判读条数（这一条 fixture 只有 1 条 risk 判读）',
+    );
     assert.ok(html.includes('期限届满后若继续收费'), '推断的正文');
     assert.ok(html.includes('出处：附件《'), '出处是程序反查出来的那一份，不是模型自报的');
     assert.ok(
       html.includes('收费公路在收费偿债或者收费经营期间的管理养护费用'),
       '引用的逐字原文要与推断同屏 —— 绝不让推断脱离原文单独成立',
+    );
+  });
+
+  /**
+   * 2026-10-02 第二刀：**块首概览**（用户要的第 2 件）。
+   *
+   * 为什么这一条要单独注入两条不同 kind 的判读：概览行的两个数（`共 N 处` 与各类型的条数）
+   * 只有**多类型混排**时才看得出顺序对不对（固定 risk → loophole → burden → other，
+   * 而 88 号文档 7.5 给的那一行例子恰好是 loophole 在前）。单类型时"顺序"这个词没有内容。
+   *
+   * 这一行是**程序聚合**的（不额外调模型），所以页面上看到的就是判据算出来的 ——
+   * 单测钉措辞（`tests/unit/impact-overview.test.mjs`），这里钉"它真的到了页面上"。
+   */
+  it('块首概览：计数按类型聚合、主体去重，且每条判读自己的行带上「方面」', async () => {
+    injectImpacts(AMENDMENT_TITLE, [
+      IMPACTS[0],
+      {
+        quote: '网络服务提供者应当建立便捷的投诉、举报入口，及时受理并处理公众投诉、举报。',
+        who: '不愿实名发言的用户',
+        point: '匿名发声空间',
+        text: '实名要求可能压缩匿名表达的空间。',
+        kind: 'loophole',
+        source: '关于《中华人民共和国公路法（修正草案征求意见稿）》的起草说明.wps',
+        sourceUrl: 'https://attachments.test/explanation.wps',
+      },
+    ]);
+    const html = await detailOf(AMENDMENT_TITLE);
+    assert.match(html, /data-testid="summary-impacts-overview"/);
+    assert.ok(
+      html.includes('共 2 处：1 处可能的不利后果 · 1 处可能被规避或滥用'),
+      '概览的计数行：N 是判读条数，类型顺序固定 risk → loophole → burden → other',
+    );
+    assert.match(html, /data-testid="summary-impacts-overview-who"/);
+    assert.ok(
+      html.includes('影响：以车辆通行费筹集养护资金的地方政府、不愿实名发言的用户'),
+      '主体行：去重后按首次出现顺序、用「、」连接',
+    );
+    assert.ok(
+      html.includes('影响：不愿实名发言的用户 · 匿名发声空间'),
+      '每条判读自己那一行：who 与 point 用「 · 」连接（这一条带 point）',
     );
   });
 

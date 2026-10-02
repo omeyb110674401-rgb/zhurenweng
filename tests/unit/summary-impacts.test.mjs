@@ -353,3 +353,141 @@ describe('issue #86：规则 7 / 8 的实质要求（提示词是唯一判据，
     assert.match(prompt, /不要写「等」「主要修改内容如下」来掩盖缺口/);
   });
 });
+
+/**
+ * issue #88 第二刀：「影响点」三件里的 `point`（受影响的**方面**）落库与读侧容错。
+ *
+ * `point` 与 `who` 是**同一类字段**（都是"缺了就不渲染那半句"的可选半边），所以这一组钉的
+ * 全是"缺了不许出事"：
+ * 1. **旧行没有 `point` 键 ⇒ 空串、条目仍在、其余字段一个字不变**。生产库里 39 条判读
+ *    全都没有这个键（88 号文档 7.2 实测），而它们是读者今天就会看到的那些条目 ——
+ *    解析若把它当必填，那 39 条会从「有判读」变成整块消失，**页面上没有任何痕迹**。
+ * 2. **超长值照实保留**：长度约束写在提示词里，落库与读侧都不许按长度砍（88 号文档 7.4）。
+ *    在解析层截断等于静默丢真内容，而且"模型守不守 12 字"这件事再也量不出来。
+ */
+describe('issue #88 第二刀：point（受影响的方面）的落库与旧行容错', () => {
+  it('buildImpacts 带出 point（前后空白要 trim）', () => {
+    const { summary } = buildQuotedSummaryWithTally(
+      summaryWith({
+        impacts: [
+          { quote: QUOTE_A, who: '平台', point: ' 合规成本 ', text: '可能有什么', kind: 'burden' },
+        ],
+      }),
+      undefined,
+      [DRAFT],
+    );
+    assert.equal(summary.impacts.length, 1);
+    assert.equal(summary.impacts[0].point, '合规成本');
+    assert.equal(summary.impacts[0].who, '平台', 'who 那半句一个字不动');
+  });
+
+  it('模型没写 point ⇒ 空串落库，条目照旧在（它是可缺的那半句）', () => {
+    const { summary } = buildQuotedSummaryWithTally(
+      summaryWith({
+        impacts: [{ quote: QUOTE_A, who: '平台', text: '可能有什么', kind: 'risk' }],
+      }),
+      undefined,
+      [DRAFT],
+    );
+    assert.equal(summary.impacts.length, 1, '缺 point 不是"缺引用/缺正文"，不该整条丢');
+    assert.equal(summary.impacts[0].point, '');
+    assert.equal(summary.impacts[0].who, '平台');
+  });
+
+  it('**旧行没有 point 键 ⇒ 空串、条目仍在、其余字段一个字不变**（存量 39 条判读全都没有它）', () => {
+    const built = buildQuotedSummary(
+      summaryWith({
+        impacts: [
+          { quote: QUOTE_A, who: '运营人', point: '合规成本', text: '可能有什么', kind: 'loophole' },
+        ],
+      }),
+      undefined,
+      [DRAFT],
+    );
+    const before = built.impacts[0];
+    assert.equal(before.point, '合规成本', '前提：这一条本来带着 point，否则下面测不出"丢了什么"');
+
+    const legacy = JSON.parse(JSON.stringify(built));
+    delete legacy.impacts[0].point;
+    const parsed = parseQuotedSummary(legacy);
+
+    assert.equal(parsed.impacts.length, 1, '缺一个可缺的键绝不能让整条判读消失');
+    assert.equal(parsed.impacts[0].point, '', '退回空串 —— 页面据此只渲染 who 那半句');
+    assert.equal(parsed.impacts[0].quote, before.quote);
+    assert.equal(parsed.impacts[0].who, before.who);
+    assert.equal(parsed.impacts[0].text, before.text);
+    assert.equal(parsed.impacts[0].kind, before.kind);
+    assert.equal(parsed.impacts[0].source, before.source);
+    assert.equal(parsed.impacts[0].sourceUrl, before.sourceUrl);
+  });
+
+  it('超长的 point 照实保留（不截断、不因为超长丢条目 —— 长度约束靠提示词）', () => {
+    const tooLong = '这个方面写得很长很长一直写到三十多个字都还没有停下来而且还要继续更长一些';
+    assert.ok(tooLong.length > 12, '前提：这个值确实超出了提示词写的 12 字');
+    const built = buildQuotedSummary(
+      summaryWith({
+        impacts: [{ quote: QUOTE_A, who: '平台', point: tooLong, text: '可能有什么', kind: 'risk' }],
+      }),
+      undefined,
+      [DRAFT],
+    );
+    assert.equal(built.impacts[0].point, tooLong, '落库不许截断');
+
+    const parsed = parseQuotedSummary(JSON.parse(JSON.stringify(built)));
+    assert.equal(parsed.impacts.length, 1, '超长不是"形状不对"，不该丢条目');
+    assert.equal(parsed.impacts[0].point, tooLong, '读侧照实显示：截断是静默丢真内容');
+    assert.equal(parsed.impacts[0].point.length, tooLong.length);
+  });
+});
+
+/**
+ * issue #88 第二刀：提示词里 `who` / `point` 的**新实质约束**（规格 7.3）。
+ *
+ * 为什么单独一组：`LLM_PROVIDER=stub` 的测试路径不经过提示词，所以"把 `point` 的约束整条删掉"
+ * 不会有任何门变红 —— 而这一刀新增的正是"方面"这个字段，它的全部判据就在提示词里。
+ *
+ * 断言打在**要求那一段的 bullet**上（不是字段示例那一行）：提示词是"一行一条"拼出来的，
+ * 字段示例（那一行 JSON）说的是"这个字段放什么"，要求里的 bullet 说的才是
+ * "不许怎么写"（罗列主体 / 写成句子 / 把 who 换个说法重写）。两者都会影响模型，
+ * 但**只有后者是要求**；按行找 bullet 的写法也让措辞可以改，约束不许悄悄消失。
+ */
+describe('issue #88 第二刀：who / point 的实质约束（提示词是唯一判据）', () => {
+  const prompt = SYSTEM_PROMPT;
+
+  /** 在**要求**那一段里按行找 bullet（`   - …`），字段示例那一行（JSON）不算。 */
+  function requirementLine(...needles) {
+    return prompt
+      .split('\n')
+      .find((line) => line.trimStart().startsWith('- ') && needles.every((n) => line.includes(n)));
+  }
+
+  it('who 的要求里写着 20 字上限、单一主体类别、最多一个顿号', () => {
+    const rule = requirementLine('who', '20 字以内');
+    assert.ok(rule, 'who 的字数上限必须写进**要求**（模型看不到的约束等于没有）');
+    assert.match(rule, /单一主体类别/, '一句话里塞三四个主体正是用户说的"笼统"');
+    assert.match(rule, /最多一个顿号/, '顿号数量是这条约束唯一可执行的判据');
+  });
+
+  it('反例（五个主体四个顿号那条长串）逐字在提示词里', () => {
+    assert.match(
+      prompt,
+      /网络服务提供者、网络平台服务提供者、互联网用户公众账号生产运营者、学校、未成年人监护人/,
+      '反例必须写成那串真实的主体罗列 —— 抽象地说"不要罗列"拦不住它',
+    );
+  });
+
+  it('point 的要求里写着 12 字上限、是"方面"而不是第二个 who', () => {
+    const rule = requirementLine('point', '12 字以内');
+    assert.ok(rule, 'point 的字数上限必须写进**要求**');
+    assert.match(rule, /方面|东西/, 'point 回答的是"他的什么被动了"，不是"谁"');
+    assert.match(rule, /不是主体/, '写成第二个 who 就退化成了重复');
+  });
+
+  it('正例「平台 · 合规成本」在提示词里（把 who 与 point 的分工摆出来）', () => {
+    assert.match(prompt, /平台 · 合规成本/);
+  });
+
+  it('写不出来就留空、不许为了填满而编（新字段不能破既有口径）', () => {
+    assert.match(prompt, /不许为了填满而编/);
+  });
+});

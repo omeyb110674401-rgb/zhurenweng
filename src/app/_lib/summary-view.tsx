@@ -23,7 +23,7 @@ import {
   draftProvenanceLine,
   type DraftAvailabilityInput,
 } from '@/lib/summary-display';
-import { shouldRenderImpacts, shouldRenderWho } from '@/lib/impact-display';
+import { impactLine, impactOverview, shouldRenderImpacts, shouldRenderWho } from '@/lib/impact-display';
 import { summaryProvenance, summaryTemplateOf } from '@/lib/summary-basis';
 
 /**
@@ -234,7 +234,12 @@ export function SummaryView({
          * 位置（2026-10-02 两栏版式这一刀）：**「这是什么」之后、「草案条文要点」之前**。
          * 原先它在「改了哪几处」之后，理由写的是"证据先于推断"；那一刀之后证据并没有被推到
          * 后面去（条文要点、改动表、编制说明仍在它下面），而它自己上移到了读者第一屏 ——
-         * 规格第一节第 7 条拍板的就是这件事。块内渲染一个字没改（「影响点」三件是第二刀）。
+         * 规格第一节第 7 条拍板的就是这件事。
+         *
+         * 块内渲染在**同日第二刀**（「影响点」三件，规格第七节）改了两处：块首多了两行概览
+         * （计数 + 主体，程序聚合）、每条那行「可能受影响：<长串>」换成 `impactLine` 判出来的
+         * 「影响：主体 · 方面」。两处的**措辞与空值判据都在 `lib/impact-display.ts`**，
+         * 这里只负责摆放与"null 就不渲染"（页面 .tsx 进不了单测，拼接写在这里等于钉不住）。
          *
          * **受众面门控**：只给「公众广域」渲染（用户 2026-09-27 拍板："先只上公众广域 +
          * 人工过一遍"）。门放在**渲染侧**而不是生成侧：这一段与其余字段共用同一次模型调用，
@@ -244,6 +249,16 @@ export function SummaryView({
           const impacts = summary.impacts;
           // 判据在 lib/impact-display.ts（纯函数，能进单测也就能进自证框架 —— 页面 .tsx 两样都进不去）
           if (!shouldRenderImpacts({ audience: notice.audience, impacts })) return null;
+          /*
+           * 块首概览（2026-10-02 第二刀「影响点」三件之一，规格 7.5）：计数行 + 主体行，
+           * 两行都是**程序聚合**的（不额外调模型），因此措辞全部落在 `impactOverview` 里 ——
+           * 页面一个字都不拼。页面里的字符串拼接进不了单测、也进不了自证框架的钉子，
+           * 而这两行**没有模型兜底**：这里写错，页面上就是错的。
+           *
+           * 位置在免责声明**之后**：先让读者读到"这是推断"，再给他索引 ——
+           * 顺序反过来等于把一句没有证据地位的汇总摆在免责声明前面。
+           */
+          const overview = impactOverview(impacts);
           return (
             <div className="summary-section" data-testid="summary-impacts">
               <h2 className="summary-section-title">可能的争议点</h2>
@@ -251,33 +266,55 @@ export function SummaryView({
                 以下是本站 AI 依据公开原文作出的<b>推断</b>，不是官方表述，也不构成法律意见；
                 每条都附了它依据的那句原文，请自己判断。
               </p>
+              {/*
+                概览行与主体行是**两个独立元素**（不是一个 `<p>` 里两句话）：
+                主体行可能整个不出现（一条判读都没写出主体时），而计数行永远在
+                （这一段有"一条都没有就整块不渲染"的门，走到这里 `countsLine` 必不为 null）。
+              */}
+              <p className="impact-overview" data-testid="summary-impacts-overview">
+                {overview.countsLine}
+              </p>
+              {overview.whoLine !== null ? (
+                <p className="impact-overview-who" data-testid="summary-impacts-overview-who">
+                  {overview.whoLine}
+                </p>
+              ) : null}
               <ul className="summary-points">
-                {impacts.map((impact, index) => (
-                  <li key={index}>
-                    <p className="impact-kind" data-testid="summary-impact-kind">
-                      {IMPACT_KIND_LABELS[impact.kind]}
-                    </p>
-                    <p className="summary-section-text">{impact.text}</p>
-                    {impact.who ? (
-                      <p className="impact-who" data-testid="summary-impact-who">
-                        可能受影响：{impact.who}
+                {impacts.map((impact, index) => {
+                  /*
+                   * 这一条那一行「影响：主体 · 方面」（第二刀三件之二）：写什么、以及
+                   * **什么时候整行不渲染**（`null`），判据都在 `impactLine` 里。
+                   * 旧实现判的是 `impact.who ?` —— 换成新形状之后，"有方面没主体"的那条
+                   * 会被整行吞掉，所以这一行必须由判据说了算。
+                   */
+                  const line = impactLine(impact);
+                  return (
+                    <li key={index}>
+                      <p className="impact-kind" data-testid="summary-impact-kind">
+                        {IMPACT_KIND_LABELS[impact.kind]}
                       </p>
-                    ) : null}
-                    <SectionQuote
-                      notice={notice}
-                      quote={impact.quote}
-                      href={impact.sourceUrl ?? undefined}
-                    />
-                    <p className="draft-point-source" data-testid="summary-impact-source">
-                      {impact.source
-                        ? draftProvenanceLine(
-                            impact.source,
-                            '出处：未标注（这条的引用没能反查到本轮喂入的附件）',
-                          )
-                        : '出处：未标注（这条的引用没能反查到本轮喂入的附件）'}
-                    </p>
-                  </li>
-                ))}
+                      <p className="summary-section-text">{impact.text}</p>
+                      {line !== null ? (
+                        <p className="impact-who" data-testid="summary-impact-who">
+                          {line}
+                        </p>
+                      ) : null}
+                      <SectionQuote
+                        notice={notice}
+                        quote={impact.quote}
+                        href={impact.sourceUrl ?? undefined}
+                      />
+                      <p className="draft-point-source" data-testid="summary-impact-source">
+                        {impact.source
+                          ? draftProvenanceLine(
+                              impact.source,
+                              '出处：未标注（这条的引用没能反查到本轮喂入的附件）',
+                            )
+                          : '出处：未标注（这条的引用没能反查到本轮喂入的附件）'}
+                      </p>
+                    </li>
+                  );
+                })}
               </ul>
             </div>
           );

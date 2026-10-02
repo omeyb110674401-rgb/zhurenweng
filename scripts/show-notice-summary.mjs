@@ -37,7 +37,7 @@ import {
   parseQuotedSummary,
   IMPACT_KIND_LABELS,
 } from '../src/lib/summary-content.ts';
-import { shouldRenderImpacts } from '../src/lib/impact-display.ts';
+import { impactLine, impactOverview, shouldRenderImpacts } from '../src/lib/impact-display.ts';
 import { changeCoverageVerdict, changeFactNote, changeTableNote } from '../src/lib/change-coverage.ts';
 import { explanationCoverageVerdict } from '../src/lib/explanation-coverage.ts';
 import { changeTableCounts, changeTableRows } from '../src/lib/change-table.ts';
@@ -100,8 +100,21 @@ for (const row of rows) {
   const impacts = parsed.impacts;
   if (shouldRenderImpacts({ audience: row.audience, impacts })) {
     console.log('\n  ── 可能的争议点（本站 AI 推断，非官方表述，可能错） ──');
+    /**
+     * 块首概览（issue #88 第二刀）：**与页面同源** —— 这两行也是 `impactOverview` 算出来的，
+     * 不在这里另拼一份。本脚本的立身之本就是"印的必须是读者真会看到的"，
+     * 自己拼一份就是这只量具第 N 次说谎（它已经因为同类原因被抓过八次）。
+     */
+    const overview = impactOverview(impacts);
+    if (overview.countsLine) console.log(`   ${overview.countsLine}`);
+    if (overview.whoLine) console.log(`   ${overview.whoLine}`);
     for (const item of impacts) {
-      console.log(`   • [${IMPACT_KIND_LABELS[item.kind] ?? item.kind}] ${item.who || '（未写明影响谁）'}：${item.text}`);
+      // 每条的「影响：主体 · 方面」也走页面那个纯函数。两半都空时页面**整行不渲染** ——
+      // 门这里照实写一句"未写明"，免得把"页面上没有这一行"读成"这一条没有影响"。
+      const line = impactLine(item);
+      console.log(
+        `   • [${IMPACT_KIND_LABELS[item.kind] ?? item.kind}] ${line ?? '（未写明影响谁、也没写出哪一方面）'}：${item.text}`,
+      );
       console.log(`     引用：${item.quote}`);
       console.log(`     ${draftProvenanceLine(item.source, '出处：（无出处）')}`);
     }
