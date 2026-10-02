@@ -346,10 +346,20 @@ describe('详情页两栏：断点与栅格（源码文本，没有浏览器时�
      * 第一版写成 `main.page.detail-page { max-width: 1120px }`（看着特异性更高），
      * 后果是"栅格确实两列了、整页仍被关在 760px 里"，主栏只剩 372px。
      */
-    assert.match(
+    /*
+     * 2026-10-02 收尾：宽度从**断点里**搬到了**基础规则**上，而且写成连续式
+     * `min(1120px, max(760px, 100% - 48px))`。原来它写死在断点里，视口跨过 1000px 时
+     * 宽度从 760 一步跳到 952（拖窗口时看得见）。所以这里断言两件事：
+     * ① 上限作用在**外层** `.page:has(.detail-grid)` 上（不是详情页自己的 `<main>`）；
+     * ② 它是**连续式**（含 `min` 与百分比）—— 写死一个 px 就又会跳一次。
+     */
+    const widened = ruleBody(css, '.page:has(.detail-grid) {');
+    assert.match(widened, /max-width:\s*min\(\s*1120px/, '上限放到 1120px，且作用在外层 .page 上');
+    assert.match(widened, /100vw/, '上限必须是连续式（视口单位）：写死 px 会在断点处跳一次');
+    assert.doesNotMatch(
       wide,
-      /\.page:has\(\.detail-grid\)\s*\{[^}]*max-width:\s*1120px/,
-      '宽屏把**外层** .page 放宽到 1120px',
+      /max-width/,
+      '断点那一档里不许再写宽度 —— 写了会盖掉上面那条连续式，跳变就回来了',
     );
     assert.doesNotMatch(
       wide,

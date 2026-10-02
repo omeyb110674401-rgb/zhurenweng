@@ -274,7 +274,26 @@ export default async function HomePage({ searchParams }: HomePageProps) {
         </nav>
       </header>
 
-      <section className="notice-section" aria-labelledby="notice-list-title">
+      {/*
+        列表页宽屏两栏（2026-10-02 用户拍板：一页的信息量不足）。
+        窄屏 = 与改动前逐字一致的顺序：标题 → 合计 → 排序说明 → 排序/范围入口 →
+        筛选条 → 列表 → 分页（筛选在列表**上方**，一个字都没挪）。
+        宽屏（≥1000px，与详情页同一个断点）= 筛选条进右栏、列表占主栏。
+
+        为什么 DOM 顺序**不动**、只靠栅格摆位：筛选条在文档里排在结果之前，于是
+        键盘 Tab 与读屏的到达顺序在两种版式下都是"先筛选、后结果"。若改成把筛选条
+        写在列表之后、再用 CSS 摆到左边，窄屏下筛选就跑到列表下面去了 —— 那正好
+        违反"窄屏落回现在的样子"。CSS 的 `order` 也不做：那会让视觉顺序与焦点顺序
+        分家（键盘用户 Tab 进一个"看起来在后面"的控件）。
+
+        为什么 rail 放**右**：这一栏的内容就是改动前压在首屏、把列表顶到 2.5 条的那
+        一整块（排序档 / 范围 / 受众面 / 领域 / 关键词 / 机关 / 来源 / 筛选按钮）。
+        放在主栏右边 = 中文从左到右的阅读顺序仍是"先看列表、再看筛选"，与改动前
+        "筛选在上、列表在下"的先后关系一致；同时整页左边缘（站点标题、搜索框、
+        条目卡）对齐不动，只是右边多出一栏，视觉上不像换了一个站。
+        `.list-page` 这个类只当"这是列表页"的标记用（`:has()` 的锚点），不承担宽度。
+      */}
+      <section className="notice-section list-page" aria-labelledby="notice-list-title">
         <h2 id="notice-list-title">最新公示</h2>
         <p className="section-hint">
           <span data-testid="filter-result-count">
@@ -378,226 +397,236 @@ export default async function HomePage({ searchParams }: HomePageProps) {
           })}
         </nav>
 
-        {/* 分类浏览筛选条（issue #9）：领域标签云 + 机关下拉 + 关键词框，
-            全部经 URL 参数驱动、服务端渲染，不依赖客户端 JS */}
-        <div className="filter-bar" data-testid="notice-filter-bar">
-          {/*
-            受众面筛选条（issue #83）：与领域标签**正交**的第二个维度 ——
-            领域答"这是关于什么事"，受众面答"该谁来看、该谁去提意见"。
-            站长的原始诉求就是把「立法、税收这类影响面广的」与「林业、住房这类
-            主要影响特定从业者的」分成两个大类；「未判定」也留在条上，因为
-            筛出未判定的那批正是逐条改进规则（lib/audience.ts 的覆盖表）的入口。
-          */}
-          <nav className="audience-cloud" data-testid="audience-filter" aria-label="按受众面筛选">
-            <span className="filter-group-label">受众面</span>
-            <a
-              className={`category-chip${audience === undefined ? ' category-chip-active' : ''}`}
-              href={buildFilterHref(current, { audience: undefined })}
-              data-testid="audience-filter-all"
-              aria-current={audience === undefined ? 'true' : undefined}
-            >
-              全部
-            </a>
-            {NOTICE_AUDIENCES.map((key) => (
-              <a
-                key={key}
-                className={`category-chip${audience === key ? ' category-chip-active' : ''}`}
-                href={buildFilterHref(current, { audience: audience === key ? undefined : key })}
-                data-testid="audience-filter-link"
-                data-audience={key}
-                title={AUDIENCE_HINTS[key]}
-                aria-current={audience === key ? 'true' : undefined}
-              >
-                {AUDIENCE_LABELS[key]}
-              </a>
-            ))}
-          </nav>
-          <nav className="category-cloud" data-testid="category-filter" aria-label="按领域筛选">
-            <a
-              className={`category-chip${category === undefined ? ' category-chip-active' : ''}`}
-              href={buildFilterHref(current, { category: '' })}
-              data-testid="category-filter-all"
-              aria-current={category === undefined ? 'true' : undefined}
-            >
-              全部领域
-            </a>
-            {DOMAIN_CATEGORIES.map((domain) => (
-              <a
-                key={domain.label}
-                className={`category-chip${category === domain.label ? ' category-chip-active' : ''}`}
-                href={buildFilterHref(current, { category: domain.label })}
-                data-testid="category-filter-link"
-                aria-current={category === domain.label ? 'true' : undefined}
-              >
-                {domain.label}
-              </a>
-            ))}
-          </nav>
-          {/* 机关下拉 + 关键词框共用一个 GET 表单；其余筛选维度经隐藏字段保留。
-              表单名放在 <form> 上而不是外层 div（issue #53）：无 role 的 div 上的
-              aria-label 多数辅助技术不会暴露，而带名字的 form 是真正的表单地标。 */}
-          <form
-            className="filter-form"
-            action="/"
-            method="get"
-            data-testid="filter-form"
-            aria-label="按机关与关键词筛选"
-          >
-            {category !== undefined && <input type="hidden" name="category" value={category} />}
-            {/* 受众面也要留住（issue #83，与下面 sort / open / since 同一件事）：
-                表单里没这个字段时，用户只填个关键词点「筛选」就会静默丢掉刚选的受众面，
-                页面顶部却还显示着他筛过的那一档 */}
-            {audience !== undefined && <input type="hidden" name="audience" value={audience} />}
-            {from !== undefined && <input type="hidden" name="from" value={from} />}
-            {to !== undefined && <input type="hidden" name="to" value={to} />}
-            {period !== undefined && <input type="hidden" name="period" value={period} />}
-            {source !== undefined && <input type="hidden" name="source" value={source} />}
-            {/* 排序与范围同样要留住（issue #62，与 issue #50 的 lead 同一件事）：
-                表单里没这些字段时，用户只填个关键词点「筛选」就会静默回到默认排序 +
-                全部条目，页面顶部却还显示着他刚选的那一档 */}
-            {current.sort !== undefined && (
-              <input type="hidden" name="sort" value={current.sort} />
-            )}
-            {current.openOnly && <input type="hidden" name="open" value="1" />}
-            {current.sinceDays !== undefined && (
-              <input type="hidden" name="since" value={String(current.sinceDays)} />
-            )}
+        {/* 两栏栅格：窄屏是单列（筛选条在上、结果在下，与改动前逐字一致），
+            ≥1000px 时筛选条进右栏、结果进主栏（列位全在 globals.css 的宽屏那一档）。
+            这里只有两个直接子项（筛选条 / 结果区），中间不夹任何东西 ——
+            栅格里的额外子项会各占一格，把"两栏"变成"三行"。 */}
+        <div className="list-layout">
+          {/* 分类浏览筛选条（issue #9）：领域标签云 + 机关下拉 + 关键词框，
+              全部经 URL 参数驱动、服务端渲染，不依赖客户端 JS */}
+          <div className="filter-bar" data-testid="notice-filter-bar">
             {/*
-              牵头口径也要留住（issue #50）：从统计页钻取进来的是 `?agency=X&lead=1`
-              （牵头机关，表格数字按它算），而表单此前只保留 category / from / to /
-              period —— 用户不改机关、只填个关键词点「筛选」，lead=1 就静默丢失，
-              口径退回「任一参与机关」，条数当场变化（发改委 25 → 26）。
-              只在带机关时才写：裸 lead=1 不改变任何结果（见 buildFilterHref）。
+              受众面筛选条（issue #83）：与领域标签**正交**的第二个维度 ——
+              领域答"这是关于什么事"，受众面答"该谁来看、该谁去提意见"。
+              站长的原始诉求就是把「立法、税收这类影响面广的」与「林业、住房这类
+              主要影响特定从业者的」分成两个大类；「未判定」也留在条上，因为
+              筛出未判定的那批正是逐条改进规则（lib/audience.ts 的覆盖表）的入口。
             */}
-            {current.leadAgencyOnly && agency !== undefined && (
-              <input type="hidden" name="lead" value="1" />
-            )}
-            <input
-              className="filter-keyword"
-              type="search"
-              name="q"
-              defaultValue={keyword ?? ''}
-              placeholder="标题 / 正文关键词"
-              aria-label="关键词过滤"
-              data-testid="filter-keyword-input"
-            />
-            <select
-              className="filter-agency"
-              name="agency"
-              aria-label="按发布机关筛选"
-              data-testid="agency-filter-select"
-              defaultValue={agency ?? ''}
-            >
-              <option value="">全部机关</option>
-              {agencyOptions.map((name) => (
-                <option key={name} value={name}>
-                  {name}
-                </option>
+            <nav className="audience-cloud" data-testid="audience-filter" aria-label="按受众面筛选">
+              <span className="filter-group-label">受众面</span>
+              <a
+                className={`category-chip${audience === undefined ? ' category-chip-active' : ''}`}
+                href={buildFilterHref(current, { audience: undefined })}
+                data-testid="audience-filter-all"
+                aria-current={audience === undefined ? 'true' : undefined}
+              >
+                全部
+              </a>
+              {NOTICE_AUDIENCES.map((key) => (
+                <a
+                  key={key}
+                  className={`category-chip${audience === key ? ' category-chip-active' : ''}`}
+                  href={buildFilterHref(current, { audience: audience === key ? undefined : key })}
+                  data-testid="audience-filter-link"
+                  data-audience={key}
+                  title={AUDIENCE_HINTS[key]}
+                  aria-current={audience === key ? 'true' : undefined}
+                >
+                  {AUDIENCE_LABELS[key]}
+                </a>
               ))}
-            </select>
-            {/*
-              来源下拉（issue #65）。与机关下拉同一处理（issue #39）：当前值若不在
-              选项里（登记表里已删掉这个源，老链接还在被分享），把它补成第一项 ——
-              否则 <select> 显示「全部来源」而列表其实按那个源筛过了，控件在说谎。
-              选项是**有收录记录的 + 登记表里的**全部源（0 条的也在：那正是
-              "源活着但不再送新东西"这种故障的可见化入口）。
-            */}
-            <select
-              className="filter-source"
-              name="source"
-              aria-label="按来源渠道筛选"
-              data-testid="source-filter-select"
-              defaultValue={source ?? ''}
-            >
-              <option value="">全部来源</option>
-              {sourceOptions.map((facet) => (
-                <option key={facet.id} value={facet.id}>
-                  {facet.name}
-                  {facet.count === 0 ? '（暂无收录）' : `（${facet.count}）`}
-                </option>
+            </nav>
+            <nav className="category-cloud" data-testid="category-filter" aria-label="按领域筛选">
+              <a
+                className={`category-chip${category === undefined ? ' category-chip-active' : ''}`}
+                href={buildFilterHref(current, { category: '' })}
+                data-testid="category-filter-all"
+                aria-current={category === undefined ? 'true' : undefined}
+              >
+                全部领域
+              </a>
+              {DOMAIN_CATEGORIES.map((domain) => (
+                <a
+                  key={domain.label}
+                  className={`category-chip${category === domain.label ? ' category-chip-active' : ''}`}
+                  href={buildFilterHref(current, { category: domain.label })}
+                  data-testid="category-filter-link"
+                  aria-current={category === domain.label ? 'true' : undefined}
+                >
+                  {domain.label}
+                </a>
               ))}
-            </select>
-            <button className="filter-button" type="submit" data-testid="filter-submit">
-              筛选
-            </button>
-            {hasFilter && (
-              <Link className="filter-clear" href="/" data-testid="filter-clear">
-                清除筛选
-              </Link>
-            )}
-          </form>
-        </div>
-
-        {notices.length === 0 ? (
-          <div className="empty-state" data-testid="notice-empty-state">
-            <p className="empty-title">{hasFilter ? '没有符合筛选条件的公示' : '暂无公示条目'}</p>
-            {hasFilter ? (
-              <p className="empty-hint">
-                试试放宽或更换筛选条件，或
-                <Link className="search-back-link" href="/" data-testid="filter-clear-empty">
-                  清除全部筛选
+            </nav>
+            {/* 机关下拉 + 关键词框共用一个 GET 表单；其余筛选维度经隐藏字段保留。
+                表单名放在 <form> 上而不是外层 div（issue #53）：无 role 的 div 上的
+                aria-label 多数辅助技术不会暴露，而带名字的 form 是真正的表单地标。 */}
+            <form
+              className="filter-form"
+              action="/"
+              method="get"
+              data-testid="filter-form"
+              aria-label="按机关与关键词筛选"
+            >
+              {category !== undefined && <input type="hidden" name="category" value={category} />}
+              {/* 受众面也要留住（issue #83，与下面 sort / open / since 同一件事）：
+                  表单里没这个字段时，用户只填个关键词点「筛选」就会静默丢掉刚选的受众面，
+                  页面顶部却还显示着他筛过的那一档 */}
+              {audience !== undefined && <input type="hidden" name="audience" value={audience} />}
+              {from !== undefined && <input type="hidden" name="from" value={from} />}
+              {to !== undefined && <input type="hidden" name="to" value={to} />}
+              {period !== undefined && <input type="hidden" name="period" value={period} />}
+              {source !== undefined && <input type="hidden" name="source" value={source} />}
+              {/* 排序与范围同样要留住（issue #62，与 issue #50 的 lead 同一件事）：
+                  表单里没这些字段时，用户只填个关键词点「筛选」就会静默回到默认排序 +
+                  全部条目，页面顶部却还显示着他刚选的那一档 */}
+              {current.sort !== undefined && (
+                <input type="hidden" name="sort" value={current.sort} />
+              )}
+              {current.openOnly && <input type="hidden" name="open" value="1" />}
+              {current.sinceDays !== undefined && (
+                <input type="hidden" name="since" value={String(current.sinceDays)} />
+              )}
+              {/*
+                牵头口径也要留住（issue #50）：从统计页钻取进来的是 `?agency=X&lead=1`
+                （牵头机关，表格数字按它算），而表单此前只保留 category / from / to /
+                period —— 用户不改机关、只填个关键词点「筛选」，lead=1 就静默丢失，
+                口径退回「任一参与机关」，条数当场变化（发改委 25 → 26）。
+                只在带机关时才写：裸 lead=1 不改变任何结果（见 buildFilterHref）。
+              */}
+              {current.leadAgencyOnly && agency !== undefined && (
+                <input type="hidden" name="lead" value="1" />
+              )}
+              <input
+                className="filter-keyword"
+                type="search"
+                name="q"
+                defaultValue={keyword ?? ''}
+                placeholder="标题 / 正文关键词"
+                aria-label="关键词过滤"
+                data-testid="filter-keyword-input"
+              />
+              <select
+                className="filter-agency"
+                name="agency"
+                aria-label="按发布机关筛选"
+                data-testid="agency-filter-select"
+                defaultValue={agency ?? ''}
+              >
+                <option value="">全部机关</option>
+                {agencyOptions.map((name) => (
+                  <option key={name} value={name}>
+                    {name}
+                  </option>
+                ))}
+              </select>
+              {/*
+                来源下拉（issue #65）。与机关下拉同一处理（issue #39）：当前值若不在
+                选项里（登记表里已删掉这个源，老链接还在被分享），把它补成第一项 ——
+                否则 <select> 显示「全部来源」而列表其实按那个源筛过了，控件在说谎。
+                选项是**有收录记录的 + 登记表里的**全部源（0 条的也在：那正是
+                "源活着但不再送新东西"这种故障的可见化入口）。
+              */}
+              <select
+                className="filter-source"
+                name="source"
+                aria-label="按来源渠道筛选"
+                data-testid="source-filter-select"
+                defaultValue={source ?? ''}
+              >
+                <option value="">全部来源</option>
+                {sourceOptions.map((facet) => (
+                  <option key={facet.id} value={facet.id}>
+                    {facet.name}
+                    {facet.count === 0 ? '（暂无收录）' : `（${facet.count}）`}
+                  </option>
+                ))}
+              </select>
+              <button className="filter-button" type="submit" data-testid="filter-submit">
+                筛选
+              </button>
+              {hasFilter && (
+                <Link className="filter-clear" href="/" data-testid="filter-clear">
+                  清除筛选
                 </Link>
-                查看全部条目。
-              </p>
+              )}
+            </form>
+          </div>
+
+          {/* 结果区（主栏）：空态与列表二选一，后面跟着分页。
+              它在栅格里是**第二个**子项 —— 宽屏落在主栏（第二列），窄屏落在筛选条之后 */}
+          <div className="list-main">
+            {notices.length === 0 ? (
+              <div className="empty-state" data-testid="notice-empty-state">
+                <p className="empty-title">{hasFilter ? '没有符合筛选条件的公示' : '暂无公示条目'}</p>
+                {hasFilter ? (
+                  <p className="empty-hint">
+                    试试放宽或更换筛选条件，或
+                    <Link className="search-back-link" href="/" data-testid="filter-clear-empty">
+                      清除全部筛选
+                    </Link>
+                    查看全部条目。
+                  </p>
+                ) : (
+                  <p className="empty-hint">
+                    数据管线尚未收录任何官方公示。抓取管线接入后，这里将按截止日期倒计时展示全国人大、
+                    各部委等渠道的最新征求意见稿。
+                  </p>
+                )}
+              </div>
             ) : (
-              <p className="empty-hint">
-                数据管线尚未收录任何官方公示。抓取管线接入后，这里将按截止日期倒计时展示全国人大、
-                各部委等渠道的最新征求意见稿。
-              </p>
+              <ul className="notice-list">
+                {notices.map((notice) => (
+                  <NoticeItem key={notice.id} notice={notice} />
+                ))}
+              </ul>
+            )}
+
+            {/* 分页（issue #19）：纯链接翻页，保留全部筛选条件；单页时不渲染 */}
+            {totalPages > 1 && (
+              <nav className="pagination" data-testid="notice-pagination" aria-label="公示翻页">
+                {page > 1 ? (
+                  <Link
+                    className="pagination-link"
+                    href={buildFilterHref(current, { page: page - 1 })}
+                    data-testid="pagination-prev"
+                    rel="prev"
+                  >
+                    上一页
+                  </Link>
+                ) : (
+                  <span
+                    className="pagination-disabled"
+                    data-testid="pagination-prev-disabled"
+                    aria-disabled="true"
+                  >
+                    上一页
+                  </span>
+                )}
+                <span className="pagination-status" data-testid="pagination-status">
+                  {`第 ${page} / ${totalPages} 页`}
+                </span>
+                {page < totalPages ? (
+                  <Link
+                    className="pagination-link"
+                    href={buildFilterHref(current, { page: page + 1 })}
+                    data-testid="pagination-next"
+                    rel="next"
+                  >
+                    下一页
+                  </Link>
+                ) : (
+                  <span
+                    className="pagination-disabled"
+                    data-testid="pagination-next-disabled"
+                    aria-disabled="true"
+                  >
+                    下一页
+                  </span>
+                )}
+              </nav>
             )}
           </div>
-        ) : (
-          <ul className="notice-list">
-            {notices.map((notice) => (
-              <NoticeItem key={notice.id} notice={notice} />
-            ))}
-          </ul>
-        )}
-
-        {/* 分页（issue #19）：纯链接翻页，保留全部筛选条件；单页时不渲染 */}
-        {totalPages > 1 && (
-          <nav className="pagination" data-testid="notice-pagination" aria-label="公示翻页">
-            {page > 1 ? (
-              <Link
-                className="pagination-link"
-                href={buildFilterHref(current, { page: page - 1 })}
-                data-testid="pagination-prev"
-                rel="prev"
-              >
-                上一页
-              </Link>
-            ) : (
-              <span
-                className="pagination-disabled"
-                data-testid="pagination-prev-disabled"
-                aria-disabled="true"
-              >
-                上一页
-              </span>
-            )}
-            <span className="pagination-status" data-testid="pagination-status">
-              {`第 ${page} / ${totalPages} 页`}
-            </span>
-            {page < totalPages ? (
-              <Link
-                className="pagination-link"
-                href={buildFilterHref(current, { page: page + 1 })}
-                data-testid="pagination-next"
-                rel="next"
-              >
-                下一页
-              </Link>
-            ) : (
-              <span
-                className="pagination-disabled"
-                data-testid="pagination-next-disabled"
-                aria-disabled="true"
-              >
-                下一页
-              </span>
-            )}
-          </nav>
-        )}
+        </div>
       </section>
 
       <SiteFooter />

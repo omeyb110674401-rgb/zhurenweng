@@ -113,9 +113,16 @@ export interface ImpactOverview {
   total: number;
   /** 各类型的条数，固定顺序 risk → loophole → burden → other，且**只留 count > 0 的** */
   countsByKind: { kind: ImpactKind; count: number }[];
-  /** trim 后非空的主体去重（按首次出现顺序），最多 `IMPACT_OVERVIEW_WHO_MAX` 个 */
+  /**
+   * trim 后非空、**且不含顿号**的主体去重（按首次出现顺序），最多 `IMPACT_OVERVIEW_WHO_MAX` 个。
+   * 顿号那条规则的理由写在 `impactOverview` 里（概览是索引，一串枚举不是一个主体类别）。
+   */
   topWho: string[];
-  /** 去重后的主体总数 − `topWho.length`（0 = 没有溢出，不写"等 N 类"） */
+  /**
+   * **去重后的主体总数** − `topWho.length`（0 = 没有溢出，不写"等 N 类"）。
+   * 被顿号规则筛掉的那些**也算在这里面**：它们不进索引，但必须进计数 ——
+   * 少报的「等 N 类」会让读者以为已经看全了。
+   */
   whoOverflow: number;
   /** `共 6 处：2 处… · 2 处…`；`total === 0` ⇒ null（页面据此不渲染这一行） */
   countsLine: string | null;
@@ -148,6 +155,10 @@ const IMPACT_KIND_ORDER: ImpactKind[] = ['risk', 'loophole', 'burden', 'other'];
  *
  * 措辞用 `IMPACT_KIND_LABELS` 的**实际取值**（不在这里另抄一份中文）：那份表是类型的
  * 单一来源，抄一份的后果是页面上同一个类型出现两种叫法。
+ *
+ * 第三条规矩是 `topWho` **只收不含顿号的主体**（2026-10-02 第二刀残留第 4 件）：概览是给人
+ * **扫**的一行、它的用处是**索引**，而顿号＝枚举 —— 一串枚举不是一个"主体类别"，混进这一行
+ * 就会与概览自己的连接符撞成一句分不出边界的连写。完整理由与代价写在下面筛那一步的注释里。
  */
 export function impactOverview(impacts: QuotedImpactPoint[]): ImpactOverview {
   const countsByKind = IMPACT_KIND_ORDER.map((kind) => ({
@@ -164,7 +175,30 @@ export function impactOverview(impacts: QuotedImpactPoint[]): ImpactOverview {
     seen.add(who);
     whoAll.push(who);
   }
-  const topWho = whoAll.slice(0, IMPACT_OVERVIEW_WHO_MAX);
+
+  /**
+   * **概览只收不含顿号的主体**（去重之后、截断之前筛，所以去重与首次出现顺序都不受影响）。
+   *
+   * 为什么：顿号＝枚举，而**一串枚举不是一个"主体类别"**。旧行的 `who` 自己就带顿号，
+   * 与概览用来连接主体的顿号是同一个字，于是「影响：A、B、C」里读者分不出一个主体在哪结束 ——
+   * 线上 `0b00deff17dfa050` 那条 6 个主体连成一句没有边界的长句。而概览是给人**扫**的一行，
+   * 它的用处是**索引**：**索引条目读不出边界就没有意义**。
+   *
+   * 为什么是"筛掉"而不是"换个分隔符"：换连接符只是把"读错"换成"更挤"，边界问题一个字没解决。
+   * 而且被筛掉的条目**并没有丢信息**：它照旧完整地显示在**每条判读自己那一行**（`impactLine`），
+   * 概览的「等 N 类」也照实把它数进去（口径见下面的 `whoOverflow`）—— 只是不进这一行索引。
+   *
+   * 这条规则**只对旧行动刀**：`who` ≤20 字单一主体是第二刀才写进提示词的契约，在那之前产出的
+   * 存量行里顿号很常见（改前最长 29 字、常是三四个主体连写）。第二刀重跑过的 3 条公示
+   * `who` 里顿号数是 0 —— **新数据一个字都不会变**。
+   */
+  const listable = whoAll.filter((who) => !who.includes('、'));
+  const topWho = listable.slice(0, IMPACT_OVERVIEW_WHO_MAX);
+
+  /**
+   * 溢出按**去重后的主体总数**算，不是按能列的那些算 —— 被顿号规则筛掉的也在内。
+   * 少报的「等 N 类」正是"看不见的缺口"：读者会以为这一行已经覆盖了全部主体。
+   */
   const whoOverflow = whoAll.length - topWho.length;
 
   return {

@@ -17,6 +17,10 @@ import {
  *    退化成只显示 who 就等于把新加的"方面"静默丢掉（那正是本刀要加的东西）。
  * 2. `impactOverview`：块首概览，**程序聚合、不额外调模型**。它把"N 处判读"与"都是些什么"
  *    压成两行，所以每一个数都要与下面的条目对得上 —— 数错了读者不会发现（他没法一条条数）。
+ * 3. 概览**只收不含顿号的主体**（2026-10-02 第二刀残留第 4 件）：顿号＝枚举，而概览是给人
+ *    **扫**的一行、用处是**索引** —— 索引条目读不出边界就没有意义。被筛掉的条目**不丢信息**：
+ *    它在每条判读自己那一行上照旧完整，也照旧计入「等 N 类」。这条规则**只对旧行动刀**
+ *    （第二刀重跑过的 3 条公示 `who` 里顿号数是 0，新数据一个字都不变）。
  *
  * **上限为什么必须 import 常量**：`topWho` 列几个（4 还是 3）用户还没拍板（规格 7.5 明写
  * "待定"）。把 3/4 写进断言，等于把"待定"偷偷变成一个测试里的事实 —— 用户拍 4 的那天，
@@ -46,6 +50,24 @@ function impact(parts = {}) {
 function distinctWho(count) {
   return Array.from({ length: count }, (_, index) => `主体${index + 1}`);
 }
+
+/**
+ * 线上旧行的**真实夹具**：`0b00deff17dfa050`《中华人民共和国反网络暴力法（征求意见稿）》
+ * 落库摘要里的 6 条判读（`who` / `kind` 逐字抄自那条真实落库行，没有 `point` —— 那正是
+ * 第二刀之前的形状）。这条公示**已截止、不在方案 B 的重跑范围**，所以它就是"范围外旧行"。
+ */
+const PRODUCTION_IMPACTS = [
+  { who: '进行批评性报道、爆料的媒体和自媒体账号', kind: 'loophole' },
+  { who: '网络服务提供者', kind: 'burden' },
+  { who: '不愿实名发言的用户以及依赖匿名用户的中小平台', kind: 'risk' },
+  { who: '被平台限流、暂停或关闭账号的用户', kind: 'loophole' },
+  { who: '整理、使用他人已公开个人信息开展营销或业务的机构', kind: 'risk' },
+  { who: '收集社交、医疗、地理位置信息的平台企业', kind: 'burden' },
+].map((parts) => impact(parts));
+
+/** 改前线上实取的那一行（逐字）：6 个主体被顿号连成一句，读者分不出一个主体在哪结束。 */
+const PRODUCTION_RUN_ON =
+  '影响：进行批评性报道、爆料的媒体和自媒体账号、网络服务提供者、不愿实名发言的用户以及依赖匿名用户的中小平台、被平台限流、暂停或关闭账号的用户 等 2 类';
 
 describe('issue #88：「影响：<主体> · <方面>」这一行（impactLine）', () => {
   it('两半都有 ⇒ 用「 · 」连起来（用户 2026-10-02 给的正例形状）', () => {
@@ -226,5 +248,99 @@ describe('issue #88：块首概览（impactOverview）', () => {
     assert.equal(overview.total, 3);
     assert.equal(overview.countsLine, '共 3 处：3 处可能的不利后果');
     assert.equal(overview.whoLine, '影响：平台');
+  });
+
+  /**
+   * 下面四条是「概览只收不含顿号的主体」这一刀的判据（2026-10-02 第二刀残留第 4 件）。
+   *
+   * 顿号＝枚举，而**一串枚举不是一个"主体类别"**：旧行的 `who` 自己就带顿号，与概览连接
+   * 主体用的顿号是同一个字，于是「影响：A、B、C」在读者眼里分不出一个主体在哪结束。
+   * 概览是给人**扫**的一行、用处是**索引** —— 索引条目读不出边界就没有意义。
+   * 被筛掉的条目**不进这一行**，但它在**每条判读自己那一行**照旧完整，也照旧计入「等 N 类」。
+   */
+  it('带顿号的主体不进 topWho，但**计入** whoOverflow（不进索引 ≠ 不算数）', () => {
+    const overview = impactOverview([
+      impact({ who: '进行批评性报道、爆料的媒体和自媒体账号' }),
+      impact({ who: '网络服务提供者' }),
+      impact({ who: '平台' }),
+      impact({ who: '进行批评性报道、爆料的媒体和自媒体账号' }),
+    ]);
+    assert.deepEqual(
+      overview.topWho,
+      ['网络服务提供者', '平台'],
+      '带顿号的那个不进索引，也不影响其余主体的**首次出现顺序**（去重仍按原顺序做）',
+    );
+    assert.equal(overview.whoOverflow, 1, '被筛掉的那个也要算进「等 N 类」—— 少报就是看不见的缺口');
+    assert.equal(overview.whoLine, '影响：网络服务提供者、平台 等 1 类');
+  });
+
+  it('全部主体都带顿号 ⇒ topWho 为空、whoLine 为 null，但计数行照常（不印一行光秃秃的「影响：」）', () => {
+    const overview = impactOverview([
+      impact({ who: '进行批评性报道、爆料的媒体和自媒体账号', kind: 'loophole' }),
+      impact({ who: '被平台限流、暂停或关闭账号的用户', kind: 'risk' }),
+    ]);
+    assert.deepEqual(overview.topWho, []);
+    assert.equal(overview.whoLine, null, '一个干净主体都没有时，那一行整行不出现（与"全都写不出主体"同一条规矩）');
+    assert.equal(overview.whoOverflow, 2, '口径统一：whoOverflow 是"没进索引的去重主体数"，与 whoLine 印不印无关');
+    assert.equal(overview.countsLine, '共 2 处：1 处可能的不利后果 · 1 处可能被规避或滥用');
+  });
+
+  it('不含顿号的新数据 ⇒ 概览逐字与改动前一致（回归守卫：重跑过的 3 条一个字都不该变）', () => {
+    // 形状取自线上重跑后的实取（88 号文档 7.9）：who 是 ≤20 字的单一主体，point 是新字段。
+    const shantong = impactOverview([
+      impact({ who: '三同产品生产企业', point: '备案程序与合规成本' }),
+      impact({ who: '中小外贸企业' }),
+      impact({ who: '三同产品消费者' }),
+    ]);
+    assert.deepEqual(shantong.topWho, ['三同产品生产企业', '中小外贸企业', '三同产品消费者']);
+    assert.equal(shantong.whoOverflow, 0);
+    assert.equal(shantong.whoLine, '影响：三同产品生产企业、中小外贸企业、三同产品消费者');
+
+    const gonglu = impactOverview([
+      impact({ who: '高速公路通行车主', point: '通行费用支出' }),
+      impact({ who: '收费公路通行车主' }),
+      impact({ who: '地方举债建路沿线通行者' }),
+    ]);
+    assert.equal(gonglu.whoLine, '影响：高速公路通行车主、收费公路通行车主、地方举债建路沿线通行者');
+
+    // 干净数据超过上限时，「等 N 类」的口径也与改动前一模一样（筛顿号那一步对它是空操作）。
+    const many = distinctWho(IMPACT_OVERVIEW_WHO_MAX + 2);
+    const overflowed = impactOverview(many.map((who) => impact({ who })));
+    assert.equal(overflowed.whoOverflow, 2);
+    assert.equal(overflowed.whoLine, `影响：${many.slice(0, IMPACT_OVERVIEW_WHO_MAX).join('、')} 等 2 类`);
+  });
+
+  it('线上那条旧行（6 个主体里只有 2 个不含顿号）⇒ 概览不再把 6 个连成一句', () => {
+    // 先证明这个夹具**真的复现了改前那一行**（照旧实现的算法现算一遍）——
+    // 否则"不再连写"是一句没有对象的话。
+    const whoAll = [...new Set(PRODUCTION_IMPACTS.map((item) => item.who.trim()))];
+    const legacy =
+      `影响：${whoAll.slice(0, IMPACT_OVERVIEW_WHO_MAX).join('、')}` +
+      (whoAll.length > IMPACT_OVERVIEW_WHO_MAX ? ` 等 ${whoAll.length - IMPACT_OVERVIEW_WHO_MAX} 类` : '');
+    assert.equal(legacy, PRODUCTION_RUN_ON, '夹具要能复现改前那一行，这条用例才钉得住东西');
+
+    const overview = impactOverview(PRODUCTION_IMPACTS);
+    assert.deepEqual(overview.topWho, ['网络服务提供者', '不愿实名发言的用户以及依赖匿名用户的中小平台']);
+    assert.equal(overview.whoOverflow, 4, '另外 4 个（含顿号的）不进索引，但一个都不能少报');
+    assert.equal(overview.whoLine, '影响：网络服务提供者、不愿实名发言的用户以及依赖匿名用户的中小平台 等 4 类');
+    assert.notEqual(overview.whoLine, PRODUCTION_RUN_ON, '改后不许再是那一串分不出边界的连写');
+    assert.equal(
+      overview.countsLine,
+      '共 6 处：2 处可能的不利后果 · 2 处可能被规避或滥用 · 2 处新增的义务或成本',
+      '计数行一个字都不该变（线上实取逐字）',
+    );
+
+    // 不进索引 ≠ 不显示：被筛掉的 4 个主体在**每条判读自己那一行**上照旧完整。
+    for (const item of PRODUCTION_IMPACTS) {
+      assert.ok(impactLine(item).includes(item.who), `「${item.who}」仍要在它自己那一行上完整出现`);
+    }
+
+    /**
+     * **已知残留（本刀按 Lead 定的判据只筛顿号，别把它当 bug 查）**：第 3 个主体没有顿号、
+     * 却是用「以及」连起来的复合主体，所以它**留在**索引里。概览从"6 个连成一句"收到"2 个"，
+     * 但这一条本身仍是复合的 —— 要不要把「以及」这类枚举连接词也纳入判据是另一刀的决定，
+     * 本刀不自作主张。这条断言把当前行为**显式钉住**，免得它悄悄漂移。
+     */
+    assert.ok(overview.topWho.includes('不愿实名发言的用户以及依赖匿名用户的中小平台'));
   });
 });
