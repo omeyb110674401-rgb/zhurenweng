@@ -96,6 +96,11 @@ const TARGETS = {
   // 撤 SSR 侧源码不会红 —— 所以那两处由 `tests/unit/feed-intake-note.test.mjs` 按**源码接线**
   // 钉住（判据本身仍在 .ts 里，另有用例）。这两个键就是给它们用的。
   summaryView: 'src/app/_lib/summary-view.tsx',
+  // 2026-10-02 收尾：详情页容器的宽度规则。靶子是 CSS，而断言在
+  // `tests/e2e/detail-layout.test.mjs` 里 —— 那条用例用 `readSource()` **直读源码文件**
+  // （该文件头的原话：断点这类东西没有浏览器就断言不了），所以撤源码能让它变红。
+  // 这不是"e2e 跑构建产物、撤源码不红"那条规则被打破，而是那条用例本来就不吃构建产物。
+  pageCss: 'src/app/globals.css',
   summaryGate: 'scripts/show-notice-summary.mjs',
   // 2026-09-30：点名补摘要的工具（`--ids`，默认只读）。它是一条**生产写入**通道，
   // 所以"默认不写库""已有摘要要 --replace""覆盖前先备份"这三条各自要被撤一次。
@@ -1387,21 +1392,23 @@ const CASES = [
     pattern: '页面真的用了 shouldRenderWho',
     test: 'tests/unit/who-display.test.mjs',
   },
+  // ── 2026-10-02 收尾：这里原本有一条「「谁能提」那一段被加回去」的钉子 ────────────
+  // 它随 `whoCanSubmit` **整体删除**一起失效了：那条 `to` 注入的
+  // `section={summary.whoCanSubmit}` 指向已删字段，`pattern: '谁能提'` 也已经选不中任何
+  // 用例名 —— 脚本会判"名字模式没匹配到任何测试"，pretest 直接 exit 1。
+  // 按本仓库的口径（"留一条钉不住的 pin，下一轮就会以为它被验证过"）**删掉它**，
+  // 活的守卫换成**形状那一侧**：下面这一条（把删掉的键塞回去必须变红）。
   {
-    // 把删掉的那一段加回去。判据：源码里不许再出现那个 testid 与标题 ——
-    // 加了就必须有人当场解释为什么（96 条里 95 条等价于"公众可提"、28% 是空的）。
-    //
-    // 靶点为什么取**注释的开头**（`{/*` + 下一行）而不是某一行的 `testId="…"`：
-    // 第一版取的是 `testId="summary-deadline"`，而插回去的那一行**自带** `testId=`，
-    // 于是同一个 JSX 元素上出现两个同名属性 —— `tsc` 报 TS17001、测试文件直接跑不起来，
-    // 脚本会把它记成"这条用例不成立"（真撤真红，但红的原因是语法错，钉不住任何东西）。
-    // 注释行是**唯一且稳定**的锚点（本文件里 `{/*` + 段名这种写法每段只出现一次），
-    // 插在它前面的那一行与插回原位等价。
-    label: '「谁能提」那一段被加回去（复述"这是征求意见稿"的已知事实）',
-    file: 'summaryView',
-    from: '        {/*\n         * 可能的争议点（issue #86 第 1 刀）',
-    to: '        <SectionBlock notice={notice} label="谁能提" section={summary.whoCanSubmit} testId="summary-who-can-submit" />\n        {/*\n         * 可能的争议点（issue #86 第 1 刀）',
-    pattern: '谁能提',
+    // 删东西的钉子长这样：**把删掉的那一行加回去，必须有人当场解释为什么**。
+    // 靶点取 `parseQuotedSummary` 里 `who` 那一行：它在 `summary-content.ts` 里只出现
+    // 一次（`buildQuotedSummary` 里那行写法不同），所以 `from` 的首次命中就是要撤的那处
+    // （本脚本的规则 4）。`to` 里插回去的键让 `tsc` 报"多余属性"没关系 —— 本脚本只跑
+    // `node --test`（类型剥离，不看类型）。
+    label: '`whoCanSubmit` 被塞回落库形状（一个永不显示的字段又回来了）',
+    file: 'summaryContent',
+    from: '    who: optionalSection(record.who),',
+    to: '    who: optionalSection(record.who),\n    whoCanSubmit: optionalSection(record.whoCanSubmit),',
+    pattern: '摘要形状里不再有',
     test: 'tests/unit/who-display.test.mjs',
   },
   {
@@ -1997,6 +2004,66 @@ const CASES = [
     to: 'const overview = { countsLine: null, whoLine: null };',
     pattern: '页面真的用了 impactLine 与 impactOverview',
     test: 'tests/unit/who-display.test.mjs',
+  },
+  // ── 2026-10-02 收尾：概览的主体索引 + 两处版式宽度 + 列表页两栏 ──────────────
+  {
+    // 概览把主体用顿号连成一行，而旧行的 `who` 自己就带顿号（契约之前产的）：线上
+    // `0b00deff17dfa050` 那条 6 个主体就读成一句没有边界的长句。判据是**顿号＝枚举，
+    // 一串枚举不是一个主体类别**，不进索引（每条判读自己那行照旧完整显示，「等 N 类」照实数）。
+    // 两条分开钉，因为失效方式不同：少筛是"又连写"，少报是"等 N 类数少了"（缺口看不见）。
+    label: '概览不再筛掉带顿号的主体（旧行又连成一句没有边界的长句）',
+    file: 'impactDisplay',
+    from: "  const listable = whoAll.filter((who) => !who.includes('、'));",
+    to: '  const listable = whoAll;',
+    pattern: '带顿号的主体不进 topWho',
+    test: 'tests/unit/impact-overview.test.mjs',
+  },
+  {
+    label: '概览的「等 N 类」少报（被筛掉的主体既没列出来、也不计数）',
+    file: 'impactDisplay',
+    from: '  const whoOverflow = whoAll.length - topWho.length;',
+    to: '  const whoOverflow = listable.length - topWho.length;',
+    pattern: '带顿号的主体不进 topWho',
+    test: 'tests/unit/impact-overview.test.mjs',
+  },
+  {
+    // 容器宽度：写死 px 就回到"视口跨过 1000px 时从 760 一步跳到 952"。
+    // 靶子是 CSS，而断言在 `tests/e2e/detail-layout.test.mjs` 里 —— 那条用例用
+    // `readSource()` **直读源码文件**（该文件头的原话：断点这类东西没有浏览器就断言不了），
+    // 所以撤源码能让它变红，不算破"e2e 跑构建产物"那条规则。
+    label: '详情页容器宽度退回写死的 px（断点处又开始跳一次）',
+    file: 'pageCss',
+    from: '  max-width: min(1120px, max(760px, 100vw - 48px));',
+    to: '  max-width: 1120px;',
+    pattern: '窄屏保持 760px 居中',
+    test: 'tests/e2e/detail-layout.test.mjs',
+  },
+  {
+    label: '列表页容器宽度退回写死的 px（断点处跳变回归）',
+    file: 'pageCss',
+    from: '.page:has(.list-page) { max-width: min(1120px, max(760px, 100vw - 48px)); }',
+    to: '.page:has(.list-page) { max-width: 1120px; }',
+    pattern: '容器宽度是连续式',
+    test: 'tests/e2e/list-layout.test.mjs',
+  },
+  {
+    // 第一版靠栅格自动放置，结果**筛选条占掉主栏、列表被塞进 320px 的右栏** ——
+    // 与详情页那一刀同族：结构看着对、渲染出来是错的，而 e2e 没有浏览器照样看不出来。
+    // 要的方向是"列表在左、筛选在右"，与 DOM 顺序相反 ⇒ 列位只能写死。
+    label: '列表页的列位退回「靠自动放置」（列表被塞进 320px 的右栏）',
+    file: 'pageCss',
+    from: '  .page:has(.list-page) .list-layout > .filter-bar { grid-column: 2; grid-row: 1; }',
+    to: '  .page:has(.list-page) .list-layout > .filter-bar { grid-column: auto; grid-row: 1; }',
+    pattern: '宽屏的列位写死了',
+    test: 'tests/e2e/list-layout.test.mjs',
+  },
+  {
+    label: '列表页的主栏不再显式落在第 1 列（同上，另一头）',
+    file: 'pageCss',
+    from: '  .page:has(.list-page) .list-main { grid-column: 1; grid-row: 1; }',
+    to: '  .page:has(.list-page) .list-main { grid-column: 2; grid-row: 1; }',
+    pattern: '宽屏的列位写死了',
+    test: 'tests/e2e/list-layout.test.mjs',
   },
 ];
 
