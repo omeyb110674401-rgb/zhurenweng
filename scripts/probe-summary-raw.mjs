@@ -57,7 +57,7 @@ function shapeOf(record, key) {
   return `非字符串(${Array.isArray(value) ? 'array' : typeof value})`;
 }
 
-const FIELDS = ['what', 'who', 'whoCanSubmit', 'afterDeadline', 'deadline', 'howToComment'];
+const FIELDS = ['what', 'who', 'afterDeadline', 'deadline', 'howToComment'];
 
 // 先探一次端口：本地环境没配密钥时 createLlmPort() 默认给 stub，它会「秒返回成功」
 // 且根本不发请求 —— 探针在 stub 上跑出来的一切都没有意义，必须当场说清（实测踩过）

@@ -26,12 +26,11 @@ import type { QuotedStructuredSummary, SummaryQuotes } from '../../summary-conte
 /**
  * stub 返回的固定摘要，是 E2E 场景断言的基准值。
  * issue #55 起为「参与导引」形状：没有 keyPoints（公告壳里本来就没有条款），
- * 多出来的是谁能提 / 逾期会怎样 / 可操作的渠道清单。
+ * 多出来的是逾期会怎样 / 可操作的渠道清单。
  */
 export const STUB_SUMMARY: StructuredSummary = {
   what: '【stub】这是一份政府公示征求意见稿（固定测试摘要）。',
   who: '【stub】受该草案影响的公众与相关主体（固定测试文案）。',
-  whoCanSubmit: '【stub】社会各界均可就草案提出意见（固定测试文案）。',
   afterDeadline: '【stub】逾期未反馈将视为无意见（固定测试文案）。',
   deadline: '2026-12-31',
   howToComment: '【stub】请前往官方原文页面按指引提交意见。',
@@ -45,7 +44,6 @@ export const STUB_SUMMARY: StructuredSummary = {
 export const STUB_SUMMARY_QUOTES: SummaryQuotes = {
   what: '社会公开征求意见。',
   who: '国家建立基本医疗保险制度，保障公民在患病时获得基本医疗服务和物质帮助。',
-  whoCanSubmit: '征求社会各界意见',
   afterDeadline: '意见反馈截止日期为',
   deadline: '征求意见截止日期：',
   howToComment: '登录中国人大网（www.npc.gov.cn）进入征求意见页面提交意见',

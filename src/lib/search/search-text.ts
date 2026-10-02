@@ -145,7 +145,7 @@ function quoteFts5String(text: string): string {
 
 /**
  * 摘要检索文本：AI 摘要各段的 text 拼接（参与导引口径：这是什么 / 影响谁 /
- * 谁能提 / 逾期会怎样 / 截止日期 / 如何提意见 / 渠道地址），原文引用（quote）
+ * 逾期会怎样 / 截止日期 / 如何提意见 / 渠道地址），原文引用（quote）
  * 不入索引（PRD：索引字段含标题、AI 摘要、正文；引用是原文片段，入索引会造成
  * 重复命中偏置）。`keyPoints` 现为**草案条文要点**（issue #57 第 6 步）：要点的文字进索引，
  * 所以搜条文里的说法能命中该条目；出处附件名不进索引（那是元信息，不是内容）。
@@ -157,7 +157,6 @@ export function summarySearchText(aiSummary: unknown): string {
   const sections = [
     summary.what.text,
     summary.who.text,
-    summary.whoCanSubmit.text,
     summary.afterDeadline.text,
     ...summary.keyPoints.map((point) => point.text),
     summary.deadline.text ?? '',

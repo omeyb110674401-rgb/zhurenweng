@@ -4,6 +4,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, it } from 'node:test';
 import { shouldRenderWho } from '../../src/lib/impact-display.ts';
+import { buildQuotedSummary, parseQuotedSummary } from '../../src/lib/summary-content.ts';
 
 /**
  * 单元：摘要卡「影响谁」的渲染判据 + 卡片内部的段落顺序（2026-10-02 两栏版式这一刀）。
@@ -18,9 +19,10 @@ import { shouldRenderWho } from '../../src/lib/impact-display.ts';
  * 3. **段落顺序**（DOM 契约）：顺序本身是用户拍板的决定（规格第四节），
  *    而它是"看起来对、其实错位"那一类最容易在重构里被挪回去的东西。
  *
- * 「谁能提」为什么整段不再渲染：见 `summary-view.tsx` 的头注（96 条摘要里 95 条等价于
- * "公众可提"、平均 10.4 字、28% 是空的 —— 它复述的是读者点进来之前就知道的事实）。
- * 这条用**反向断言**钉住：那一段回来了，就必须有人当场解释为什么。
+ * 「谁能提」为什么不再存在：字段本身已于 2026-10-02 删除（渲染先删，随后提示词 / 形状解析 /
+ * 落库 / 检索 / 后台表单一起删）。删它的理由见 `summary-view.tsx` 的头注（96 条摘要里 95 条
+ * 等价于"公众可提"、平均 10.4 字、28% 是空的 —— 它复述的是读者点进来之前就知道的事实）。
+ * 靶子因此从"页面不渲染那一段"移到**摘要形状里没有这个键**，见下面那条用例。
  */
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
@@ -135,15 +137,44 @@ describe('2026-10-02 两栏版式：摘要卡的段落顺序与门控接线（�
     );
   });
 
-  it('「谁能提」整段不再渲染（`summary-who-can-submit` 节点与标题都不许在）', () => {
+  /**
+   * 这一条**换过靶子**（2026-10-02 删 `whoCanSubmit` 字段时）。
+   *
+   * 原来钉的是「`summary-who-can-submit` 节点与 `label="谁能提"` 都不许在页面上」——
+   * 那在字段还在的时候是活的（数据能驱动那一段回来）。字段删掉之后它钉不住任何东西：
+   * 没有数据能渲染出那一段，断言永远为真。而**永远为真的 pin 比没有 pin 更坏** ——
+   * 下一轮的人会以为"这一段被验证过"，其实它连一次失败的机会都没有。
+   *
+   * 换成活的：这一刀删的是"我们不再生成、不再认识它"，所以靶子移到**形状**上 ——
+   * ① 我们造出来的摘要里没有这个键；
+   * ② 旧行（生产库里那 97 条）带着这个键，解析器照旧吃下、且**不许把它带进内存形状** ——
+   *    带出来就等于字段还在，只不过没人渲染，而那正是这一刀要终结的状态。
+   */
+  it('摘要形状里不再有 `whoCanSubmit`：新产物没有这个键，带这个键的旧行读出来即丢弃', () => {
+    const built = buildQuotedSummary({
+      what: '这是什么',
+      who: '',
+      afterDeadline: '',
+      deadline: null,
+      howToComment: '如何提意见',
+      channels: [],
+    });
     assert.ok(
-      !source.includes('summary-who-can-submit'),
-      '那一段已经删除：取值 95/96 等价于"公众可提"、平均 10.4 字、28% 是空的',
+      !Object.hasOwn(built, 'whoCanSubmit'),
+      '「谁能提」已删：buildQuotedSummary 的产物上不许再有这个键',
     );
+
+    // 旧行：生产库里那 97 条摘要的形状（多一个 whoCanSubmit 段）
+    const legacy = parseQuotedSummary({
+      ...built,
+      whoCanSubmit: { text: '社会各界均可提出意见', quote: '征求社会各界意见' },
+    });
+    assert.ok(legacy, '旧行必须照常解析 —— 读不出来它们会从「有摘要」掉回「待人工复核」占位');
     assert.ok(
-      !source.includes('label="谁能提"'),
-      '光删 testid 不够 —— 标题还在就等于那一段还在',
+      !Object.hasOwn(legacy, 'whoCanSubmit'),
+      '多出来的键读出来即丢弃，不许进内存形状（否则字段只是"没人渲染"，不是删掉了）',
     );
+    assert.equal(legacy.afterDeadline.text, '', '其余各段一个都不能少');
   });
 
   it('页面真的用了 shouldRenderWho（判据写对了却没接上，是这一类改动最常见的断线）', () => {

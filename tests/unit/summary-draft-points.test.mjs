@@ -34,7 +34,6 @@ const DRAFT = [
 const BASE_SUMMARY = {
   what: '就机场垃圾管理办法征求意见',
   who: '',
-  whoCanSubmit: '',
   afterDeadline: '',
   deadline: null,
   howToComment: '邮件反馈',

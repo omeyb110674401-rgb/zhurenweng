@@ -29,11 +29,10 @@ import { buildQuotedSummary } from '../../src/lib/summary-content.ts';
  * 全程零网络：用假 fetch 断言请求，用固定响应断言解析。
  */
 
-/** 参与导引形状的一份合法模型输出（issue #55：没有 keyPoints，多了谁能提 / 逾期 / 渠道） */
+/** 参与导引形状的一份合法模型输出（issue #55：没有 keyPoints，多了逾期 / 渠道） */
 const VALID_CONTENT = JSON.stringify({
   what: '某征求意见稿公开征求意见',
   who: '运输机场运营人',
-  whoCanSubmit: '社会各界均可提出意见',
   afterDeadline: '逾期视为无意见',
   deadline: '2026-10-07',
   howToComment: '通过电子邮箱或信函反馈',
@@ -44,7 +43,6 @@ const VALID_CONTENT = JSON.stringify({
   quotes: {
     what: '现向社会公开征求意见',
     who: '本规定适用于运输机场运营人',
-    whoCanSubmit: '社会各界均可向本机关反馈意见',
     afterDeadline: '逾期不再受理',
     deadline: '截止日期为：2026年10月7日',
     howToComment: '一、电子邮箱：a@b.gov.cn',
@@ -202,7 +200,6 @@ describe('LLM 响应处理：脏数据一律抛错，绝不落库', () => {
     });
     assert.equal(summary.deadline, '2026-10-07');
     assert.equal('keyPoints' in summary, false, '新输出不再产生 keyPoints（公告壳里没有条款可概括）');
-    assert.equal(summary.whoCanSubmit, '社会各界均可提出意见');
     assert.equal(summary.afterDeadline, '逾期视为无意见');
     assert.deepEqual(
       summary.channels.map((channel) => channel.kind),
@@ -210,6 +207,31 @@ describe('LLM 响应处理：脏数据一律抛错，绝不落库', () => {
     );
     assert.equal(summary.quotes?.channels?.length, 2, '引用与渠道条数一致');
     assert.equal(summary.quotes?.deadline, '截止日期为：2026年10月7日');
+  });
+
+  /**
+   * 2026-10-02 删掉「谁能提」（`whoCanSubmit`）字段之后，这里钉的是**删除本身**：
+   * 端口形状由 `normalizeModelSummary` 逐个键列出来，模型多吐的键一律丢弃 ——
+   * 所以「模型照旧吐这个键」不会让它复活。这一条要能变红只需有人把那个键加回返回对象。
+   */
+  it('模型多吐已删除的 `whoCanSubmit` 也不带出来（形状是适配器列出来的，不是照抄模型）', async () => {
+    const summary = await withContent(
+      JSON.stringify({
+        what: 'a',
+        who: 'b',
+        whoCanSubmit: '社会各界均可提出意见',
+        afterDeadline: '',
+        howToComment: 'c',
+        channels: [],
+        quotes: { whoCanSubmit: '征求社会各界意见' },
+      }),
+    ).summarize({ title: 't', url: 'u', bodyText: 'b' });
+    assert.equal('whoCanSubmit' in summary, false, '字段已删：模型多吐的键不许进端口形状');
+    assert.equal(
+      Object.hasOwn(summary.quotes ?? {}, 'whoCanSubmit'),
+      false,
+      '引用那一侧同理 —— 键名还在就等于字段没删干净',
+    );
   });
 
   it('渠道：适配器一项都不删，未知 kind 归 other（删项会让引用与渠道错位）', async () => {
@@ -311,13 +333,12 @@ describe('LLM 响应处理：脏数据一律抛错，绝不落库', () => {
       assert.equal(summary.what, 'a');
       assert.equal(summary.howToComment, 'c');
     }
-    // 原文可能确实没写的两段**不能**必填，否则只会逼模型编一句
+    // 原文可能确实没写的这一段**不能**必填，否则只会逼模型编一句
     const sparse = await withContent('{"what":"a","who":"b","howToComment":"c"}').summarize({
       title: 't',
       url: 'u',
       bodyText: 'b',
     });
-    assert.equal(sparse.whoCanSubmit, '', '谁能提缺省为空串');
     assert.equal(sparse.afterDeadline, '', '逾期会怎样缺省为空串');
     assert.deepEqual(sparse.channels, [], '渠道缺省为空数组');
   });

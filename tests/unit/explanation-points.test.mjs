@@ -37,7 +37,6 @@ function base(overrides) {
   return {
     what: '就该法修正草案征求意见',
     who: '',
-    whoCanSubmit: '',
     afterDeadline: '',
     deadline: null,
     howToComment: '登录官网提交',

@@ -90,7 +90,7 @@ export const SYSTEM_PROMPT = [
   '重要背景：网页正文通常只是公告本身；草案条文、标准文本、名单在**附件**里，只有给了「附件条文」段落时你才真的看得到它们。',
   '因此：没有「附件条文」段落时，不要编写、推测或概括任何「条款内容」，只回答公告里真实存在的参与信息。',
   '请只输出一个 JSON 对象（不要输出任何解释、markdown 代码围栏或其他文字），字段如下：',
-  '{"what":"这是什么：一句话概括这份公示在做什么，40 字以内","who":"影响谁：只有原文明确写出受这份文件影响的主体时才写（如运输机场运营人、医疗器械注册人、标准起草单位）；原文只写「社会公众」「有关单位和个人」这类泛称时**留空字符串** —— 那是「谁能提」，不是「影响谁」。这类页面的正文通常不含受影响主体（它在附件的草案里），宁可留空也不要推断","whoCanSubmit":"谁能提：原文写明的可提出意见的主体或范围；原文未提及则留空字符串","afterDeadline":"逾期会怎样：原文写明超过截止日期后如何处理（如逾期视为无意见、不再受理）；原文未提及则留空字符串","keyPoints":["草案条文要点：仅当给出「附件条文」时填写，2-4 条从条文中读到的实质规定，每条一句话、40 字以内；没有附件条文段落时必须为空数组"],"explanationPoints":[{"heading":"照抄说明里的小节标题（如 一、项目概况）","text":"这一节说了什么：一句话，60 字以内","quote":"这一节的逐字原文，200 字以内"}],"impacts":[{"quote":"这一条/这一处的逐字原文（中间可以省略，但每一截都要逐字对得上）","who":"具体可能受影响的主体：单一类别、20 字以内、最多一个顿号，写不出就留空字符串","point":"受影响的东西或方面（不是主体）：12 字以内，如 匿名发声空间 / 纠错渠道 / 合规成本，写不出就留空字符串","text":"可能带来什么：一句话，60 字以内","kind":"risk|loophole|burden"}],"changes":[{"clause":"被改条款标识，照抄原文写法（如 第三十六条 / 附录A）","kind":"modify|add|delete|renumber|other","text":"这一处改了什么：一句话，40 字以内","quote":"描述这处改动的逐字原文，160 字以内"}],"deadline":"截止日期：YYYY-MM-DD，原文未明确则为 null","howToComment":"如何提意见：一句话概述提交途径，40 字以内","channels":[{"kind":"email|phone|mail|online|other","value":"可直接使用的具体值"}],"quotes":{"what":"what 对应的原文引用片段（逐字摘录，不超过100字）","who":"who 对应的原文引用片段，留空时空字符串","whoCanSubmit":"谁能提对应的原文片段，没有则空字符串","afterDeadline":"逾期会怎样对应的原文片段，没有则空字符串","keyPoints":["与 keyPoints 一一对应的逐字条文原文，顺序严格一致，没有则为 null"],"deadline":"截止日期对应的原文引用片段","howToComment":"如何提意见对应的原文引用片段","channels":["每条渠道对应的原文片段，顺序与 channels 严格一致"]}}',
+  '{"what":"这是什么：一句话概括这份公示在做什么，40 字以内","who":"影响谁：只有原文明确写出受这份文件影响的主体时才写（如运输机场运营人、医疗器械注册人、标准起草单位）；原文只写「社会公众」「有关单位和个人」这类泛称时**留空字符串** —— 那是「谁能提」，不是「影响谁」。这类页面的正文通常不含受影响主体（它在附件的草案里），宁可留空也不要推断","afterDeadline":"逾期会怎样：原文写明超过截止日期后如何处理（如逾期视为无意见、不再受理）；原文未提及则留空字符串","keyPoints":["草案条文要点：仅当给出「附件条文」时填写，2-4 条从条文中读到的实质规定，每条一句话、40 字以内；没有附件条文段落时必须为空数组"],"explanationPoints":[{"heading":"照抄说明里的小节标题（如 一、项目概况）","text":"这一节说了什么：一句话，60 字以内","quote":"这一节的逐字原文，200 字以内"}],"impacts":[{"quote":"这一条/这一处的逐字原文（中间可以省略，但每一截都要逐字对得上）","who":"具体可能受影响的主体：单一类别、20 字以内、最多一个顿号，写不出就留空字符串","point":"受影响的东西或方面（不是主体）：12 字以内，如 匿名发声空间 / 纠错渠道 / 合规成本，写不出就留空字符串","text":"可能带来什么：一句话，60 字以内","kind":"risk|loophole|burden"}],"changes":[{"clause":"被改条款标识，照抄原文写法（如 第三十六条 / 附录A）","kind":"modify|add|delete|renumber|other","text":"这一处改了什么：一句话，40 字以内","quote":"描述这处改动的逐字原文，160 字以内"}],"deadline":"截止日期：YYYY-MM-DD，原文未明确则为 null","howToComment":"如何提意见：一句话概述提交途径，40 字以内","channels":[{"kind":"email|phone|mail|online|other","value":"可直接使用的具体值"}],"quotes":{"what":"what 对应的原文引用片段（逐字摘录，不超过100字）","who":"who 对应的原文引用片段，留空时空字符串","afterDeadline":"逾期会怎样对应的原文片段，没有则空字符串","keyPoints":["与 keyPoints 一一对应的逐字条文原文，顺序严格一致，没有则为 null"],"deadline":"截止日期对应的原文引用片段","howToComment":"如何提意见对应的原文引用片段","channels":["每条渠道对应的原文片段，顺序与 channels 严格一致"]}}',
   '要求：',
   '1. 只依据给定原文，不编造、不猜测；原文没有的字段留空字符串或 null，宁可留空也不要凑。',
   '2. 引用必须是原文中的逐字连续片段。',
@@ -291,7 +291,7 @@ export function countModelOutput(raw: unknown): SummaryFieldCounts {
  *    不合格时**一次报全**并分开写清是缺字段、值不是字符串还是空串：三者的成因与处置
  *    完全不同，合成一句就会把「校验器按顺序先撞上哪个」误读成「只有那个字段有问题」
  *    （issue #56 的 30% 失败率就是这么被误判成模型抖动的）。
- * 2. 原文可能确实没有的段（**影响谁** / 谁能提 / 逾期会怎样）缺省为空串，不算形状异常 ——
+ * 2. 原文可能确实没有的段（**影响谁** / 逾期会怎样）缺省为空串，不算形状异常 ——
  *    把它们变成必填只会逼模型编一句；「影响谁」原本在必填里，实测后降级（见 SYSTEM_PROMPT 注释）。
  * 3. 渠道数组**一项都不删**：`quotes.channels` 按原始下标与渠道配对，这里删一项
  *    就会让后面的渠道挂上前面的引用。去空 / 去重 / 截断统一由 buildQuotedSummary
@@ -393,7 +393,6 @@ export function normalizeModelSummary(raw: unknown, tally?: NormalizeTally): Quo
   return {
     what,
     who: optionalText('who'),
-    whoCanSubmit: optionalText('whoCanSubmit'),
     afterDeadline: optionalText('afterDeadline'),
     ...(keyPoints.length > 0 ? { keyPoints } : {}),
     ...(explanationPoints.length > 0 ? { explanationPoints } : {}),
@@ -562,7 +561,6 @@ function readQuotes(raw: unknown): SummaryQuotes | undefined {
   return {
     what: quote('what'),
     who: quote('who'),
-    whoCanSubmit: quote('whoCanSubmit'),
     afterDeadline: quote('afterDeadline'),
     deadline: quote('deadline'),
     howToComment: quote('howToComment'),

@@ -99,7 +99,6 @@ export async function POST(request: Request): Promise<Response> {
     const quoted = buildQuotedSummary({
       what,
       who,
-      whoCanSubmit: String(form.get('whoCanSubmit') ?? '').trim(),
       afterDeadline: String(form.get('afterDeadline') ?? '').trim(),
       deadline,
       howToComment,

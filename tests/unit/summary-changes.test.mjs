@@ -47,7 +47,6 @@ function summaryWith(parts) {
   return {
     what: '这是什么',
     who: '',
-    whoCanSubmit: '',
     afterDeadline: '',
     deadline: null,
     howToComment: '如何提意见',

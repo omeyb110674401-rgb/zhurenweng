@@ -35,6 +35,10 @@ const showInput = !argv.includes('--no-input');
 /**
  * 旧提示词（`37ae7fa^:src/lib/adapters/openai-compatible-llm.ts` 的第 69–90 行）**逐字**抄来。
  * 差一个字都可能改变模型的行为，而这次实验的全部意义就在于"复现当年那一跑"。
+ *
+ * 因此它**故意**还带着 `whoCanSubmit`（「谁能提」）这个键 —— 那是当年那一跑的输入的一部分，
+ * 不是漏改。该字段已于 2026-10-02 从线上提示词里删除，模型今天多吐这个键也没人读
+ * （`normalizeModelSummary` 只认自己列出的键）。
  */
 const OLD_SYSTEM_PROMPT = [
   '你是政府公示的「参与导引」助手。用户会给出一份公示的标题与网页正文纯文本，可能还会附上本站从该公示官方文档里提取的「附件条文」。',

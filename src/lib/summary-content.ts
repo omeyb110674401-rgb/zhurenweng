@@ -29,8 +29,8 @@ import {
  * 详情页对该段隐藏引用块。
  *
  * 段的**必填 / 可缺**之分是有意的：`what` / `who` / `howToComment` 三段任何一份公示
- * 都答得出（缺了就是模型没答上，应当重试）；`whoCanSubmit` / `afterDeadline` 取决于
- * 公告有没有写，强要就会逼模型编，所以允许为空并且空段不渲染。
+ * 都答得出（缺了就是模型没答上，应当重试）；`afterDeadline` 取决于公告有没有写，
+ * 强要就会逼模型编，所以允许为空并且空段不渲染。
  * `keyPoints` 是历史字段：新输出不再生成（公告壳里没有条款可概括，见 ports.ts 的说明），
  * 但**存量摘要在重刷完成前仍带着它**，所以解析与渲染都保留一条通路。
  */
@@ -185,20 +185,15 @@ export interface QuotedAmendmentChange {
 
 /**
  * ai_summary_json 的落库形状。
+ *
+ * 「谁能提」（`whoCanSubmit`）已于 2026-10-02 删除（渲染先删、随后字段本身连同提示词 /
+ * 形状解析 / 检索 / 后台表单一起删）。生产库里那 97 行仍带着这个键 —— `parseQuotedSummary`
+ * 对多余的键照旧宽容：读出来即丢弃，旧行不会因此掉回占位。
  */
 export interface QuotedSummary {
   what: SummarySection;
   who: SummarySection;
-  /**
-   * 谁能提。
-   *
-   * **页面自 2026-10-02（两栏版式这一刀）起整段不渲染**（用户拍板：96 条摘要里 95 条的取值
-   * 等价于"公众可提"、平均 10.4 字、28% 是空的 —— 它复述的是读者点进来之前就知道的事实）。
-   * 落库形状一个字没动：存量摘要在重刷完成前仍带着它，`scripts/audit-attachment-extraction.mjs`
-   * 也还在用它量"who 抄了 whoCanSubmit"这件事。删的是那一段渲染，不是这个字段。
-   */
-  whoCanSubmit: SummarySection;
-  /** 逾期会怎样（同上） */
+  /** 逾期会怎样（原文未提及则为空串，空段不渲染） */
   afterDeadline: SummarySection;
   /** 历史字段（#56 停用）→ 现为**草案条文要点**：只有喂了附件条文才会产生（issue #57 第 5 步） */
   keyPoints: QuotedDraftPoint[];
@@ -231,7 +226,6 @@ export interface QuotedSummary {
 export interface SummaryQuotes {
   what?: string | null;
   who?: string | null;
-  whoCanSubmit?: string | null;
   afterDeadline?: string | null;
   keyPoints?: (string | null)[];
   deadline?: string | null;
@@ -515,7 +509,6 @@ export function buildQuotedSummaryWithTally(
     summary: {
       what: { text: text(summary.what), quote: cleanQuote(quotes?.what) },
       who: { text: text(summary.who), quote: cleanQuote(quotes?.who) },
-      whoCanSubmit: { text: text(summary.whoCanSubmit), quote: cleanQuote(quotes?.whoCanSubmit) },
       afterDeadline: { text: text(summary.afterDeadline), quote: cleanQuote(quotes?.afterDeadline) },
       keyPoints,
       explanationPoints,
@@ -899,7 +892,6 @@ export function parseQuotedSummary(value: unknown): QuotedSummary | null {
   return {
     what,
     who: optionalSection(record.who),
-    whoCanSubmit: optionalSection(record.whoCanSubmit),
     afterDeadline: optionalSection(record.afterDeadline),
     keyPoints,
     // 说明要点与它的小节数都是后加的字段：旧行没有 ⇒ 按"空 + 没数过"解析，

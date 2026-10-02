@@ -291,7 +291,6 @@ describe('issue #86 §20.3：落库形状（新增的键要与旧行共存）', 
       {
         what: '这是什么',
         who: '',
-        whoCanSubmit: '',
         afterDeadline: '',
         deadline: null,
         howToComment: '如何提意见',
@@ -318,7 +317,7 @@ describe('issue #86 §20.3：落库形状（新增的键要与旧行共存）', 
 
   it('buildQuotedSummary 自己给的是 null（表要等 changes 定下来才知道缺口）', () => {
     const built = buildQuotedSummary(
-      { what: '这是什么', who: '', whoCanSubmit: '', afterDeadline: '', deadline: null, howToComment: '如何提意见', channels: [], changes: [] },
+      { what: '这是什么', who: '', afterDeadline: '', deadline: null, howToComment: '如何提意见', channels: [], changes: [] },
       undefined,
       [DRAFT],
       null,

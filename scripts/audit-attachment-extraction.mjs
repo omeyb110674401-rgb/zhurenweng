@@ -8,7 +8,8 @@
  *
  * 为什么 #56 的 `who` 指标也在这里：附件读取要解决的正是「影响谁答不出来」。
  * 只看抽取侧的成功率会漏掉真正的问题 —— 抽到了字但摘要仍然答不出 who，
- * 说明缺的是提示词与截取位置，不是文件。基线：35 条里 23 条把「谁能提」抄进「影响谁」。
+ * 说明缺的是提示词与截取位置，不是文件。当年并排量的 `whoCopied`（「影响谁」逐字抄了
+ * 「谁能提」的比例，基线 35 条里 23 条）已随 `whoCanSubmit` 字段一起删除，理由见下面那一处。
  *
  * 用法（生产环境，脚本必须在 /app 下，否则 `pg` 解析不到）：
  *   docker compose run --rm worker node scripts/audit-attachment-extraction.mjs
@@ -66,16 +67,14 @@ const attachmentCountOf = (raw) => {
   }
 };
 
-const sections = (summaryJson) => {
+/** 摘要里「影响谁」那一段的文字（段落是 `{text}` 对象；更旧的形状是裸字符串）。 */
+const whoOf = (summaryJson) => {
   try {
     const parsed = typeof summaryJson === 'string' ? JSON.parse(summaryJson) : summaryJson;
-    const field = (name) => {
-      const segment = parsed?.[name];
-      return typeof segment === 'string' ? segment : text(segment?.text);
-    };
-    return { who: field('who'), whoCanSubmit: field('whoCanSubmit') };
+    const segment = parsed?.who;
+    return typeof segment === 'string' ? segment : text(segment?.text);
   } catch {
-    return { who: '', whoCanSubmit: '' };
+    return '';
   }
 };
 
@@ -96,7 +95,6 @@ for (const notice of notices.rows) {
       failures: new Map(),
       statuses: new Map(),
       whoAnswered: 0,
-      whoCopied: 0,
       summarized: 0,
       hostTried: new Map(),
     });
@@ -142,11 +140,12 @@ for (const notice of notices.rows) {
 
   if (notice.summary_status === 'done' || notice.ai_summary_json) {
     s.summarized += 1;
-    const { who, whoCanSubmit } = sections(notice.ai_summary_json);
-    if (who.trim() !== '') {
-      s.whoAnswered += 1;
-      if (whoCanSubmit.trim() !== '' && who.trim() === whoCanSubmit.trim()) s.whoCopied += 1;
-    }
+    const who = whoOf(notice.ai_summary_json);
+    // 这里原本还有一个 `whoCopied` 指标，量的是「L1 的 who 是不是逐字抄了 whoCanSubmit」。
+    // 2026-10-02 删掉 whoCanSubmit 字段后它跟着删了：新摘要不再有这个键，这个指标只能在
+    // 旧行上算 —— 而它当年量出来的结论已经落到产品决定里（「影响谁」收窄到行业专业档，
+    // 见 docs/pending-issues/88-detail-page-layout.md）。
+    if (who.trim() !== '') s.whoAnswered += 1;
   }
 }
 
@@ -166,7 +165,6 @@ console.log(
     '未入选/待轮',
     '已喂摘要',
     'who非空',
-    'who=谁能提',
   ]
     .map((head, index) => (index === 0 ? head : head.padStart(9)))
     .join(' | '),
@@ -187,7 +185,6 @@ for (const [source, s] of [...stats].sort((a, b) => b[1].withAttachments - a[1].
       `${s.unselected}/${s.pending}`.padStart(9),
       num(s.fedRows, 11),
       `${s.whoAnswered}/${s.summarized}`.padStart(9),
-      `${s.whoCopied}/${s.whoAnswered}`.padStart(11),
     ].join(' | '),
   );
 }

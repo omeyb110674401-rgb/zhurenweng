@@ -13,8 +13,10 @@ import {
  * 1. **旧形状的行必须还能解析** —— 全部重刷要跑两轮 worker、一个多小时，这期间存量
  *    58 条带的还是 五段式（有 keyPoints、没有新字段）。解析不了它们，页面上
  *    这 58 条会从「有摘要」掉回「待人工复核」占位，比字段少难看的多。
- * 2. **新字段缺省时不报错** —— 谁能提 / 逾期会两段是「原文有就写、没有就空」，
+ * 2. **新字段缺省时不报错** —— 逾期会怎样这一段是「原文有就写、没有就空」，
  *    渲染层按空段整段跳过。
+ *    （「谁能提」原先是同一类可缺段，2026-10-02 连同字段一起删除：旧行里多出来的那个键
+ *    由解析器丢弃这件事，钉在 `who-display.test.mjs`。）
  * 3. **引用与渠道的配对不能被去重打乱** —— normalizeChannels 会去空、去重、截断，
  *    引用必须在去重之前按原始下标配好，否则后面的渠道会挂上前面的引用。
  */
@@ -40,9 +42,7 @@ describe('摘要形状：旧行向后兼容（重刷窗口内不得掉回占位�
     assert.equal(parsed.keyPoints[0].quote, '征求意见期限为30日');
   });
 
-  it('新字段缺省为空段 / 空数组，而不是解析失败', () => {
-    assert.equal(parsed.whoCanSubmit.text, '');
-    assert.equal(parsed.whoCanSubmit.quote, null);
+  it('可缺段缺省为空段 / 空数组，而不是解析失败', () => {
     assert.equal(parsed.afterDeadline.text, '');
     assert.deepEqual(parsed.channels, []);
   });
@@ -98,7 +98,6 @@ describe('摘要形状：新输出 round-trip（build → 落库 → parse）', 
     {
       what: '就机场运营许可规定征求意见',
       who: '运输机场运营人',
-      whoCanSubmit: '社会各界均可',
       afterDeadline: '逾期不再受理',
       deadline: '2026-10-07',
       howToComment: '邮件或信函',
@@ -110,7 +109,6 @@ describe('摘要形状：新输出 round-trip（build → 落库 → parse）', 
     {
       what: '现公布如下，征求意见',
       who: '本规定适用于运输机场运营人',
-      whoCanSubmit: '',
       afterDeadline: '逾期不再受理',
       deadline: '截止日期为2026年10月7日',
       howToComment: '一、电子邮箱：a@b.gov.cn',
@@ -137,7 +135,6 @@ describe('摘要形状：新输出 round-trip（build → 落库 → parse）', 
     const bare = buildQuotedSummary({
       what: 'a',
       who: 'b',
-      whoCanSubmit: '',
       afterDeadline: '',
       deadline: null,
       howToComment: 'c',
