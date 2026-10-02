@@ -397,7 +397,14 @@ describe('issue #12：管理后台与健康告警', () => {
     const readable = stripSsrComments(detail);
     assert.match(detail, /data-testid="ai-summary"/, '详情页渲染人工摘要');
     assert.match(readable, /【人工】这是企业破产法草案的征求意见公告。/, '人工摘要内容（这是什么）');
-    assert.match(readable, /【人工】社会各界均可提出意见。/, '人工摘要「谁能提」');
+    // 「谁能提」自 2026-10-02（两栏版式这一刀）起整段不渲染：96 条摘要里 95 条的取值等价于
+    // "公众可提"、28% 是空的 —— 它复述的是读者点进来之前就知道的事实。后台表单仍收这个字段
+    // （存量摘要与审计脚本还在读它），所以这里断言的是**页面**不再印它。
+    assert.ok(
+      !readable.includes('【人工】社会各界均可提出意见。'),
+      '人工摘要里填了「谁能提」，页面也不该再渲染这一段',
+    );
+    assert.ok(!readable.includes('谁能提'), '连标题都不出现');
     // 渠道两行：一行显式给类型，一行省略由值推断（省略路径只在后台用得上）
     assert.match(readable, /yjzj@npc\.gov\.cn/, '人工摘要的邮箱渠道');
     assert.match(readable, /www\.npc\.gov\.cn/, '省略类型的那行按值判成在线提交');

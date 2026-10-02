@@ -1354,6 +1354,56 @@ const CASES = [
     pattern: '一条判读都没有时不渲染',
     test: 'tests/unit/summary-impacts.test.mjs',
   },
+  // ── 2026-10-02 两栏版式这一刀：摘要卡的段落顺序与「影响谁」的门控 ──────────────
+  // 这三条里有两条的靶点在 `src/app/_lib/summary-view.tsx`（页面 .tsx）。为什么不配 e2e：
+  // e2e 跑的是 `.next` 构建产物，撤 SSR 侧源码不会红（本脚本的规则 1）——
+  // 所以判据钉在 `impact-display.ts`（另有用例），而**接线与删除**按**源码**钉
+  // （与 `tests/unit/feed-intake-note.test.mjs` 同一手法）。
+  {
+    // 撤掉判据的实现（只剩一个恒真的出口）= 回到"公众广域也渲染「影响谁」"，
+    // 而那正是实测出来"基本是标题复述"的那一段。
+    //
+    // pattern 为什么指**公众广域那条**（本轮实测踩到的坑，两次）：撤的是"受众面"这一半，
+    // 而 `sector + 非空` 与 `sector + 空串` 两条**都不看受众面也照样绿** ——
+    // 撤掉之后前者仍 true、后者仍 false（空串由最后那一行拦住），脚本于是报
+    // "这条断言没钉住任何东西"。真正会翻红的是"不该渲染却渲染了"的那些：
+    // public / unknown / null 各一条，取公众广域那条（它正是这个门控要挡的那一档）。
+    label: '「影响谁」的门控被撤（公众广域条目又渲染一段标题复述）',
+    file: 'impactDisplay',
+    from: '  if (input.audience !== \'sector\') return false;',
+    to: '  if (false) return false;',
+    pattern: '公众广域 ⇒ 不渲染',
+    test: 'tests/unit/who-display.test.mjs',
+  },
+  {
+    // 撤掉渲染 = 判据还在、页面不再用它。这一条与上一条必须分开：判据对而页面没接上，
+    // 是这一类改动最常见的断线，而它在 e2e 里看不见（构建产物照旧）。
+    // 靶点取**那一行调用**，不是 `shouldRenderWho` 这个名字 —— 名字在头注与 import 里也有，
+    // 撤一个名字等于什么都没撤（本脚本的规则 4：`from` 首次出现处必须就是要撤的那一处）。
+    label: '页面不再用 shouldRenderWho 判「影响谁」（判据对、页面没接上）',
+    file: 'summaryView',
+    from: '        {shouldRenderWho({ audience: notice.audience, who: summary.who }) ? (',
+    to: '        {true ? (',
+    pattern: '页面真的用了 shouldRenderWho',
+    test: 'tests/unit/who-display.test.mjs',
+  },
+  {
+    // 把删掉的那一段加回去。判据：源码里不许再出现那个 testid 与标题 ——
+    // 加了就必须有人当场解释为什么（96 条里 95 条等价于"公众可提"、28% 是空的）。
+    //
+    // 靶点为什么取**注释的开头**（`{/*` + 下一行）而不是某一行的 `testId="…"`：
+    // 第一版取的是 `testId="summary-deadline"`，而插回去的那一行**自带** `testId=`，
+    // 于是同一个 JSX 元素上出现两个同名属性 —— `tsc` 报 TS17001、测试文件直接跑不起来，
+    // 脚本会把它记成"这条用例不成立"（真撤真红，但红的原因是语法错，钉不住任何东西）。
+    // 注释行是**唯一且稳定**的锚点（本文件里 `{/*` + 段名这种写法每段只出现一次），
+    // 插在它前面的那一行与插回原位等价。
+    label: '「谁能提」那一段被加回去（复述"这是征求意见稿"的已知事实）',
+    file: 'summaryView',
+    from: '        {/*\n         * 可能的争议点（issue #86 第 1 刀）',
+    to: '        <SectionBlock notice={notice} label="谁能提" section={summary.whoCanSubmit} testId="summary-who-can-submit" />\n        {/*\n         * 可能的争议点（issue #86 第 1 刀）',
+    pattern: '谁能提',
+    test: 'tests/unit/who-display.test.mjs',
+  },
   {
     label: '诊断不数影响判读的条数（"模型吐了几条判读"这件事又变得查不到）',
     file: 'summarize',

@@ -41,6 +41,43 @@ body {
   padding: 24px 20px 48px;
 }
 
+/* ===== 详情页两栏（2026-10-02 用户拍板）=====
+   版式：窄屏 = 与列表页完全一样的 760px 单栏（右栏接在主栏之后，阅读顺序不变）；
+   ≥1000px = 页面放宽到 1120px，正文与行动栏并排。
+
+   宽度**不在这里给**：根布局把每一页都包在 `<div class="page">` 里（layout.tsx:67），
+   详情页的 `<main class="page detail-page">` 只是它的子元素 —— 子元素的 max-width
+   压不过父容器的 760px。所以放宽写在下面宽屏那一档、作用在**外层 `.page`** 上
+   （`:has(.detail-grid)`）。`detail-page` 这个类因此只当"这是详情页"的标记用
+   （margin:0 auto 与测试的选择器锚点），不承担宽度。
+   窄屏那一档**一个字都不写**，于是行为与改动前逐字一致。 */
+.detail-page {
+  margin: 0 auto;
+}
+
+/* 栅格只负责"怎么排"，宽度由外层容器给（1120px，见下面宽屏那一档）。
+   列位在**基础规则**里就写死：若只给宽屏写 `grid-column: 2`，窄屏下那一行依然生效
+   —— 右栏会被摆进一个并不存在的第二列，是那种不报错、只是位置不对的错版。 */
+.detail-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 28px;
+  max-width: 1120px;
+  margin: 0 auto;
+}
+
+.detail-main {
+  grid-column: 1;
+  min-width: 0;
+}
+
+/* 右栏就是 `.action-slot` 本身（同一个节点，不复制 DOM）。窄屏把它摆回第二行
+   —— 也就是它改版前的原位：摘要卡之后、附件与正文之前（DOM 顺序见 page.tsx）。 */
+.detail-rail {
+  grid-column: 1;
+  grid-row: 2;
+}
+
 /* 跳到主内容（issue #53）：首页要按 Tab 依次经过搜索框、站内导航、7 个领域 chip、
    机关下拉与筛选按钮才到列表。默认移出视口、获得焦点时显形 —— 不能用
    display: none，那样它也无法被键盘聚焦。 */
@@ -375,6 +412,15 @@ body {
   margin-top: 14px;
 }
 
+/* 「分步提意指引」搬进主栏之后（2026-10-02 详情页两栏）：它原来是行动栏里的最后
+   一段，靠 `.action-slot` 的上内边距与卡片底色跟按钮分开；到了主栏里，上一条是
+   摘要卡，两者都是白底/浅底块，只靠间距分不开 —— 补一条分隔线。窄屏下这个选择器
+   不命中（.detail-main 只在详情页存在），列表页等其它页面不受影响。 */
+.detail-main > .how-to {
+  border-top: 1px solid var(--line);
+  padding-top: 14px;
+}
+
 .how-to .how-to-title {
   font-size: 14px;
   font-weight: 600;
@@ -455,6 +501,10 @@ body {
   padding: 16px;
   font-size: 14px;
   white-space: pre-wrap;
+  /* 行宽上限（2026-10-02 详情页两栏）：与 `.summary-section-text` 同一条理由 ——
+     官方原文是最该慢慢读的一段，宽屏上通栏排到 50+ 汉字/行只会让人串行。
+     上限算的是内容盒，盒子本身仍占满主栏（卡片右边缘不会缩进来半截）。 */
+  max-inline-size: 44em;
 }
 
 .body-source {
@@ -544,6 +594,10 @@ body {
   margin: 0;
   font-size: 14px;
   color: var(--ink);
+  /* 行宽上限（2026-10-02 详情页两栏）：宽屏下主栏有 700px 以上，中文一行能排到
+     50 字以上 —— 加宽版式**不许**把正文行一起拉长（正文 65–75ch 是上限，"大屏上
+     通栏长行"是典型反面写法）。44em ≈ 44 个汉字/行，含标点仍在可读区间。 */
+  max-inline-size: 44em;
 }
 
 .summary-points {
@@ -1655,5 +1709,49 @@ body {
 
   .period-buckets .period-bar {
     flex: 1 1 100%;
+  }
+}
+
+/* ===== 详情页宽屏两栏（2026-10-02 用户拍板）=====
+   断点 1000px（用户拍板，不是算出来的）：1440×900 这类常见桌面视口下主栏约 770px
+   （1120 − 320 右栏 − 28 间距 − 左右内边距），正文靠 44em 上限收到约 44 汉字/行；
+   视口刚好 1000px 时主栏只剩约 610px，仍排得下 —— 再窄就落回单栏，而不是把正文
+   挤成窄条。
+
+   **宽度必须写在根布局那层 `.page` 上，不能写在详情页自己的 `<main>` 上。**
+   第一版写成 `main.page.detail-page { max-width: 1120px }`，看着特异性更高、其实
+   一点用没有：根布局把每一页都包在 `<div class="page">` 里（layout.tsx:67），
+   详情页的 `<main class="page detail-page">` 是**它的子元素** —— 子元素的 max-width
+   再大也压不过父容器的 760px。表现是"栅格确实变成两列了，但整页仍被关在 760px 里"，
+   于是主栏只剩 372px、正文被挤成一条窄柱（2026-10-02 渲染出来才看见）。
+
+   用 `:has()` 精确命中"里面装着详情页栅格"的那一层，并且**把两栏切换与放宽宽度绑在
+   同一个选择器上**：不支持 `:has()` 的浏览器两条都不生效 ⇒ 页面与改动前逐字一致
+   （760px 单栏），而不是退化成"760 容器里硬塞两列"那种挤扁的错版。宁可少一个特性，
+   不要一个更坏的降级形态。
+
+   这一档只做三件事，都是**只在这里生效**的（窄屏一个字都不写，行为与现在逐字一致）：
+   1. 把外层容器放宽到 1120px（`:has()`，见上）；
+   2. 内边距从 20px 提到 24px：宽屏下正文离屏幕边缘太近会显得整页没边距；
+   3. 栅格改两列 + 右栏 sticky（吸顶 16px，与 mockup 一致）。
+      sticky 只在这一档生效 —— 窄屏下右栏是一个跨满宽的行，吸顶会把附件与正文
+      盖住一半，那不是"响应式落回"，那是坏掉。 */
+@media (min-width: 1000px) {
+  .page:has(.detail-grid) {
+    max-width: 1120px;
+    padding-left: 24px;
+    padding-right: 24px;
+  }
+
+  .page:has(.detail-grid) .detail-grid {
+    grid-template-columns: minmax(0, 1fr) 320px;
+  }
+
+  .detail-rail {
+    grid-column: 2;
+    grid-row: 1;
+    position: sticky;
+    top: 16px;
+    align-self: start;
   }
 }

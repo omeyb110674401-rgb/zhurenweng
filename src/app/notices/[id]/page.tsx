@@ -168,7 +168,11 @@ export default async function NoticeDetailPage({ params }: NoticeDetailPageProps
   );
 
   return (
-    <main id="main-content">
+    // `detail-page` 是宽屏两栏的开关（`.page` 由根布局的容器给出，见 globals.css
+    // 「详情页两栏」那一节）：≥1000px 时页面比列表页宽、正文与行动栏并排，窄屏
+    // 落回与列表页同样的 760px 单栏。刻意**不改** layout.tsx —— 那里一动，全站每页
+    // 都跟着变，而这一刀只碰详情页。
+    <main id="main-content" className="page detail-page">
       {/* schema.org 结构化数据（issue #39）：给搜索引擎/聚合器读的机器可读版本，
           字段口径见 lib/notice-jsonld.ts；用户可见内容全在下方，此处不重复渲染 */}
       <script
@@ -181,192 +185,220 @@ export default async function NoticeDetailPage({ params }: NoticeDetailPageProps
       </nav>
 
       <article className="notice-detail">
-        <header className="detail-header">
-          <div className="detail-badges">
-            <StatusBadge status={status} />
-            <Countdown notice={notice} now={new Date()} />
-            {/*
-             * 体裁角标（issue #76）。放在详情页而不是只存库里：读者得知道自己正在读的是
-             * "一份改现行的修正案"还是"一部新起草的规定"——这两种公告该看的重点不一样，
-             * 而摘要的形态也正因为如此才不同。未判定不显示（没有信息量的角标只会占位置）。
-             */}
-            {notice.genre !== null && notice.genre !== 'unknown' ? (
-              <span className="genre-badge" data-testid="notice-genre-badge">
-                {GENRE_LABELS[notice.genre]}
-              </span>
-            ) : null}
-            {/*
-             * 受众面角标（issue #83）。与体裁角标并排，但回答的是另一个问题：
-             * 体裁说"这是哪种文件"（修正案 / 新案 / 名单），受众面说"这份文件找的是谁的意见"
-             * —— 后者决定普通读者要不要往下读。`basis` 挂在 title 上（悬停可看判据），
-             * 因为"凭什么这么判"是**可核对性**的一部分：判错了要能一眼看出是哪条规则撞的。
-             */}
-            {notice.audience !== null && notice.audience !== 'unknown' ? (
-              <span
-                className={`audience-badge audience-${notice.audience}`}
-                data-testid="notice-audience-badge"
-                data-audience={notice.audience}
-                title={notice.audienceBasis ?? undefined}
-              >
-                {AUDIENCE_LABELS[notice.audience]}
-              </span>
-            ) : null}
-          </div>
-          <h1 className="detail-title">{notice.title}</h1>
-          <dl className="detail-fields" data-testid="notice-fields">
-            <div className="field">
-              <dt>发布机关</dt>
-              <dd>{notice.agency}</dd>
-            </div>
-            <div className="field">
-              <dt>信息来源</dt>
-              <dd>{source?.name ?? notice.sourceId}</dd>
-            </div>
-            <div className="field">
-              <dt>发布日期</dt>
-              <dd>{formatDate(notice.publishedAt)}</dd>
-            </div>
-            <div className="field">
-              <dt>截止日期</dt>
-              <dd>{formatDate(notice.deadlineAt)}</dd>
-            </div>
-          </dl>
-        </header>
+        {/* 两栏栅格（issue #53 重开的桌面版式）：左栏是阅读列，右栏就是**下面那个
+            `.action-slot` 本身** —— 靠 grid 放到第二列，不复制节点。同一个
+            `data-testid="go-official-button"` 在 DOM 里出现两次会让 e2e 命中歧义、
+            读屏也会读两遍，所以右栏刻意不是"另做一份 CTA"。 */}
+        <div className="detail-grid">
+          {/* 主栏：阅读顺序（标题 → 摘要 → 提意指引 → 附件 → 正文）在宽窄屏上完全一致
+              —— 用户拍板不做两套顺序，窄屏只是把右栏接在主栏之后（见 globals.css）。 */}
+          <div className="detail-main">
+            <header className="detail-header">
+              <div className="detail-badges">
+                <StatusBadge status={status} />
+                <Countdown notice={notice} now={new Date()} />
+                {/*
+                 * 体裁角标（issue #76）。放在详情页而不是只存库里：读者得知道自己正在读的是
+                 * "一份改现行的修正案"还是"一部新起草的规定"——这两种公告该看的重点不一样，
+                 * 而摘要的形态也正因为如此才不同。未判定不显示（没有信息量的角标只会占位置）。
+                 */}
+                {notice.genre !== null && notice.genre !== 'unknown' ? (
+                  <span className="genre-badge" data-testid="notice-genre-badge">
+                    {GENRE_LABELS[notice.genre]}
+                  </span>
+                ) : null}
+                {/*
+                 * 受众面角标（issue #83）。与体裁角标并排，但回答的是另一个问题：
+                 * 体裁说"这是哪种文件"（修正案 / 新案 / 名单），受众面说"这份文件找的是谁的意见"
+                 * —— 后者决定普通读者要不要往下读。`basis` 挂在 title 上（悬停可看判据），
+                 * 因为"凭什么这么判"是**可核对性**的一部分：判错了要能一眼看出是哪条规则撞的。
+                 */}
+                {notice.audience !== null && notice.audience !== 'unknown' ? (
+                  <span
+                    className={`audience-badge audience-${notice.audience}`}
+                    data-testid="notice-audience-badge"
+                    data-audience={notice.audience}
+                    title={notice.audienceBasis ?? undefined}
+                  >
+                    {AUDIENCE_LABELS[notice.audience]}
+                  </span>
+                ) : null}
+              </div>
+              <h1 className="detail-title">{notice.title}</h1>
+              <dl className="detail-fields" data-testid="notice-fields">
+                <div className="field">
+                  <dt>发布机关</dt>
+                  <dd>{notice.agency}</dd>
+                </div>
+                <div className="field">
+                  <dt>信息来源</dt>
+                  <dd>{source?.name ?? notice.sourceId}</dd>
+                </div>
+                <div className="field">
+                  <dt>发布日期</dt>
+                  <dd>{formatDate(notice.publishedAt)}</dd>
+                </div>
+                <div className="field">
+                  <dt>截止日期</dt>
+                  <dd>{formatDate(notice.deadlineAt)}</dd>
+                </div>
+              </dl>
+            </header>
 
-        {notice.versionOf ? (
-          <p className="version-line" data-testid="version-line">
-            这是第 {notice.versionSeq ?? 1} 轮公示。
-            <Link
-              href={`/notices/${notice.id}/diff`}
-              className="diff-entry-link"
-              data-testid="compare-previous-link"
-            >
-              对比上一版
-            </Link>
-          </p>
-        ) : null}
+            {/* 版本提示跟着标题走（留在主栏）：它说的是"这份公告本身是第几轮"，
+                与右栏那组"现在该做什么"不是一回事。 */}
+            {notice.versionOf ? (
+              <p className="version-line" data-testid="version-line">
+                这是第 {notice.versionSeq ?? 1} 轮公示。
+                <Link
+                  href={`/notices/${notice.id}/diff`}
+                  className="diff-entry-link"
+                  data-testid="compare-previous-link"
+                >
+                  对比上一版
+                </Link>
+              </p>
+            ) : null}
 
-        {/* 摘要区（issue #4 / #22 / #27 / #58）：已有摘要照常渲染（绝不隐藏库内内容）；
-            未生成时先给「结构化速读」（确定性抽取，不依赖大模型），再按 summaryDisplayState
-            区分「生成中」/「待人工复核」/「未生成摘要」/「暂未启用」。 */}
-        {summaryInfo?.aiSummaryJson ? (
-          <SummaryView
-            notice={notice}
-            summaryJson={summaryInfo.aiSummaryJson}
-            summaryModel={summaryInfo.summaryModel}
-            attachmentReport={draftReport}
-            feedReport={feedReport}
-          />
-        ) : (
-          <>
-            <NoticeBriefView brief={brief} url={notice.url} />
-            {summaryDisplay === 'unavailable' ? (
-              <SummaryUnavailable />
-            ) : summaryDisplay === 'not-generated' ? (
-              <SummaryNotGenerated />
+            {/* 摘要区（issue #4 / #22 / #27 / #58）：已有摘要照常渲染（绝不隐藏库内内容）；
+                未生成时先给「结构化速读」（确定性抽取，不依赖大模型），再按 summaryDisplayState
+                区分「生成中」/「待人工复核」/「未生成摘要」/「暂未启用」。 */}
+            {summaryInfo?.aiSummaryJson ? (
+              <SummaryView
+                notice={notice}
+                summaryJson={summaryInfo.aiSummaryJson}
+                summaryModel={summaryInfo.summaryModel}
+                attachmentReport={draftReport}
+                feedReport={feedReport}
+              />
             ) : (
-              <SummaryPlaceholder status={summaryInfo?.summaryStatus ?? 'pending'} />
+              <>
+                <NoticeBriefView brief={brief} url={notice.url} />
+                {summaryDisplay === 'unavailable' ? (
+                  <SummaryUnavailable />
+                ) : summaryDisplay === 'not-generated' ? (
+                  <SummaryNotGenerated />
+                ) : (
+                  <SummaryPlaceholder status={summaryInfo?.summaryStatus ?? 'pending'} />
+                )}
+              </>
             )}
-          </>
-        )}
 
-        <section className="action-slot">
-          <a
-            className="go-button"
-            href={`/go/${notice.id}`}
-            data-testid="go-official-button"
-          >
-            去官方渠道提意见
-          </a>
-          {/* 提交方式（issue #27）：原文里写着的具体渠道。放在按钮旁——读者点了
-              按钮要跳走，此处先给「跳过去之后往哪儿提」。取不到时不再留白，
-              而是说明为什么取不到（issue #64），仍然不编一条凑数。 */}
-          <SubmissionChannels channels={submissionChannels} guidance={channelAdvice} url={notice.url} />
-          <div className="how-to" data-testid="how-to-comment">
-            <p className="how-to-title">分步提意指引</p>
-            <ol>
-              <li>
-                点击上方「去官方渠道提意见」按钮，跳转到
-                <a href={`/go/${notice.id}`}>官方原文页面</a>
-                （本站只引流，不代替官方受理意见）。
-              </li>
-              <li>在官方页面阅读公告全文，确认征求意见的截止日期与受理范围。</li>
-              <li>
-                {submissionChannels.length > 0
-                  ? '本公示已在原文中注明具体提交方式（见上方「意见提交方式」），按其办理；建议附上具体条款与修改建议。'
-                  : '到官方原文页面上找「反馈方式 / 意见反馈」那一段并按其办理（上方已说明本站为什么没取到渠道）；建议附上具体条款与修改建议。'}
-              </li>
-              <li>截止日期前提交的意见才会被纳入汇总，请留意页面上的截止时间。</li>
-            </ol>
-          </div>
-          <p className="click-stats" data-testid="outbound-clicks">
-            出站提意点击：{notice.outboundClicks} 次
-          </p>
-          {/* 订阅提醒入口（issue #17）：详情页是「想参与」意向最强的时刻；
-              邮件端口未配置时不渲染（不挂必然失败的死流程） */}
-          {mailerReady() ? (
-            <p className="subscribe-hint">
-              不想错过同类公示？
-              <Link href="/subscribe" data-testid="subscribe-detail-link">
-                订阅公示提醒
-              </Link>
-              —— 按关键词或领域，在截止前 7 天、3 天各收一封提醒邮件。
-            </p>
-          ) : null}
-        </section>
-
-        {notice.attachments.length > 0 ? (
-          <section className="attachments">
-            <h2>附件清单</h2>
-            <ul data-testid="notice-attachments">
-              {notice.attachments.map((attachment) => (
-                <li key={attachment.url}>
-                  <a href={attachment.url} target="_blank" rel="noopener noreferrer">
-                    {attachment.name}
-                  </a>
+            {/* 「分步提意指引」从行动栏搬进主栏（放在摘要卡之后）：它是**怎么提**的
+                阅读内容，不是行动按钮本身 —— 挤在 320px 的窄栏里会折成十几行，而右栏
+                只留 CTA / 提交方式 / 订阅提醒 / 出站点击小字（见下方 .detail-rail）。
+                搬过来之后这一段的 DOM 位置在窄屏与宽屏上都一致，不做两套阅读顺序。 */}
+            <div className="how-to" data-testid="how-to-comment">
+              <p className="how-to-title">分步提意指引</p>
+              <ol>
+                <li>
+                  点击「去官方渠道提意见」按钮，跳转到
+                  <a href={`/go/${notice.id}`}>官方原文页面</a>
+                  （本站只引流，不代替官方受理意见）。
                 </li>
-              ))}
-            </ul>
-            {/*
-              附件打不开时的出路（issue #35）：实测生产 340 个附件引用里有 31 个
-              （全部来自工信部）在两类独立网络下都返回 403 —— 文件挂在
-              jyhwzhq.miit.gov.cn 上，该主机对非白名单客户端一律拦（连根路径都 403），
-              而官方页面链接的就是同一批 URL。我们**不隐藏**这些链接（同一条链接在
-              用户浏览器里未必同样被拦，藏掉等于删掉可能可用的入口），但要让用户在
-              点进一个陌生站点的错误页之前就知道还有官方原文这条路。
-            */}
-            <p className="attachment-hint" data-testid="attachment-fallback">
-              附件打不开？部分政府站点对下载有网络或会话限制，可到
-              <a href={notice.url} target="_blank" rel="noopener noreferrer">
-                官方原文页面
-              </a>
-              获取。
-            </p>
-          </section>
-        ) : null}
-
-        {notice.bodyText ? (
-          <section className="notice-body">
-            <h2>正文（纯文本，摘自官方页面）</h2>
-            <div className="body-text" data-testid="notice-body">
-              {notice.bodyText}
+                <li>在官方页面阅读公告全文，确认征求意见的截止日期与受理范围。</li>
+                <li>
+                  {submissionChannels.length > 0
+                    ? '本公示已在原文中注明具体提交方式（见右侧「意见提交方式」），按其办理；建议附上具体条款与修改建议。'
+                    : '到官方原文页面上找「反馈方式 / 意见反馈」那一段并按其办理（右侧已说明本站为什么没取到渠道）；建议附上具体条款与修改建议。'}
+                </li>
+                <li>截止日期前提交的意见才会被纳入汇总，请留意页面上的截止时间。</li>
+              </ol>
             </div>
-            <p className="body-source">
-              官方原文：
-              <a
-                href={notice.url}
-                target="_blank"
-                rel="noopener noreferrer"
-                data-testid="official-url"
-              >
-                {notice.url}
-              </a>
-            </p>
-          </section>
-        ) : null}
-      </article>
 
+          {/* 附件与正文仍在主栏（栅格的第一列）：它们与摘要同属"读这份公告"，
+              不该被挤到 320px 的右栏里，也不该因为右栏是 sticky 就跟着浮起来。 */}
+          {notice.attachments.length > 0 ? (
+            <section className="attachments">
+              <h2>附件清单</h2>
+              <ul data-testid="notice-attachments">
+                {notice.attachments.map((attachment) => (
+                  <li key={attachment.url}>
+                    <a href={attachment.url} target="_blank" rel="noopener noreferrer">
+                      {attachment.name}
+                    </a>
+                  </li>
+                ))}
+              </ul>
+              {/*
+                附件打不开时的出路（issue #35）：实测生产 340 个附件引用里有 31 个
+                （全部来自工信部）在两类独立网络下都返回 403 —— 文件挂在
+                jyhwzhq.miit.gov.cn 上，该主机对非白名单客户端一律拦（连根路径都 403），
+                而官方页面链接的就是同一批 URL。我们**不隐藏**这些链接（同一条链接在
+                用户浏览器里未必同样被拦，藏掉等于删掉可能可用的入口），但要让用户在
+                点进一个陌生站点的错误页之前就知道还有官方原文这条路。
+              */}
+              <p className="attachment-hint" data-testid="attachment-fallback">
+                附件打不开？部分政府站点对下载有网络或会话限制，可到
+                <a href={notice.url} target="_blank" rel="noopener noreferrer">
+                  官方原文页面
+                </a>
+                获取。
+              </p>
+            </section>
+          ) : null}
+
+          {notice.bodyText ? (
+            <section className="notice-body">
+              <h2>正文（纯文本，摘自官方页面）</h2>
+              <div className="body-text" data-testid="notice-body">
+                {notice.bodyText}
+              </div>
+              <p className="body-source">
+                官方原文：
+                <a
+                  href={notice.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  data-testid="official-url"
+                >
+                  {notice.url}
+                </a>
+              </p>
+            </section>
+          ) : null}
+          </div>
+
+          {/* 右栏 = 行动栏本身（`data-testid="go-official-button"` 全页只有这一份）：
+              倒计时角标不在这里 —— 它跟着状态徽标留在主栏的标题区，读者第一眼看到
+              「什么时候截止」的位置不该随版式变。用 <aside> 而不是 <section>：这块
+              内容是对主栏的补充（去哪儿提、要不要订阅），不是主栏里的一节。
+
+              **它必须是 `.detail-grid` 的直接子项**（与 `.detail-main` 平级）：靠显式
+              `grid-column:2; grid-row:1` 摆到右栏，所以放在 DOM 最后不影响位置。
+              2026-10-02 的第一版把它写在了 `.detail-main` 里面 —— 后果是栅格只剩一个
+              子项、右栏退化成主栏里的一段（窄栏挤在正文中间），而当时的结构断言只查
+              "节点存在"，是渲染出来的**祖先链**把它抓出来的。改完请照 DOM 祖先链验，
+              别只验"有没有这个节点"。 */}
+          <aside className="action-slot detail-rail">
+            <a
+              className="go-button"
+              href={`/go/${notice.id}`}
+              data-testid="go-official-button"
+            >
+              去官方渠道提意见
+            </a>
+            {/* 提交方式（issue #27）：原文里写着的具体渠道。放在按钮旁——读者点了
+                按钮要跳走，此处先给「跳过去之后往哪儿提」。取不到时不再留白，
+                而是说明为什么取不到（issue #64），仍然不编一条凑数。 */}
+            <SubmissionChannels channels={submissionChannels} guidance={channelAdvice} url={notice.url} />
+            <p className="click-stats" data-testid="outbound-clicks">
+              出站提意点击：{notice.outboundClicks} 次
+            </p>
+            {/* 订阅提醒入口（issue #17）：详情页是「想参与」意向最强的时刻；
+                邮件端口未配置时不渲染（不挂必然失败的死流程） */}
+            {mailerReady() ? (
+              <p className="subscribe-hint">
+                不想错过同类公示？
+                <Link href="/subscribe" data-testid="subscribe-detail-link">
+                  订阅公示提醒
+                </Link>
+                —— 按关键词或领域，在截止前 7 天、3 天各收一封提醒邮件。
+              </p>
+            ) : null}
+          </aside>
+        </div>
+      </article>
       <SiteFooter />
-    </main>
-  );
+    </main>  );
 }

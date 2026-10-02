@@ -17,8 +17,10 @@ import { createFixtureServer } from './helpers/fixture-server.mjs';
  *     （stub 调用日志 JSONL 精确断言 4 次尝试）→ summary_status=failed_review，
  *     详情页显示「摘要生成中（待人工复核）」占位；后续正常轮次不再自动重试；
  *   → 成功路径：向 fixture 列表追加第 4 条（未截止）→ 再跑一轮 → 参与导引摘要
- *     （这是什么 / 影响谁 / 谁能提 / 逾期会怎样 / 截止日期 / 如何提意见）+ 每段原文引用
- *     （可点击跳转官方原文）+ 显著 AI 标注，占位消失。
+ *     （这是什么 / 逾期会怎样 / 截止日期 / 如何提意见）+ 每段原文引用（可点击跳转官方原文）
+ *     + 显著 AI 标注，占位消失。
+ *     「影响谁」与「谁能提」自 2026-10-02（两栏版式这一刀）起不渲染 —— 前者只在行业专业档、
+ *     后者整段删除，本条的受众面是公众广域，所以两段都该**不出现**（下面有反向断言）。
  *
  * 全程零外部依赖（ADR-0001）：SQLite 临时文件库 + 本地 fixture 源站 + stub LLM。
  */
@@ -233,18 +235,28 @@ describe('issue #4：AI 摘要器 → 五段式摘要展示（失败重试与成
     assert.ok(!html.includes('摘要生成中'), '占位消失');
     assert.match(html, /AI 生成，仅供参考，以官方原文为准/, '显著的 AI 生成标注');
 
-    // 参与导引各段（stub 固定摘要基准，issue #55）
+    // 参与导引各段（stub 固定摘要基准，issue #55；段落顺序与门控见 2026-10-02 两栏版式那一刀）
     assert.match(html, /【stub】这是一份政府公示征求意见稿（固定测试摘要）。/, '这是什么');
-    assert.match(html, /【stub】受该草案影响的公众与相关主体（固定测试文案）。/, '影响谁');
-    assert.match(html, /【stub】社会各界均可就草案提出意见（固定测试文案）。/, '谁能提');
     assert.match(html, /【stub】逾期未反馈将视为无意见（固定测试文案）。/, '逾期会怎样');
     assert.match(html, /【stub】请前往官方原文页面按指引提交意见。/, '如何提意见');
     assert.match(html, /2026-12-31/, '截止日期段展示摘要中的截止日期');
     assert.ok(!html.includes('关键条款'), '不再渲染「关键条款」：公告壳里没有条款可概括');
+    // 2026-10-02 两栏版式这一刀的两处删除，各钉一条**反向断言**（删掉的东西要有痕迹）：
+    // ① 「谁能提」整段不再渲染（96 条摘要里 95 条等价于"公众可提"、28% 是空的）；
+    // ② 「影响谁」只在行业专业档渲染，而本条的受众面是公众广域（标题是法律草案）。
+    //    stub 的 who 取值一直在（STUB_SUMMARY.who），所以这一条红只可能是门控错了。
+    assert.ok(!html.includes('谁能提'), '「谁能提」段已删除，标题与正文都不该在');
+    assert.ok(!rawHtml.includes('data-testid="summary-who-can-submit"'), '那个节点已删除');
+    assert.ok(
+      !rawHtml.includes('data-testid="summary-who"'),
+      '公众广域条目不渲染「影响谁」（那一段实测基本是标题复述）',
+    );
+    assert.ok(
+      !html.includes('【stub】受该草案影响的公众与相关主体（固定测试文案）。'),
+      '「影响谁」的正文同样不出现 —— 光藏标题等于把判据写在样式里',
+    );
     for (const testId of [
       'summary-what',
-      'summary-who',
-      'summary-who-can-submit',
       'summary-after-deadline',
       'summary-deadline',
       'summary-how-to-comment',
@@ -282,10 +294,15 @@ describe('issue #4：AI 摘要器 → 五段式摘要展示（失败重试与成
     );
     assert.match(html, /摘要补充/, '标签文字对读者可见');
 
-    // 引用：6 个正文段（这是什么/影响谁/谁能提/逾期/截止/如何提意见）
+    // 引用：4 个正文段（这是什么 / 逾期会怎样 / 截止日期 / 如何提意见）。
+    // 2026-10-02 两栏版式这一刀之前是 6 个，少掉的**两个原因不同，别混成一条**：
+    //   - 「谁能提」：整段被删（生产实测 96 条里 95 条等价于"公众可提"，复述已知事实）；
+    //   - 「影响谁」：没删，但被 `shouldRenderWho` 的受众面门控挡掉了 —— 这条 fixture 判 public，
+    //     而它只在行业专业档渲染。
+    // **这个数字是那两条决定的可见痕迹**，别顺手改回去；改回去之前先想清楚是哪一条变了。
     // 渠道的引用不再走 summary-quote —— 它作为「原文：…」小字跟在渠道行下方
     const quoteAnchors = [...rawHtml.matchAll(/<a\b[^>]*data-testid="summary-quote"[^>]*>/g)];
-    assert.equal(quoteAnchors.length, 6, '各段都附原文引用块');
+    assert.equal(quoteAnchors.length, 4, '各段都附原文引用块（少了说明有段落没渲染出来）');
     for (const anchor of quoteAnchors) {
       assert.ok(
         anchor[0].includes(`href="${officialUrl}"`),

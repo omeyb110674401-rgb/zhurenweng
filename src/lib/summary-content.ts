@@ -181,7 +181,14 @@ export interface QuotedAmendmentChange {
 export interface QuotedSummary {
   what: SummarySection;
   who: SummarySection;
-  /** 谁能提（text 为空串 = 公告未提及，渲染时整段不出现） */
+  /**
+   * 谁能提。
+   *
+   * **页面自 2026-10-02（两栏版式这一刀）起整段不渲染**（用户拍板：96 条摘要里 95 条的取值
+   * 等价于"公众可提"、平均 10.4 字、28% 是空的 —— 它复述的是读者点进来之前就知道的事实）。
+   * 落库形状一个字没动：存量摘要在重刷完成前仍带着它，`scripts/audit-attachment-extraction.mjs`
+   * 也还在用它量"who 抄了 whoCanSubmit"这件事。删的是那一段渲染，不是这个字段。
+   */
   whoCanSubmit: SummarySection;
   /** 逾期会怎样（同上） */
   afterDeadline: SummarySection;

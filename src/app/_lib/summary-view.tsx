@@ -23,20 +23,33 @@ import {
   draftProvenanceLine,
   type DraftAvailabilityInput,
 } from '@/lib/summary-display';
-import { shouldRenderImpacts } from '@/lib/impact-display';
+import { shouldRenderImpacts, shouldRenderWho } from '@/lib/impact-display';
 import { summaryProvenance, summaryTemplateOf } from '@/lib/summary-basis';
 
 /**
  * 详情页摘要展示（issue #4 建立，issue #55/#56 重构为「参与导引」，issue #57 第 6 步
  * 重新启用条文要点）。
  *
- * 段落：这是什么 / 影响谁 / 谁能提 / 逾期会怎样 / **草案条文要点** / 截止日期 / 如何提意见。
+ * 段落顺序（2026-10-02 两栏版式这一刀，规格第四节 —— **顺序本身是决定，别重排**）：
+ * 这是什么 / 影响谁（仅行业专业档）/ **可能的争议点** / 草案条文要点 / 改了哪几处 /
+ * 编制说明要点 / 逾期会怎样 / 截止日期 / 如何提意见，底部是出处 / 摘要依据 / 模型名。
+ *
+ * 两处位置是有意为之：
+ * - **判读上移到「这是什么」之后**（原位置在「改了哪几处」之后）。它是这一段里唯一
+ *   "会让读者想提意见"的东西，而下面几块是证据与长尾；让读者翻过一整列说明才看到它，
+ *   等于把最该被看见的一段藏起来。证据先于推断这条原则没有让步 —— 判读块里每条推断
+ *   仍与它依据的那句原文同屏。
+ * - **「谁能提」整段不再渲染**（2026-10-02 用户拍板，规格第一节第 5 条）。删它的理由在
+ *   数据里：96 条摘要里 95 条的取值等价于"公众可提"、平均 10.4 字、28% 干脆是空的 ——
+ *   它复述的是"这是一份征求意见稿"这个**读者点进来之前就知道**的事实。落库形状里的
+ *   `whoCanSubmit` 一个字没动（存量数据与审计脚本还在读它），删的只是这一段渲染。
+ *
  * 「条文要点」与其余各段不同：它的依据不是公告壳，而是本站从附件里抽出的正文，
  * 因此每条都带**出处**（哪个附件），且出处是程序按引用反查出来的（`buildQuotedSummary`）——
  * 反查不到的要点根本不会落库，所以这里不需要防御"模型编了条文"。
  * **渠道清单**仍刻意不在此渲染：地址在页面上只有一个位置，见下方 SummaryView 的注释。
  *
- * - done：渲染本体；可缺段（谁能提 / 逾期会怎样）文本为空时**整段不出现**，
+ * - done：渲染本体；可缺段（影响谁 / 逾期会怎样）文本为空时**整段不出现**，
  *   避免出现「标题下面没有内容」（issue #55 实测线上有过一条空的「影响谁」）。
  * - pending / failed_review：占位块（复用 data-testid="summary-placeholder" 契约），
  *   failed_review 额外标注「待人工复核」。
@@ -194,13 +207,81 @@ export function SummaryView({
 
       <div className="summary-sections">
         <SectionBlock notice={notice} label="这是什么" section={summary.what} testId="summary-what" />
-        <SectionBlock notice={notice} label="影响谁" section={summary.who} testId="summary-who" />
-        <SectionBlock
-          notice={notice}
-          label="谁能提"
-          section={summary.whoCanSubmit}
-          testId="summary-who-can-submit"
-        />
+        {/*
+         * 「影响谁」（2026-10-02 两栏版式这一刀）：**只在行业专业档渲染**，判据在
+         * `lib/impact-display.ts` 的 `shouldRenderWho`（页面 .tsx 进不了单测，而钉不住的
+         * 判据等于没有判据 —— 见那个文件的头注）。
+         *
+         * 这一段与「可能的争议点」的门控**方向相反**，两处挨着看才不容易改错：
+         * 公众广域看的是判读（推断），行业专业看的是受影响主体（那一档里它就是读者自己）。
+         * 空串同样整段不渲染 —— 连标题都不出现（#55 / #85 的教训）。
+         */}
+        {shouldRenderWho({ audience: notice.audience, who: summary.who }) ? (
+          <SectionBlock notice={notice} label="影响谁" section={summary.who} testId="summary-who" />
+        ) : null}
+        {/*
+         * 可能的争议点（issue #86 第 1 刀）—— 全站**唯一一段推断**内容。
+         *
+         * 为什么单独一块、为什么措辞这么小心：上面每一句都要求逐字对得上原文，而这里写的是
+         * "这一条可能带来什么" —— 那是推断，**不可能逐字核对**。用户要的正是这个
+         * （"吸毒修正案、留学生 Z 签都是事后曝光才有人参与"），所以不能不做，只能把它做成
+         * 读者能自己判断的样子。三条硬规矩：
+         * ① 每条挂一条**逐字原文**（反查不到整条不落库，出处由程序算，不由模型自报）；
+         * ② **块级**免责声明 —— 卡片头部那行「AI 生成」说的是整张卡，而这一段是卡里唯一
+         *    需要读者额外警惕的部分，它在自己的块里再讲一遍；
+         * ③ **一行都没有时整块不渲染**（连标题都不出现）——#85 的教训：空壳比没有更坏。
+         *
+         * 位置（2026-10-02 两栏版式这一刀）：**「这是什么」之后、「草案条文要点」之前**。
+         * 原先它在「改了哪几处」之后，理由写的是"证据先于推断"；那一刀之后证据并没有被推到
+         * 后面去（条文要点、改动表、编制说明仍在它下面），而它自己上移到了读者第一屏 ——
+         * 规格第一节第 7 条拍板的就是这件事。块内渲染一个字没改（「影响点」三件是第二刀）。
+         *
+         * **受众面门控**：只给「公众广域」渲染（用户 2026-09-27 拍板："先只上公众广域 +
+         * 人工过一遍"）。门放在**渲染侧**而不是生成侧：这一段与其余字段共用同一次模型调用，
+         * 多写一份不额外花钱，而这批数据正是将来放宽档位时要用的原样原料。
+         */}
+        {(() => {
+          const impacts = summary.impacts;
+          // 判据在 lib/impact-display.ts（纯函数，能进单测也就能进自证框架 —— 页面 .tsx 两样都进不去）
+          if (!shouldRenderImpacts({ audience: notice.audience, impacts })) return null;
+          return (
+            <div className="summary-section" data-testid="summary-impacts">
+              <h2 className="summary-section-title">可能的争议点</h2>
+              <p className="summary-section-note" data-testid="summary-impacts-note">
+                以下是本站 AI 依据公开原文作出的<b>推断</b>，不是官方表述，也不构成法律意见；
+                每条都附了它依据的那句原文，请自己判断。
+              </p>
+              <ul className="summary-points">
+                {impacts.map((impact, index) => (
+                  <li key={index}>
+                    <p className="impact-kind" data-testid="summary-impact-kind">
+                      {IMPACT_KIND_LABELS[impact.kind]}
+                    </p>
+                    <p className="summary-section-text">{impact.text}</p>
+                    {impact.who ? (
+                      <p className="impact-who" data-testid="summary-impact-who">
+                        可能受影响：{impact.who}
+                      </p>
+                    ) : null}
+                    <SectionQuote
+                      notice={notice}
+                      quote={impact.quote}
+                      href={impact.sourceUrl ?? undefined}
+                    />
+                    <p className="draft-point-source" data-testid="summary-impact-source">
+                      {impact.source
+                        ? draftProvenanceLine(
+                            impact.source,
+                            '出处：未标注（这条的引用没能反查到本轮喂入的附件）',
+                          )
+                        : '出处：未标注（这条的引用没能反查到本轮喂入的附件）'}
+                    </p>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          );
+        })()}
         <SectionBlock
           notice={notice}
           label="逾期会怎样"
@@ -359,69 +440,6 @@ export function SummaryView({
                   </tbody>
                 </table>
               </div>
-            </div>
-          );
-        })()}
-
-        {/*
-         * 可能的争议点（issue #86 第 1 刀）—— 全站**唯一一段推断**内容。
-         *
-         * 为什么单独一块、为什么措辞这么小心：上面每一句都要求逐字对得上原文，而这里写的是
-         * "这一条可能带来什么" —— 那是推断，**不可能逐字核对**。用户要的正是这个
-         * （"吸毒修正案、留学生 Z 签都是事后曝光才有人参与"），所以不能不做，只能把它做成
-         * 读者能自己判断的样子。三条硬规矩：
-         * ① 每条挂一条**逐字原文**（反查不到整条不落库，出处由程序算，不由模型自报）；
-         * ② **块级**免责声明 —— 卡片头部那行「AI 生成」说的是整张卡，而这一段是卡里唯一
-         *    需要读者额外警惕的部分，它在自己的块里再讲一遍；
-         * ③ **一行都没有时整块不渲染**（连标题都不出现）——#85 的教训：空壳比没有更坏。
-         *
-         * 位置：放在「草案条文要点」（短的、直接的证据）之后、「编制说明要点」（长尾）之前。
-         * 这是有意的取舍 —— 证据先于推断（本站的立身之本），但又不能让读者翻过一整列说明
-         * 才看到唯一会让他想提意见的东西。
-         *
-         * **受众面门控**：只给「公众广域」渲染（用户 2026-09-27 拍板："先只上公众广域 +
-         * 人工过一遍"）。门放在**渲染侧**而不是生成侧：这一段与其余字段共用同一次模型调用，
-         * 多写一份不额外花钱，而这批数据正是将来放宽档位时要用的原样原料。
-         */}
-        {(() => {
-          const impacts = summary.impacts;
-          // 判据在 lib/impact-display.ts（纯函数，能进单测也就能进自证框架 —— 页面 .tsx 两样都进不去）
-          if (!shouldRenderImpacts({ audience: notice.audience, impacts })) return null;
-          return (
-            <div className="summary-section" data-testid="summary-impacts">
-              <h2 className="summary-section-title">可能的争议点</h2>
-              <p className="summary-section-note" data-testid="summary-impacts-note">
-                以下是本站 AI 依据公开原文作出的<b>推断</b>，不是官方表述，也不构成法律意见；
-                每条都附了它依据的那句原文，请自己判断。
-              </p>
-              <ul className="summary-points">
-                {impacts.map((impact, index) => (
-                  <li key={index}>
-                    <p className="impact-kind" data-testid="summary-impact-kind">
-                      {IMPACT_KIND_LABELS[impact.kind]}
-                    </p>
-                    <p className="summary-section-text">{impact.text}</p>
-                    {impact.who ? (
-                      <p className="impact-who" data-testid="summary-impact-who">
-                        可能受影响：{impact.who}
-                      </p>
-                    ) : null}
-                    <SectionQuote
-                      notice={notice}
-                      quote={impact.quote}
-                      href={impact.sourceUrl ?? undefined}
-                    />
-                    <p className="draft-point-source" data-testid="summary-impact-source">
-                      {impact.source
-                        ? draftProvenanceLine(
-                            impact.source,
-                            '出处：未标注（这条的引用没能反查到本轮喂入的附件）',
-                          )
-                        : '出处：未标注（这条的引用没能反查到本轮喂入的附件）'}
-                    </p>
-                  </li>
-                ))}
-              </ul>
             </div>
           );
         })()}
@@ -624,8 +642,8 @@ export function SummaryPlaceholder({ status }: { status: SummaryStatus }): React
         <span className="summary-pending">{SUMMARY_STATUS_LABELS[status] ?? status}</span>
       </div>
       <p className="summary-note">
-        本站正在为本条公示生成结构化 AI 摘要（这是什么 / 影响谁 / 谁能提 / 如何提意见）；抽到的
-        提交地址会并入下方「意见提交方式」，并标注为「摘要补充」。
+        本站正在为本条公示生成结构化 AI 摘要（这是什么 / 可能的影响 / 草案条文要点 / 如何提意见）；
+        抽到的提交地址会并入下方「意见提交方式」，并标注为「摘要补充」。
         AI 生成内容将显著标注并附原文引用，仅供参考，以官方原文为准。
       </p>
       {status === 'failed_review' ? (
