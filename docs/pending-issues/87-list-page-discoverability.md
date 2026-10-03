@@ -521,6 +521,10 @@ cat deploy/audit-l3-reach.sql | docker compose exec -T db psql -U zhurenweng -d 
 
 1. **把 d 档那 6 条的判读拿去人工过一遍**（`scripts/show-notice-summary.mjs` 出读数，只读）。
    样本从 3 条变 6 条，且这 6 条正好覆盖行业档现在最富的判读 —— 过完再定扩不扩档。
+   **过目用的清单已出：`87-l3-sector-review-sheet.md`**（6 条 / 22 条判读，逐条带逐字引用与出处）。
+   那一份不是用 `show-notice-summary.mjs` 出的 —— 验收门按设计走到
+   `shouldRenderImpacts === false` 就停、只印「本页不渲染」，**它读不到被挡住的那几条**；
+   清单由新脚本 `scripts/review-impacts-extension.mjs`（只读、与页面同一套纯函数）生成。
 2. **重跑那 19 条排在复核之后**：否则要人读的东西从 6 条条目变成 25 条条目，
    而"人工过一遍"这条纪律一旦因为量太大而被跳过，扩档就变成了"把未经复核的推断铺开"。
 
