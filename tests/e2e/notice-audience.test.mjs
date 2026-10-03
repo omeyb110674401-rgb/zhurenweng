@@ -257,3 +257,96 @@ describe('issue #83：受众面分类与筛选', () => {
     assert.ok(!listTitles(sector).includes(SECTOR_TITLES[0]));
   });
 });
+
+/**
+ * issue #87（2026-10-03 用户拍板「标记只放首页」）：列表页的「这条里有什么」。
+ *
+ * 为什么这一组放在**受众面**这个文件里：这一刀的全部风险就是**门控同源**。
+ * 生产库里有一批 `sector` 条目存着判读、而详情页一个字都不渲染；列表页若照库里的
+ * 数组打标记，读者点进去会发现什么都没有。所以判据必须经由 `shouldRenderImpacts`
+ * （单测把这条契约定死了），这里钉的是**它真的到了首页 HTML 上**。
+ *
+ * 判据本身钉不住在 e2e 里（撤 `src/lib/**` 撤不出红，e2e 跑的是构建产物）——
+ * 这一组的价值在"接线"：组件真的把那行字画出来了。
+ */
+describe('issue #87：列表标记与受众面门控同源', () => {
+  it('公众广域 ⇒ 两个标记都在；行业专业 ⇒ 判读标记不许有、改动对照照样有（两个标记门控不同）', async () => {
+    // 直接注入一份**已知**的摘要（不依赖 stub 产出什么），这样断言才是确定的。
+    // 注意 `what` / `deadline` / `howToComment` 这三段是 `parseQuotedSummary` 的**必需段**
+    // （`summary-content.ts` 里 `if (!what || !deadline || !howToComment) return null`）——
+    // 少了它们整份解析成 null，标记会静默不打（第一次就踩在这里：判据没错、夹具不对）。
+    const injected = JSON.stringify({
+      what: { text: '关于某规定的征求意见稿。', quote: null },
+      deadline: { text: '2026-10-24', quote: null },
+      howToComment: { text: '可通过电子邮件提交意见。', quote: null },
+      impacts: [
+        {
+          quote: '收费公路在收费偿债或者收费经营期间的管理养护费用，在车辆通行费中列支。',
+          who: '高速公路通行车主',
+          point: '通行费用支出',
+          text: '期限届满后可能继续收费。',
+          kind: 'burden',
+          source: null,
+          sourceUrl: null,
+        },
+      ],
+      // 一条**完整**的改动行：`quote` 与 `text` 缺一即被读侧丢掉（与判读同一条不变量），
+      // 所以夹具必须给全，否则"改动对照打标"那条断言会红在一个与判据无关的地方。
+      changes: [
+        {
+          clause: '第三十六条',
+          kind: 'modify',
+          text: '改为依法征税筹集公路管理养护资金。',
+          quote: '将第三十六条修改为：“国家采用依法征税的办法筹集公路管理养护资金”。',
+          source: null,
+          sourceUrl: null,
+        },
+      ],
+      changeTable: { entries: [], headers: 0 },
+    });
+    const db = new Database(dbFile);
+    db.prepare('update notices set ai_summary_json = ? where title = ?').run(injected, PUBLIC_TITLES[0]);
+    db.prepare('update notices set ai_summary_json = ? where title = ?').run(injected, SECTOR_TITLES[0]);
+    db.close();
+
+    const html = await fetchHome('');
+    const blockOf = (title) => {
+      const block = noticeItems(html).find((item) => itemTitle(item) === title);
+      assert.ok(block, `首页应含条目「${title}」`);
+      return block;
+    };
+
+    const publicBlock = blockOf(PUBLIC_TITLES[0]);
+    assert.match(
+      publicBlock,
+      /data-testid="notice-mark"[^>]*data-mark="impacts"[^>]*>含本站推断（非官方）</,
+      '公众广域 + 有判读 ⇒ 列表要标出「含本站推断（非官方）」',
+    );
+    assert.match(
+      publicBlock,
+      /title="本站 AI 依据公开原文作出的推断/,
+      '完整说明要挂在 title 上（悬停与读屏都拿得到，列表不因此变长）',
+    );
+    assert.match(publicBlock, /data-testid="notice-mark"[^>]*data-mark="changes"|data-mark="changes"/, '改动对照也打标');
+
+    const sectorBlock = blockOf(SECTOR_TITLES[0]);
+    /*
+     * 两个标记的**门控不一样**，这一条断言把这件事钉死：
+     * - 「含本站推断」跟着 `shouldRenderImpacts` 走 ⇒ 行业专业档**不许**打
+     *   （详情页那一段对 sector 不渲染，列表打了就是在承诺不存在的东西）；
+     * - 「含改动对照」**不受受众面门控**（详情页「改了哪几处」对任何受众面都渲染，
+     *   它是事实、不是推断）⇒ 这里**应当**有。
+     * 第一版我断言的是"整个 sector 块一个标记都没有" —— 那是错的，而且错得很有价值：
+     * 它说明"两个标记同门控"是个很容易想当然的假设。
+     */
+    assert.ok(
+      !/data-mark="impacts"/.test(sectorBlock),
+      '行业专业条目详情页不渲染判读 —— 列表就不许打「含本站推断」（那是在承诺详情页不存在的东西）',
+    );
+    assert.match(
+      sectorBlock,
+      /data-mark="changes"/,
+      '改动对照不受受众面门控：详情页那一段对任何受众面都渲染',
+    );
+  });
+});

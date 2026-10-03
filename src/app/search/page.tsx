@@ -166,7 +166,15 @@ export default async function SearchPage({ searchParams }: SearchPageProps) {
         ) : (
           <ul className="notice-list">
             {notices.map((notice) => (
-              <NoticeItem key={notice.id} notice={notice} />
+              /*
+               * `showMarks={false}`：用户 2026-10-03 拍板「标记只放首页」。
+               * 理由不是"搜索页不重要"，而是两处不同：① 搜索结果页整页 noindex（见本文件
+               * 与 issue #38 的索引口径），标记在那一页不会被搜索引擎读到；② 首页是"逛"的
+               * 场景、"一条条翻着看这条值不值得点" —— 标记正是给这个动作用的；
+               * 搜索页的人已经带着关键词来了，列表只需回答"命中哪几条"。
+               * 组件默认是**开着**的（新加列表入口不会静默漏掉），所以这个例外显式写在这里。
+               */
+              <NoticeItem key={notice.id} notice={notice} showMarks={false} />
             ))}
           </ul>
         )}

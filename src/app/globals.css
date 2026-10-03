@@ -212,6 +212,9 @@ body {
 .notice-item-head {
   display: flex;
   align-items: center;
+  /* 允许换行：这一行现在可能装 状态徽标 + 倒计时 + 「新」+ 最多两个「含…」标记，
+     窄屏（332px 栏）下不换行就会溢出或把徽标压变形。加宽屏时没有任何影响。 */
+  flex-wrap: wrap;
   gap: 8px;
   margin-bottom: 6px;
 }
@@ -279,6 +282,21 @@ body {
   color: var(--accent);
   background: #fff;
   border: 1px dashed var(--accent);
+}
+
+/* 「这条里有什么」的标记（issue #87，2026-10-03）：判读 / 改动对照此前**只存在于详情页
+   渲不渲染**（全库 97 条摘要里只有 11 条带判读 —— 它们正需要被看见）。
+   视觉层级**低于状态徽标**：它答"这条里有什么"，不答"该不该行动"，所以用 `.genre-badge`
+   那套语言（描边 + muted 文字）而不是填色。**不许用红色系** —— 红在这套样式里已经是
+   「已截止」（`.status-closed`）与「今天截止」（`.countdown-urgent`）。
+   完整说明挂在元素的 `title` 上（与详情页那段块级免责声明同义），悬停与读屏都拿得到，
+   列表不因此变长。 */
+.notice-mark {
+  padding: 2px 8px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  font-size: 12px;
+  color: var(--muted);
 }
 
 .countdown-urgent {
