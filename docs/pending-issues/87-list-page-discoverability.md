@@ -328,3 +328,61 @@ export const NOTICE_MARK_HINTS: Record<NoticeMarkKind, string>
 **判据抽进 `src/lib/notice-marks.ts` 并调用 `shouldRenderImpacts`；渲染只改 `NoticeItem` 一处；
 不加列、不加迁移、不加筛选、不写进结构化数据。** 这一刀的产出是让库里那 8 条（今天只有
 1 条带改动表）从详情页里走出来，代价是一次 ≤50 行的纯函数解析。
+
+## 8. 落地记录（2026-10-03 当日完成）
+
+> 上线后再回来看这一节：数量要按当天的库现状读（本文件写于 09-27，那天的"8 条判读"
+> 到 2026-10-03 已是 **11 条**，全库摘要 97 条）。
+
+### 8.1 第 6 节那六个问题的拍板
+
+| # | 问题 | 用户拍板 |
+| --- | --- | --- |
+| 1 | 标记放在哪些列表 | **只首页**（搜索页**显式**关掉，见 8.2） |
+| 2 | 只有改动表、没有判读的条目 | **换措辞打标**「含改动对照」（不打就永远没人看得到那唯一一条） |
+| 3 | 已截止条目要不要显示 | **有就显示**（时效不设门控 —— 与受众面门控是两回事，不混成一道门） |
+| 4 | 加不加 `?has=impacts` 筛选 | **不加**（按本文建议，先让那几条被看见） |
+| 5 | 「有摘要没判读」的弱标记 | **不加**（会在近一半条目上出现，反而把判读淹掉） |
+| 6 | 验收方式 | **① e2e 注入 + 单测** 与 **② 上线后人工过一眼首页** |
+
+### 8.2 落地形状
+
+| 文件 | 内容 |
+| --- | --- |
+| `src/lib/notice-marks.ts`（新增） | `noticeMarks()` / `NOTICE_MARK_LABELS` / `NOTICE_MARK_HINTS`；`impacts` 那一支**调用** `shouldRenderImpacts`（不抄表达式），`changes` 那一支与详情页提前返回逐字对齐 |
+| `src/app/_lib/notice-item.tsx` | 新增 `showMarks` 参数（**默认 true**）+ `parseQuotedSummary` 只解析一次 + 渲染 `data-testid="notice-mark"` / `data-mark=…` / `title=…` |
+| `src/app/search/page.tsx` | 显式传 `showMarks={false}`（用户拍板"只首页"；例外写在例外发生的地方，而默认值留给列表页的应有之义） |
+| `src/app/globals.css` | 新增 `.notice-mark`（描边 + muted，比状态徽标弱一档、不用红）；`.notice-item-head` 加 `flex-wrap: wrap`（多一个标记后在 332px 窄栏里不换行会溢出） |
+
+**没有动**的：`drizzle/**`（不加列）、`notices.ts`（SQL 一个字没改）、`summary-view.tsx`（详情页
+一个字没改）、`notice-jsonld.ts` / `feed.ts` / `sitemap.ts`（结构化数据与广播不承载这个信号）、
+`home-query.ts`（不加 querystring 维度）—— 与第 5.3 节一致。
+
+### 8.3 两处"夹具先错、才看出判据的形状"（记下来，免得下次再踩）
+
+1. **`parseQuotedSummary` 的必需段是 `what` / `deadline` / `howToComment`** ——
+   `summary-content.ts` 里 `if (!what || !deadline || !howToComment) return null`。
+   第一版 e2e 注入的摘要只给了 `impacts`，于是整份解析成 `null`、标记**静默不打**：
+   表现是"判据没错、页面也对，就是没有那一行"。这与 §1.4 说的"对缺键宽容"**不矛盾**：
+   宽容的是后加的键（`impacts` / `changes` / `changeTable`），不是这三段。
+2. **两个标记的门控不一样**：`impacts` 跟着受众面门控走，而 `changes` **不受**它约束
+   （详情页「改了哪几处」对任何受众面都渲染 —— 它是事实、不是推断）。
+   第一版断言写成"sector 块一个标记都没有"，红了 —— 而它错得有价值：
+   "两个标记同门控"是个很容易想当然的假设，e2e 现在把这条**不对称**钉住了。
+
+### 8.4 门
+
+- 单测 `tests/unit/notice-marks.test.mjs` **13 条**，其中两组是重心：
+  **契约测试**（`public/sector/unknown/null` × 有/无判读 共 8 格穷举，`noticeMarks` 的
+  `impacts` 结论必须与 `shouldRenderImpacts` **逐格一致**）与**源码接线** 3 条
+  （组件真的调用了 `noticeMarks`、真的画了 testid/`data-mark`/`title`、搜索页真的关掉了）。
+- pin **+3**：撤受众面门控 → 红；撤 `changes.length > 0 || table !== null`（收缩成 `&&`）→ 红；
+  撤组件接线 → 红。
+- e2e `tests/e2e/notice-audience.test.mjs` **+1 组**（注入一份已知摘要：公众广域断言两个标记
+  都在且 `title` 完整，行业专业断言"判读标记不许有、改动对照照样有"）。
+
+### 8.5 验收（第 6 问选 ①②）
+
+上线后**人工过一眼首页**即可：带「含本站推断（非官方）」的条目点进去，应当能看到
+「可能的争议点」那一段；带「含改动对照」的点进去应当有「改了哪几处」。
+**若数量对不上**，再做第 6 问那个 ③（只读审计脚本打印"应当带标记的条目 id 清单"）。
