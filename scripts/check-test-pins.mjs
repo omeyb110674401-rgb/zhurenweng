@@ -86,6 +86,11 @@ const TARGETS = {
   llmAdapter: 'src/lib/adapters/openai-compatible-llm.ts',
   // issue #86 第 1 刀：影响判读的展示判据（页面 .tsx 进不了单测，所以判据抽在 .ts 里）
   impactDisplay: 'src/lib/impact-display.ts',
+  // issue #87（2026-10-03）：列表页「这条里有什么」的标记。判据在 `.ts`，渲染在 `.tsx` ——
+  // 而 `.tsx` 撤不出红（e2e 跑构建产物），所以接线由 `tests/unit/notice-marks.test.mjs`
+  // 最后那一组按**源码**钉。这两个键就是给它用的。
+  noticeMarks: 'src/lib/notice-marks.ts',
+  noticeItem: 'src/app/_lib/notice-item.tsx',
   // issue #86 第 2 刀：「改了哪几处」的覆盖度（改动表述计数 + 三态判词）
   changeCoverage: 'src/lib/change-coverage.ts',
   // issue #86 第二十节第 3 小节：那张表**行由程序定**（按句归并、缺口成行、标题不成行）。
@@ -2064,6 +2069,39 @@ const CASES = [
     to: '  .page:has(.list-page) .list-main { grid-column: 2; grid-row: 1; }',
     pattern: '宽屏的列位写死了',
     test: 'tests/e2e/list-layout.test.mjs',
+  },
+  // ── 2026-10-03：列表页「这条里有什么」的标记（issue #87）──────────────────────
+  {
+    // 这一条是整刀的风险所在：生产库里有一批 `sector` 条目**存着判读但详情页一个字都不渲染**
+    // （受众面门控）。列表页若照库里的数组打标记，读者点进去会发现什么都没有 ——
+    // 列表在承诺详情页不存在的东西，那比没有标记坏得多。所以靶点就是那道门本身。
+    label: '列表标记不再看受众面（列表承诺详情页不存在的东西）',
+    file: 'noticeMarks',
+    from: '  if (shouldRenderImpacts({ audience, impacts })) {',
+    to: '  if (impacts.length > 0) {',
+    pattern: '行业专业',
+    test: 'tests/unit/notice-marks.test.mjs',
+  },
+  {
+    // 失效方式不同（不是"多打标"而是"少打标"）：`changeTable` 是 worker 在 `changes` 定下
+    // 之后**补写**的，历史行可能只有一半 —— 收缩成 `&&` 就会漏掉那些行，而且与详情页那个
+    // 提前返回（`changes.length === 0 && table === null`）不再逐字对齐。
+    label: '改动对照的判据收缩成"两半都要有"（只有一半的历史行漏掉标记）',
+    file: 'noticeMarks',
+    from: '  const hasChanges = changes.length > 0 || table !== null;',
+    to: '  const hasChanges = changes.length > 0 && table !== null;',
+    pattern: '改动对照：',
+    test: 'tests/unit/notice-marks.test.mjs',
+  },
+  {
+    // 接线：判据对了、组件没接上 —— 这一类改动最常见的断线，而它在 e2e 里**看不见**
+    // （e2e 跑 `.next` 构建产物）。所以由单测那一组按**源码**钉，这里撤的是接线本身。
+    label: '组件不再把摘要喂给 noticeMarks（判据对、页面没接上）',
+    file: 'noticeItem',
+    from: '    ? noticeMarks({ audience: notice.audience, summary: parseQuotedSummary(notice.aiSummary) })',
+    to: '    ? []',
+    pattern: '组件真的用了 noticeMarks',
+    test: 'tests/unit/notice-marks.test.mjs',
   },
 ];
 
