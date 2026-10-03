@@ -86,6 +86,17 @@ docker compose up -d worker          # 让常驻容器也换到新镜像，否�
   同一天还有第二批（npc 草案附件开关，见 `docs/pending-issues/86-*.md` §18.4）：现算下来是
   **9 个文件**（7 改 2 新），**新文件不在 `git ls-files` 里，现算清单时要先 `git add`**
   —— 否则它们既不在清单里、也不会被同步，而表现是"代码改了、服务器上还是旧的"
+- `audit-l3-reach.sql` —— **只读**（issue #87 收尾，2026-10-03）：L3 判读（「可能的争议点」）
+  的触达口径。把三份记录对起来 —— `ai_summary_json` 的实际形状、
+  `summary_diagnostics_json` 的 `feed.sources` / `emitted` / `kept` / `dropped`、
+  以及 `audience` 门控 —— 并按**互斥**分档回答"判读卡在哪一关"
+  （没喂 / 模型没吐 / 被反查吃掉 / 被受众面挡住 / 量具不存在）。
+  跑法：`cat deploy/audit-l3-reach.sql | docker compose exec -T db psql -U zhurenweng -d zhurenweng`；
+  读数与结论见 `docs/pending-issues/87-list-page-discoverability.md` 第九节。
+  **它只从 `/tmp` 跑过**（只读探针的惯例：`zw-push-tmp.ps1` → `cat` 进 psql，不碰 `/opt`），
+  所以下一轮全树对拍会把它显示成 `missing` —— 那是**还没同步**，不是漏传；
+  下一轮授权部署会随 deploy 面一并带上去。它除会话级临时视图外不写任何东西，
+  且自带两条自检（分档之和 = 有摘要、诊断 `kept.impacts` = 落库数组长度）
 - `run-probe-public-impacts.sh` —— **只读实验的启动器**（issue #86 第十三节）：把**未部署**的源码
   （`src/lib/attachment-feed.ts`、适配器、worker 等）从 `/tmp/zw-probe` **只读挂进**一次性 worker
   容器，跑 `scripts/probe-public-impacts.mjs` —— 它用生产那份适配器与反查实现，在真实的
