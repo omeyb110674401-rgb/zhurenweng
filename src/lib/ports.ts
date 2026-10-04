@@ -1,6 +1,7 @@
 import { createGlmLlm } from './adapters/glm-llm.ts';
 import type { SummaryTier } from './attachment-feed.ts';
 import type { ChangeKind } from './change-coverage.ts';
+import { createImpactReviewLlmFromEnv } from './adapters/impact-review-llm.ts';
 import type { ImpactReviewVerdict } from './impact-review.ts';
 import { createOpenAiLlmFromEnv } from './adapters/openai-compatible-llm.ts';
 import { StubImpactReview } from './adapters/stubs/stub-impact-review.ts';
@@ -304,6 +305,15 @@ export interface ImpactReviewItem {
   point: string;
   /** 推断正文 */
   text: string;
+  /**
+   * 引用出处的原文邻域（issue #50；由 `neighborhoodForQuote` 从这一条目的附件正文里取出，
+   * 取不到为 null）。
+   *
+   * **没有邻域，A1 / A2 / A6 三条判不了**：只喂引用会让"是否超出原文"退化成拿引用证明引用。
+   * 谁有正文谁负责取 —— 正文只在 worker 手上（`draftSources`），所以这一格由 worker 填，
+   * 端口只管把它原样放进提示词。
+   */
+  neighborhood: string | null;
 }
 
 export interface ImpactReviewInput {
@@ -347,7 +357,15 @@ export function impactReviewReady(env: NodeJS.ProcessEnv = process.env): boolean
 }
 
 /**
- * 按环境变量创建审读端口（issue #47；真实模型在第 4 条 #50 接上）。
+ * 按环境变量创建审读端口（issue #47；真实模型在 issue #50 接上）。
+ *
+ * - `stub`：测试用（逐字回显 + 可注入结论，见 `StubImpactReview`）；
+ * - `openai-compatible`：**真实模型**，配置族是审读侧自己的四个变量
+ *   （`IMPACT_REVIEW_API_KEY` / `IMPACT_REVIEW_API_BASE` / `IMPACT_REVIEW_MODEL` /
+ *   `IMPACT_REVIEW_TIMEOUT_MS`）—— 与生成侧的 `LLM_*` **不共用任何一个**，因为
+ *   "独立模型"这件事必须能从配置上看出来（同一个变量换来换去的那种实现，
+ *   在库里留下的 `model` 字段也说不清这一次是谁判的）。境内厂商的 OpenAI 兼容端点
+ *   （智谱 open.bigmodel.cn / DeepSeek / 通义 dashscope…）直接填进 `IMPACT_REVIEW_API_BASE`。
  *
  * 未配置时抛错而不是回落到 stub：调用方（worker）先问 `impactReviewReady()`，
  * 走到这里还没配就是配置事故，说清楚比悄悄给一枚橡皮章好。
@@ -357,12 +375,89 @@ export function createImpactReviewPort(): ImpactReviewPort {
   switch (provider) {
     case 'stub':
       return new StubImpactReview();
+    case 'openai-compatible':
+      return createImpactReviewLlmFromEnv();
     case '':
       throw new Error(
         '审读端口未配置（IMPACT_REVIEW_PROVIDER 为空）：审读侧不会跑，判读将没有审读记录',
       );
     default:
-      throw new Error(`未知的 IMPACT_REVIEW_PROVIDER "${provider}"（可选：stub）`);
+      throw new Error(
+        `未知的 IMPACT_REVIEW_PROVIDER "${provider}"（可选：stub | openai-compatible）`,
+      );
+  }
+}
+
+/**
+ * 审读侧与生成侧的**独立性核对**（issue #50）。
+ *
+ * 用户 2026-10-04 拍板"带门扩"的前提就是**由与被审读内容不同来源的模型判一遍**。
+ * 代码能核的是其中两件可核的事：
+ * ① 审读侧必须有自己的配置（不许回落到 `LLM_*` / `GLM_*`）；
+ * ② 审读侧的端点与密钥**不许与生成侧是同一个** —— 同一个端点或同一把 key 就是同一个厂商，
+ *    "独立模型"只剩一句口号。
+ *
+ * 代码**核不了**"境内直连"这件事（那要看服务商是谁、线路怎么走）。所以这里把两侧的
+ * **主机名**原样报出来，由人核对（日志里也是这一份）—— 不拿一个域名白名单假装核过了，
+ * 那是本仓最不能接受的那种"看起来很严谨的假判据"。
+ */
+export interface ImpactReviewIndependence {
+  ok: boolean;
+  /** 不成立的原因（成立时为 null） */
+  reason: string | null;
+  /** 审读侧端点主机（不含密钥，日志与人工核对用）；没配为 null */
+  reviewHost: string | null;
+  /** 生成侧端点主机（同上） */
+  generationHost: string | null;
+}
+
+export function impactReviewIndependence(
+  env: NodeJS.ProcessEnv = process.env,
+): ImpactReviewIndependence {
+  const reviewBase = (env.IMPACT_REVIEW_API_BASE ?? '').trim();
+  const generationBase = (env.LLM_API_BASE ?? env.GLM_API_BASE ?? '').trim();
+  const reviewKey = (env.IMPACT_REVIEW_API_KEY ?? '').trim();
+  const generationKey = (env.LLM_API_KEY ?? env.GLM_API_KEY ?? '').trim();
+  const reviewHost = hostOf(reviewBase);
+  const generationHost = hostOf(generationBase);
+
+  const fail = (reason: string): ImpactReviewIndependence => ({
+    ok: false,
+    reason,
+    reviewHost,
+    generationHost,
+  });
+
+  /**
+   * `stub` 是**测试端口**：它没有端点、也不发请求，独立性问题在这一档不成立
+   * —— 这也正是"它不许当生产缺省"（见 `createImpactReviewPort` 的空值分支）的另一面：
+   * 谁在生产上显式配了 stub，库里那份记录的 `model` 就会写着 `stub`，审计面一眼能看见。
+   */
+  if ((env.IMPACT_REVIEW_PROVIDER ?? '').trim() === 'stub') {
+    return { ok: true, reason: null, reviewHost: null, generationHost };
+  }
+
+  if (reviewBase === '') {
+    return fail('审读侧缺 IMPACT_REVIEW_API_BASE（生成侧的 LLM_* 不许顶替）');
+  }
+  if (reviewHost === null) return fail(`审读侧端点不是合法 URL：「${reviewBase}」`);
+  if (reviewKey === '') return fail('审读侧缺 IMPACT_REVIEW_API_KEY');
+  if (generationHost !== null && generationHost === reviewHost) {
+    return fail(`审读侧与生成侧是同一个端点（${reviewHost}）—— 独立性不成立`);
+  }
+  if (generationKey !== '' && generationKey === reviewKey) {
+    return fail('审读侧与生成侧共用同一把 Key —— 独立性不成立');
+  }
+  return { ok: true, reason: null, reviewHost, generationHost };
+}
+
+/** 取主机名；不是合法 URL 返回 null（配置错误由调用方报出来，不在这里抛）。 */
+function hostOf(base: string): string | null {
+  if (base === '') return null;
+  try {
+    return new URL(base).host;
+  } catch {
+    return null;
   }
 }
 

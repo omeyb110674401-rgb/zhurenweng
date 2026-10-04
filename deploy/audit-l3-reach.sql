@@ -32,8 +32,12 @@
 --   · `feed.sources` / `emitted.impacts` / `kept.impacts` 取 `summary_diagnostics_json`。
 --     `feed` 是 **v2** 才有的键；v1 的存量行没有它，而**"没记"与"喂了 0 份"处置相反**
 --     （前者是没量具，后者是抓取侧没给料）⇒ v1 行在分档里**单列一档**，不混进 a 档。
---   · 「能不能渲染」= `shouldRenderImpacts` 的两条判据（`audience = 'public'` 且非空），
---     与列表页标记（`notice-marks.ts`）**同源** —— 这里只是把它翻成 SQL，不重写它。
+--   · 「能不能渲染」= 渲染门 `impactsToRender` 的判据（2026-10-04 起它是**选择器**，此前那个
+--     谓词叫 `shouldRenderImpacts`）：本脚本第 ⑥⑦ 两条量的是**过渡期**的口径
+--     （`audience = 'public'` 且非空），与列表页标记（`notice-marks.ts`）**同源** ——
+--     这里只是把它翻成 SQL，不重写它。**两处已知的过渡偏差**（都在第 6 条 #52 收口）：
+--     ① 受众面还没退出判据（翻转后才退出）；② 审读可以**逐条剔除**，本脚本数不出那一层
+--     （它读不到 `impact_review_json`）⇒ 第 ⑥⑦ 与第 5/6 节眼下是**上限**，不是精确值。
 --   · 「还没截止」用展示口径（`effectiveStatus`）：库内 `status` 是抓取时推导的，刚过截止的
 --     条目能挂十几个小时仍是 `open`（见 `notice-status.ts` 头注的生产实测）⇒ 两列都看，
 --     并按 **Asia/Shanghai** 的当天比较（库容器是 UTC，`now()::date` 会在北京时间 0–8 点差一天）；
@@ -140,7 +144,7 @@ select count(*)                                            as "条目总数",
        count(*) filter (where s is not null and has_diag)   as "摘要+诊断都有",
        count(*) filter (where s is not null and not has_diag) as "有摘要没诊断(人工录入或旧管线)",
        count(*) filter (where has_diag and diag_v = '1')    as "诊断是v1(没有feed)",
-       count(*) filter (where has_diag and diag_v not in ('1', '2')) as "诊断版本认不出"
+       count(*) filter (where has_diag and diag_v not in ('1', '2', '3')) as "诊断版本认不出"
   from l3;
 
 \echo ''
@@ -331,7 +335,7 @@ select coalesce(summary_model, '(null)') as "摘要模型", summary_status as "�
 \echo '=== 11. 自检：诊断里的 kept.impacts 与落库数组长度必须逐条相等（不等就是漂移）==='
 select count(*) filter (where kept_impacts <> impacts) as "两者不一致的条目数"
   from l3
- where has_diag and diag_v = '2';
+ where has_diag and diag_v in ('2', '3');
 
 \echo ''
 \echo '（本脚本除会话级临时视图外不写任何东西：无 insert / update / delete / ddl。）'

@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
+import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -365,5 +366,98 @@ describe('2026-09-30：summarize-now 点名给已截止条目补摘要', () => {
     assert.equal(unknown.code, 1, unknown.output);
     assert.match(unknown.output, /库里没有以它开头的条目/);
     assert.match(unknown.output, /一个字节都没改/);
+  });
+
+  /**
+   * issue #50：**真实审读端口**那一整条路（真发 HTTP、结论真的落库）。
+   *
+   * 为什么值得一条 e2e：这条路上有三段只有跑起来才相通的接缝 —— worker 按附件名回查正文取
+   * **原文邻域**、审读侧**自己的** env 族（与生成侧各自独立）、模型回话的结论按内容指纹落进
+   * `impact_review_json`。任何一段接错，单测都还是绿的（它们测的是各自那一半）。
+   * 假端点只做一件事：按请求体里的判读回话（第 1 条通过、其余剔除），于是三态在库里看得见。
+   */
+  it('真实审读端点（本地假服务）：判读送出去、三态落库，诊断说"审读通过"', async () => {
+    const seen = [];
+    const server = http.createServer((req, res) => {
+      let body = '';
+      req.on('data', (chunk) => {
+        body += chunk;
+      });
+      req.on('end', () => {
+        seen.push(body);
+        const parsed = JSON.parse(body);
+        const content = parsed.messages[1].content;
+        const verdicts = content
+          .split('【第 ')
+          .slice(1)
+          .map((block, index) => ({
+            quote: /逐字引用：([^\n]*)/.exec(block)?.[1] ?? '',
+            text: /推断正文：([^\n]*)/.exec(block)?.[1] ?? '',
+            // 第一条判「已改」（证明审读后文本也真的落库），其余剔除
+            status: index === 0 ? 'revised' : 'rejected',
+            revisedText: index === 0 ? '【假审读】改过的推断正文' : null,
+          }));
+        res.writeHead(200, { 'content-type': 'application/json' });
+        res.end(
+          JSON.stringify({ choices: [{ message: { content: JSON.stringify(verdicts) } }] }),
+        );
+      });
+    });
+    await new Promise((done) => server.listen(0, '127.0.0.1', done));
+    const reviewBase = `http://127.0.0.1:${server.address().port}/v1`;
+    try {
+      const { code, output } = await runScript(
+        ['--ids', CLOSED_INLINE.slice(0, 8), '--apply', '--replace'],
+        {
+          // 审读侧：真实端口（指向本地假服务）
+          IMPACT_REVIEW_PROVIDER: 'openai-compatible',
+          IMPACT_REVIEW_API_BASE: reviewBase,
+          IMPACT_REVIEW_API_KEY: 'review-key',
+          IMPACT_REVIEW_MODEL: 'fake-review-model',
+          // 生成侧仍是 stub —— 两侧各走各的 env，这一条本身就是"两路端口独立"的实测
+          LLM_PROVIDER: 'stub',
+        },
+      );
+      assert.equal(code, 0, output);
+      assert.match(output, /审读完成：送审 \d+ 条/);
+
+      const row = rowOf(CLOSED_INLINE);
+      const reviews = JSON.parse(row.impact_review_json);
+      assert.ok(Array.isArray(reviews) && reviews.length >= 1, '审读记录必须真的落库');
+      assert.equal(
+        reviews[0].status,
+        'revised',
+        '「已改」真的落下来了（三态里那一条带审读后文本的）',
+      );
+      assert.equal(reviews[0].revisedText, '【假审读】改过的推断正文');
+      assert.equal(
+        reviews[0].model,
+        'fake-review-model',
+        '记录里带着审读模型名（审计要能看出是谁判的，而不是"生成侧那个"）',
+      );
+      assert.ok(
+        reviews.every((item) => ['passed', 'revised', 'rejected'].includes(item.status)),
+        '每条记录的结论都在三态白名单里',
+      );
+
+      const diagnostics = JSON.parse(row.summary_diagnostics_json);
+      assert.equal(diagnostics.v, 3, '诊断版本升到 3（多了审读那一格）');
+      assert.equal(diagnostics.review.status, 'ok');
+      assert.equal(diagnostics.review.model, 'fake-review-model');
+      assert.equal(diagnostics.review.accepted, reviews.length);
+
+      assert.equal(seen.length, 1, '一次调用审一个条目的全部判读（不是一个判读一次）');
+      assert.match(seen[0], /前后各 200 字/, '提示词要写明邻域长度（依据范围是判据的一部分）');
+      assert.match(
+        seen[0],
+        /第2条/,
+        '邻域真的从正文里取出来了 —— 只送引用的话，A1 就退化成拿引用证明引用',
+      );
+      assert.match(seen[0], /fake-review-model/);
+      assert.ok(!seen[0].includes('review-key'), '审读侧凭据不进请求体（只在请求头里）');
+    } finally {
+      server.closeAllConnections();
+      await new Promise((done) => server.close(done));
+    }
   });
 });

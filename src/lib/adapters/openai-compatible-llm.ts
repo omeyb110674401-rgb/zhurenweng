@@ -231,11 +231,22 @@ export function extraHeaders(raw: string | undefined): Record<string, string> {
   return headers;
 }
 
+/**
+ * 剥掉 markdown 围栏（模型常常把 JSON 包在 ``` 里）。
+ *
+ * 抽出来是因为**这一路之外还有一路**（issue #50 的审读端口）：审读要的是 JSON **数组**，
+ * 而围栏剥离这件事两边一样。各写一份的表现是"一边认得围栏、另一边判成形状非法"，
+ * 看起来像模型时好时坏 —— 其实是我们的两把尺子不一样。
+ */
+export function stripJsonFence(content: string): string {
+  const text = content.trim();
+  const fenced = /```(?:json)?\s*([\s\S]*?)```/i.exec(text);
+  return (fenced ? fenced[1] : text).trim();
+}
+
 /** 解析模型输出的 JSON 文本（剥离 markdown 围栏、截取最外层 JSON 主体）。 */
 export function parseModelJson(content: string): unknown {
-  let text = content.trim();
-  const fenced = /```(?:json)?\s*([\s\S]*?)```/i.exec(text);
-  if (fenced) text = fenced[1].trim();
+  const text = stripJsonFence(content);
   const start = text.indexOf('{');
   const end = text.lastIndexOf('}');
   if (start === -1 || end <= start) {

@@ -122,6 +122,19 @@ services:
       LLM_TIMEOUT_MS: ${LLM_TIMEOUT_MS:-}
       # 额外请求头（JSON；部分网关要求客户端带会话头，如 {"x-session-id":"…"}）
       LLM_EXTRA_HEADERS: ${LLM_EXTRA_HEADERS:-}
+      # 审读侧（issue #47/#50）—— **独立的一路**，与上面那组 LLM_* 一个都不共用：
+      # 这一路负责"判读在渲染前由另一个厂商的模型判一遍合规性"，独立性是整功能的前提
+      # （worker 会核对端点/密钥是否与生成侧撞车，撞了就跳过审读并记进诊断）。
+      # 空 = 不跑审读（判读没有审读记录；门翻转之后等于不渲染 —— fail-closed 的方向）。
+      # 境内厂商的 OpenAI 兼容端点：智谱 https://open.bigmodel.cn/api/paas/v4、
+      # DeepSeek https://api.deepseek.com/v1、通义 …/compatible-mode/v1。
+      # 密钥经 deploy/set-env-keys.sh 落 .env：不进仓库、不进对话。
+      IMPACT_REVIEW_PROVIDER: ${IMPACT_REVIEW_PROVIDER:-}
+      IMPACT_REVIEW_API_KEY: ${IMPACT_REVIEW_API_KEY:-}
+      IMPACT_REVIEW_API_BASE: ${IMPACT_REVIEW_API_BASE:-}
+      IMPACT_REVIEW_MODEL: ${IMPACT_REVIEW_MODEL:-}
+      IMPACT_REVIEW_TIMEOUT_MS: ${IMPACT_REVIEW_TIMEOUT_MS:-}
+      IMPACT_REVIEW_EXTRA_HEADERS: ${IMPACT_REVIEW_EXTRA_HEADERS:-}
       MAILER_PROVIDER: smtp
       SMTP_HOST: ${SMTP_HOST:-}
       SMTP_PORT: ${SMTP_PORT:-}

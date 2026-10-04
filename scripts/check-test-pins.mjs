@@ -120,6 +120,10 @@ const TARGETS = {
   // issue #49：审读规则与提示词。六类判据是**文字**，而文字只有被案例钉住才拦得住改动 ——
   // 错误案例库（`tests/unit/impact-review-rules.test.mjs`）就是那颗钉子。
   impactReviewPrompt: 'src/lib/impact-review-prompt.ts',
+  // issue #50：审读端口的**真实模型**实现（配置族 / 输出解析 / 失败归类）与 worker 那两处接线。
+  impactReviewAdapter: 'src/lib/adapters/impact-review-llm.ts',
+  // 端口工厂与独立性核对住在 ports.ts 里（审读侧与生成侧各一套 env 族的判据）
+  impactReviewPort: 'src/lib/ports.ts',
   // issue #86 第 3 刀：喂入侧的档位与预算。这一处撤掉之后**一个字都不会报错** ——
   // 档位判错就是"还是老样子"（回到标准档，页面照常出摘要），喂少了只是模型看到的东西变少，
   // 而那正是这一刀要消灭的静默失败，所以它必须有"撤掉实现必须变红"的钉子。
@@ -1808,6 +1812,74 @@ const CASES = [
     to: "      '引用出处的原文（邻域）：',",
     pattern: '邻域长度只写在常量里',
     test: 'tests/unit/impact-review-rules.test.mjs',
+  },
+  // ── issue #50：第二路审读端口接真实模型 ──────────────────────────────────────
+  {
+    // 独立性是整功能的前提（用户拍板"带门扩"的理由）。撤掉这一条 = 允许生成侧与审读侧
+    // 走同一个端点，"独立模型"只剩口号，而页面上一点异常都看不出来。
+    label: '审读侧与生成侧撞在同一个端点也照跑（独立性只剩口号）',
+    file: 'impactReviewPort',
+    from: '  if (generationHost !== null && generationHost === reviewHost) {',
+    to: '  if (false) {',
+    pattern: '同一个端点',
+    test: 'tests/unit/impact-review-adapter.test.mjs',
+  },
+  {
+    // 审读侧必须有自己的配置：允许 LLM_API_BASE 顶替之后，两侧共用一套变量，
+    // 库里那条记录的 model 也说不清这一次是谁判的。
+    label: '审读侧端点允许被生成侧的 LLM_API_BASE 顶替（两路端口不再是两路）',
+    file: 'impactReviewPort',
+    from: "  const reviewBase = (env.IMPACT_REVIEW_API_BASE ?? '').trim();",
+    to: "  const reviewBase = (env.IMPACT_REVIEW_API_BASE ?? env.LLM_API_BASE ?? '').trim();",
+    pattern: '缺 base',
+    test: 'tests/unit/impact-review-adapter.test.mjs',
+  },
+  {
+    // 状态认不出还往下走 ⇒ 我们会把模型的一句"没说过的话"读成某个结论。
+    // 这一条刻意是最严格的：整份作废，而不是丢掉那一条。
+    label: '审读结论的状态认不出也照收（把模型没说过的结论读成某一种）',
+    file: 'impactReviewAdapter',
+    from: '    if (!isImpactReviewStatus(row.status)) {',
+    to: '    if (false) {',
+    pattern: '状态认不出',
+    test: 'tests/unit/impact-review-adapter.test.mjs',
+  },
+  {
+    // 超时与"调用失败"必须分开：一个要换端点/放宽超时，一个要看网关。
+    label: '审读的超时被归成"调用失败"（处置混在一起）',
+    file: 'impactReview',
+    from: "    return kind === 'timeout' ? 'timeout' : 'request-failed';",
+    to: "    return 'request-failed';",
+    pattern: '失败归类',
+    test: 'tests/unit/impact-review-adapter.test.mjs',
+  },
+  {
+    // 诊断那一格的读侧守卫：认不出的状态要整格丢掉（半份比没有更坏）。
+    label: '诊断里认不出的审读状态也照样读出来（半份诊断比没有更坏）',
+    file: 'summaryDiagnostics',
+    from: '  if (!isReviewOutcome(record.status)) return undefined;',
+    to: '  if (false) return undefined;',
+    pattern: '认不出的 status',
+    test: 'tests/unit/impact-review-adapter.test.mjs',
+  },
+  {
+    // worker 接线①：审读结果要进摘要诊断，否则"这条判读为什么没有记录"在库里读不出来。
+    label: 'worker 不把审读结果写进诊断（六种失败在库里又变得分不开）',
+    file: 'summarize',
+    from: '      review: review.diagnostics,',
+    to: '      // 撤掉实现：不写审读诊断',
+    pattern: '真实审读端点',
+    test: 'tests/e2e/summarize-now.test.mjs',
+  },
+  {
+    // worker 接线②：邻域要从本轮真喂进去的正文里取。撤掉它，端口只拿到引用本身 ——
+    // 而 A1（是否超出原文）会因此退化成拿引用证明引用，页面上看不出任何异常。
+    label: 'worker 不给审读端口取原文邻域（A1 退化成拿引用证明引用）',
+    file: 'summarize',
+    from: '        neighborhood: neighborhoodOf(impact, input.sources),',
+    to: '        neighborhood: null,',
+    pattern: '真实审读端点',
+    test: 'tests/e2e/summarize-now.test.mjs',
   },
   // 2026-09-30：引号字形归一（生产实测：附件原文是中文引号、模型某几遍吐 ASCII 直引号，
   // 词句逐字一致却整行被判"对不上" —— 那一遍 9 行全丢，页面上「改了哪几处」只剩事实行）。

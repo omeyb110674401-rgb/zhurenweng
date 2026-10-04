@@ -47,6 +47,131 @@ import { quoteFingerprint, type QuotedImpactPoint } from './summary-content.ts';
 /** 单条判读的审读结论，取值互斥（`CONTEXT.md`「审读状态」）。 */
 export type ImpactReviewStatus = 'passed' | 'revised' | 'rejected';
 
+/**
+ * 这一轮审读**跑成什么样**（issue #50）。
+ *
+ * 为什么必须分这么细：`status` 全落在"这一批判读有没有审读记录"上（门翻转之后 = 渲不渲染），
+ * 而下面这几种的**处置完全相反**：
+ * - `not-configured` / `not-independent` ⇒ **配置问题**（运维的活）；
+ * - `port-error` ⇒ 端口构造失败（配置或代码，看错误）；
+ * - `timeout` / `request-failed` ⇒ 网络或服务商（重试/换端点）；
+ * - `invalid-shape` ⇒ 模型没按形状回话（提示词的活）；
+ * - `ok` ⇒ 跑了，`accepted / rejected` 说明采信了几条。
+ *
+ * 少了这个区分，"这一条判读为什么没有记录"在库里只有一种读法 —— 而它今天至少有六种原因。
+ */
+export type ReviewOutcome =
+  | 'ok'
+  | 'skipped'
+  | 'not-configured'
+  | 'not-independent'
+  | 'port-error'
+  | 'timeout'
+  | 'request-failed'
+  | 'invalid-shape';
+
+/** 全部取值（白名单：诊断读侧靠它判断这一格能不能解读，认不出就整份丢掉）。 */
+export const REVIEW_OUTCOMES: readonly ReviewOutcome[] = [
+  'ok',
+  'skipped',
+  'not-configured',
+  'not-independent',
+  'port-error',
+  'timeout',
+  'request-failed',
+  'invalid-shape',
+];
+
+export function isReviewOutcome(value: unknown): value is ReviewOutcome {
+  return typeof value === 'string' && (REVIEW_OUTCOMES as readonly string[]).includes(value);
+}
+
+/** 诊断那一行的中文说法（**只在诊断与审计面**可见，页面上一个字都不许出现）。 */
+export const REVIEW_OUTCOME_LABELS: Record<ReviewOutcome, string> = {
+  ok: '通过',
+  skipped: '跳过（这条没有判读可审）',
+  'not-configured': '未配置',
+  'not-independent': '独立性不成立',
+  'port-error': '端口构造失败',
+  timeout: '超时',
+  'request-failed': '调用失败',
+  'invalid-shape': '返回形状非法',
+};
+
+/** 端口没配好（缺 key / 缺 base / 缺 model / 端点不是合法 URL）—— 构造期就能发现的那一类。 */
+export class ImpactReviewConfigError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'ImpactReviewConfigError';
+  }
+}
+
+/** 调用没跑成：`timeout` / `http` / `network` 三种，**都不是模型的错**。 */
+export class ImpactReviewTransportError extends Error {
+  readonly kind: 'timeout' | 'http' | 'network';
+  /** 响应体（HTTP 错误时才有；已截断），诊断与日志用 */
+  readonly raw: string;
+  readonly elapsedMs: number | null;
+
+  constructor(
+    message: string,
+    kind: 'timeout' | 'http' | 'network',
+    options: { raw?: string; elapsedMs?: number | null } = {},
+  ) {
+    super(message);
+    this.name = 'ImpactReviewTransportError';
+    this.kind = kind;
+    this.raw = options.raw ?? '';
+    this.elapsedMs = options.elapsedMs ?? null;
+  }
+}
+
+/** 跑成了，但响应不是我们能读的形状（不是 JSON 数组 / 状态认不出）。 */
+export class ImpactReviewShapeError extends Error {
+  /** 模型原始输出（已截断），诊断里要能看见它到底说了什么 */
+  readonly raw: string;
+  readonly elapsedMs: number | null;
+
+  constructor(message: string, raw: string, elapsedMs: number | null = null) {
+    super(message);
+    this.name = 'ImpactReviewShapeError';
+    this.raw = raw;
+    this.elapsedMs = elapsedMs;
+  }
+}
+
+/**
+ * 失败时能拿到的模型原始输出（形状非法这类失败最需要它；拿不到返回空串）。
+ *
+ * 形态识别而非 `instanceof`：跨 realm（不同模块实例）时不认类，而**这类失败恰恰是
+ * 最需要诊断的场合**，不能因为一个 `instanceof` 判否就把原始输出丢掉。
+ */
+export function reviewFailureRaw(error: unknown): string {
+  if (typeof error !== 'object' || error === null) return '';
+  const raw = (error as { raw?: unknown }).raw;
+  return typeof raw === 'string' ? raw : '';
+}
+
+/**
+ * 把抛出来的东西归到 `ReviewOutcome` 上（诊断写这一格）。
+ *
+ * **认不出的一律归 `request-failed`**（而不是编一个"未知"档）：它至少把"调用没成"这件事
+ * 说清楚了，而"未知"会让读的人以为是某条新路径。跨 realm 时不认 `instanceof`，按 `name` 认
+ * （与 `diagnosticsOfError` 同一手法）。
+ */
+export function reviewOutcomeOfError(error: unknown): ReviewOutcome {
+  const name = typeof error === 'object' && error !== null ? (error as { name?: unknown }).name : null;
+  if (name === 'ImpactReviewConfigError') return 'port-error';
+  if (name === 'ImpactReviewShapeError') return 'invalid-shape';
+  if (name === 'ImpactReviewTransportError') {
+    const kind = (error as { kind?: unknown }).kind;
+    return kind === 'timeout' ? 'timeout' : 'request-failed';
+  }
+  // 超时也可能以平台错误的形式冒出来（`AbortSignal.timeout` → TimeoutError/AbortError）
+  if (name === 'TimeoutError' || name === 'AbortError') return 'timeout';
+  return 'request-failed';
+}
+
 /** 全部结论取值（白名单：认不出的值一律不当结论用，见 `parseImpactReviews`）。 */
 export const IMPACT_REVIEW_STATUSES: readonly ImpactReviewStatus[] = [
   'passed',

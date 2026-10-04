@@ -26,6 +26,7 @@
  */
 
 import type { FeedReport } from './attachment-feed.ts';
+import { REVIEW_OUTCOME_LABELS, isReviewOutcome, type ReviewOutcome } from './impact-review.ts';
 
 /**
  * 形状版本：字段增删时 +1，读侧据此判断能不能按当前口径解读。
@@ -34,8 +35,11 @@ import type { FeedReport } from './attachment-feed.ts';
  * - **2**（第 3 刀）：多一个 `feed` —— **喂进去的那一截**（每份附件拿了多少、谁被预算挤掉）。
  *   这一项在此之前从来不落库，于是"模型没读到"与"我们没喂"在库里长得一模一样；
  *   1 版的行没有这个键，读侧当"没记"处理（不是"喂了 0 份"）。
+ * - **3**（#50 第 4 条）：多一个 `review` —— **这一轮审读跑成什么样**（跑了/没配/超时/
+ *   形状非法…）。少了它，"这条判读为什么没有审读记录"在库里只有一种读法，而它至少有六种
+ *   原因，且**处置完全相反**（配置 vs 网络 vs 提示词）。3 版之前的行没有这个键。
  */
-export const SUMMARY_DIAGNOSTICS_VERSION = 2;
+export const SUMMARY_DIAGNOSTICS_VERSION = 3;
 
 /**
  * 原始输出的留存上限（字符）。
@@ -129,6 +133,39 @@ export interface SummaryDiagnostics {
    * `undefined` = 这一次调用没记（v1 的存量行、或失败在选取之前）。
    */
   feed?: FeedReport;
+  /**
+   * 审读那一步的结果（issue #50 第 4 条，v3 起）。
+   *
+   * `undefined` = 这一行的诊断生成于 v3 之前，**或**摘要调用在审读之前就失败了
+   * （那种情况连这条诊断都是失败路径写下的）。`status` 已经说明"跑没跑成"，
+   * 所以不要再另立一个布尔 —— 键在不在 vs 值是多少，本仓栽过不止一次。
+   */
+  review?: ReviewDiagnostics;
+}
+
+/**
+ * 一轮审读的结果（写进诊断的 `review` 那一格）。
+ *
+ * 三个数各有各的用处：`requested` 是我们送出去几条、`accepted` 是**被采信并落库**几条、
+ * `rejected` 是模型说了但我们没采信几条（回显对不上、歧义、同一条两份结论…）。
+ * 三者的差额能让读的人分辨"模型没说"与"我们没要" —— 这正是本模块存在的理由。
+ */
+export interface ReviewDiagnostics {
+  status: ReviewOutcome;
+  /** 审读模型标识（没跑起来为 null；跑起来了才有） */
+  model: string | null;
+  /** 这一次送出去审读的判读条数 */
+  requested: number;
+  /** 被采信、落进 `impact_review_json` 的结论条数 */
+  accepted: number;
+  /** 模型给了、但没被采信的结论条数 */
+  rejected: number;
+  /** 失败时的可读原因（成功为 null） */
+  error: string | null;
+  /** 这一次审读调用的耗时（毫秒）；没跑起来为 null */
+  elapsedMs: number | null;
+  /** 模型原始输出（仅形状非法时有意义；已截断） */
+  raw?: string;
 }
 
 export function emptyFieldCounts(): SummaryFieldCounts {
@@ -239,6 +276,26 @@ function feedReportOr(value: unknown): FeedReport | undefined {
 }
 
 /**
+ * 读侧解析审读那一格：状态认不出就**整个丢掉**（返回 undefined），不返回半份。
+ * 与 `feedReportOr` 同一条纪律 —— 半份比没有更坏。
+ */
+function reviewDiagnosticsOr(value: unknown): ReviewDiagnostics | undefined {
+  if (typeof value !== 'object' || value === null) return undefined;
+  const record = value as Record<string, unknown>;
+  if (!isReviewOutcome(record.status)) return undefined;
+  return {
+    status: record.status,
+    model: typeof record.model === 'string' ? record.model : null,
+    requested: countOr(record.requested),
+    accepted: countOr(record.accepted),
+    rejected: countOr(record.rejected),
+    error: typeof record.error === 'string' ? record.error : null,
+    elapsedMs: numberOrNull(record.elapsedMs),
+    ...(typeof record.raw === 'string' && record.raw !== '' ? { raw: record.raw } : {}),
+  };
+}
+
+/**
  * 读侧解析（审计脚本与后台用）：**形状不认识就返回 null，绝不抛错**。
  *
  * 与 `parseQuotedSummary` 同一条纪律：这一列是给人查问题用的，
@@ -261,6 +318,7 @@ export function parseSummaryDiagnostics(value: unknown): SummaryDiagnostics | nu
         })()
       : null;
   const feed = feedReportOr(record.feed);
+  const review = reviewDiagnosticsOr(record.review);
 
   return {
     v: version,
@@ -286,6 +344,7 @@ export function parseSummaryDiagnostics(value: unknown): SummaryDiagnostics | nu
       };
     })(),
     ...(feed ? { feed } : {}),
+    ...(review ? { review } : {}),
   };
 }
 /**
@@ -312,6 +371,11 @@ export function buildSummaryDiagnostics(
      * 传 `undefined` 表示这次没走选取（例如失败在调用之前），不是"喂了 0 份"。
      */
     feed?: FeedReport;
+    /**
+     * 这一轮审读的结果（#50）：同样只有 worker 知道 —— 它是审读那一步的调用方。
+     * 传 `undefined` 表示这份诊断不是 worker 的摘要路径写下的（例如失败路径的原始诊断）。
+     */
+    review?: ReviewDiagnostics;
   },
 ): SummaryDiagnostics {
   const base: SummaryDiagnostics = reported ?? {
@@ -341,6 +405,8 @@ export function buildSummaryDiagnostics(
     // 端口上报的那一份不带 feed（它看不到选取过程），所以以 worker 的为准；
     // 没给就保留端口那一份里的（正常为空），不编一个空的喂入清单出来。
     ...(overrides.feed ? { feed: overrides.feed } : {}),
+    // 审读（#50）：与 feed 同一条规矩 —— 只有 worker 知道，没给就不编
+    ...(overrides.review ? { review: overrides.review } : {}),
   };
 }
 
@@ -390,5 +456,16 @@ export function describeDiagnostics(diagnostics: SummaryDiagnostics): string {
     parts.push(`结束原因 ${diagnostics.finishReason}`);
   }
   if (diagnostics.rawTruncated) parts.push(`原始输出已截断（原 ${diagnostics.rawChars} 字）`);
+  // 审读那一步（#50）：**只在真跑过审读时**才占位置（v3 之前、或摘要调用早于审读时都没有它）
+  const review = diagnostics.review;
+  if (review) {
+    const counts = `送审 ${review.requested} 条 / 采信 ${review.accepted} 条`;
+    const statusText = REVIEW_OUTCOME_LABELS[review.status];
+    parts.push(
+      review.status === 'ok'
+        ? `审读通过（${counts}${review.rejected > 0 ? ` / 未采信 ${review.rejected} 条` : ''}）`
+        : `审读${statusText}（${counts}${review.error ? `：${review.error}` : ''}）`,
+    );
+  }
   return parts.join('；');
 }

@@ -40,8 +40,10 @@ import {
 } from '../../src/lib/summary-content.ts';
 import {
   buildSummaryDiagnostics,
+  capRawOutput,
   describeDiagnostics,
   diagnosticsOfError,
+  type ReviewDiagnostics,
   type SummaryFieldCounts,
 } from '../../src/lib/summary-diagnostics.ts';
 import {
@@ -52,14 +54,19 @@ import {
 } from '../../src/db/repo/summaries.ts';
 import {
   createImpactReviewPort,
+  impactReviewIndependence,
   impactReviewReady,
   type ImpactReviewPort,
 } from '../../src/lib/ports.ts';
 import {
   impactReviewRecordsFrom,
+  reviewFailureRaw,
+  reviewOutcomeOfError,
   serializeImpactReviews,
   type ImpactReviewRecord,
+  type ReviewOutcome,
 } from '../../src/lib/impact-review.ts';
+import { neighborhoodForQuote } from '../../src/lib/impact-review-prompt.ts';
 import type { LlmPort, LlmSummarizeInput } from '../../src/lib/ports.ts';
 import type { Job, JobContext } from '../registry.ts';
 
@@ -316,7 +323,7 @@ export interface SummarizeOneNoticeDeps {
  *
  * ## 失败一律跳过，绝不让审读把摘要生成带崩
  *
- * 三种失败（端口没配 / 端口构造失败 / 调用抛错与超时）走**同一条处置**：记一句日志、
+ * 六种失败（端口没配 / 独立性不成立 / 端口构造失败 / 超时 / 调用失败 / 形状非法）走**同一条处置**：记一句日志、
  * 返回空数组 ⇒ 这一批判读**没有审读记录**。这不是"放行"，而是本切片（#47）的过渡语义：
  * 审读层此时只影响"渲染什么文本"，不影响"要不要渲染"，所以没有记录 = 按今天的行为渲染。
  * 门翻转（第 6 条 #52）之后同一件事自动变成"不渲染"（无记录 ⇒ fail-closed），
@@ -330,14 +337,39 @@ export interface SummarizeOneNoticeDeps {
 async function reviewImpactsForSummary(input: {
   target: PendingSummaryTarget;
   impacts: readonly QuotedImpactPoint[];
+  /** 本轮喂进提示词的那几份正文：审读要按引用回它们里取邻域（只有 worker 手上有正文） */
+  sources: readonly DraftSource[];
   logger: (message: string) => void;
-}): Promise<ImpactReviewRecord[]> {
-  if (input.impacts.length === 0) return [];
+}): Promise<{ records: ImpactReviewRecord[]; diagnostics: ReviewDiagnostics }> {
+  const requested = input.impacts.length;
+  /** 六种失败共用的那几格（差异只在 status / error / raw 上） */
+  const empty = (status: ReviewOutcome, error: string | null): ReviewDiagnostics => ({
+    status,
+    model: null,
+    requested,
+    accepted: 0,
+    rejected: 0,
+    error,
+    elapsedMs: null,
+  });
+
+  if (requested === 0) return { records: [], diagnostics: empty('skipped', null) };
   if (!impactReviewReady()) {
+    const reason = 'IMPACT_REVIEW_PROVIDER 未配置';
+    input.logger(`条目 ${input.target.id} 审读跳过：${reason}，这一批判读将没有审读记录`);
+    return { records: [], diagnostics: empty('not-configured', reason) };
+  }
+  /**
+   * 独立性核对（#50）：审读侧与生成侧必须**不同来源** —— 用户拍板"带门扩"的前提就是这一条。
+   * 不成立就**不跑**：一份同源模型的"通过"会让门看起来在工作，比没有审读更坏。
+   */
+  const independence = impactReviewIndependence();
+  if (!independence.ok) {
     input.logger(
-      `条目 ${input.target.id} 审读跳过：IMPACT_REVIEW_PROVIDER 未配置，这一批判读将没有审读记录`,
+      `条目 ${input.target.id} 审读跳过：审读侧的独立性不成立（${independence.reason}）—— ` +
+        '同源模型的"通过"比没有审读更坏',
     );
-    return [];
+    return { records: [], diagnostics: empty('not-independent', independence.reason) };
   }
   let port: ImpactReviewPort;
   try {
@@ -346,8 +378,10 @@ async function reviewImpactsForSummary(input: {
     input.logger(
       `条目 ${input.target.id} 审读端口构造失败，整条跳过：${errorMessage(error)}`,
     );
-    return [];
+    return { records: [], diagnostics: empty('port-error', errorMessage(error)) };
   }
+
+  const startedAt = Date.now();
   try {
     const verdicts = await port.review({
       noticeId: input.target.id,
@@ -357,23 +391,66 @@ async function reviewImpactsForSummary(input: {
         who: impact.who,
         point: impact.point,
         text: impact.text,
+        // 邻域只在这里取得到：正文（`sources`）是 worker 的输入，端口看不到它
+        neighborhood: neighborhoodOf(impact, input.sources),
       })),
     });
-    return impactReviewRecordsFrom({
+    const records = impactReviewRecordsFrom({
       impacts: input.impacts,
       verdicts,
       model: port.model,
       reviewedAt: new Date().toISOString(),
     });
+    const diagnostics: ReviewDiagnostics = {
+      status: 'ok',
+      model: port.model,
+      requested,
+      accepted: records.length,
+      // 模型给了、但没被采信的那些（回显对不上 / 同一条两份结论 / 已改却没文本）
+      rejected: Math.max(0, verdicts.length - records.length),
+      error: null,
+      elapsedMs: Date.now() - startedAt,
+    };
+    input.logger(
+      `条目 ${input.target.id} 审读完成：送审 ${requested} 条 / 采信 ${diagnostics.accepted} 条` +
+        (diagnostics.rejected > 0 ? ` / 未采信 ${diagnostics.rejected} 条` : ''),
+    );
+    return { records, diagnostics };
   } catch (error) {
-    // 超时 / 网络 / 返回形状非法都落在这里。**不重试**：这一轮的判读本来就没渲染出去
+    // 超时 / HTTP / 网络 / 返回形状非法都落在这里。**不重试**：这一轮的判读本来就没渲染出去
     // （过渡期按原文渲染、翻转后不渲染），而重试会把一轮摘要任务拖长 —— 下一轮回填
     // 与审读会整体重跑，代价比重试一次小。
+    const status = reviewOutcomeOfError(error);
+    const raw = capRawOutput(reviewFailureRaw(error)).raw;
     input.logger(
-      `条目 ${input.target.id} 审读失败，跳过（这一批判读将没有审读记录）：${errorMessage(error)}`,
+      `条目 ${input.target.id} 审读未成（${status}），跳过（这一批判读将没有审读记录）：${errorMessage(error)}`,
     );
-    return [];
+    return {
+      records: [],
+      diagnostics: {
+        ...empty(status, errorMessage(error)),
+        elapsedMs: Date.now() - startedAt,
+        ...(raw !== '' ? { raw } : {}),
+      },
+    };
   }
+}
+
+/**
+ * 这条判读的**原文邻域**：按 `impact.source`（附件名，由落库时的逐字反查算出）回查到本轮
+ * 喂进去的那一份正文，再从正文里按引用前后各取一段。
+ *
+ * 取不到就给 null，而 `null` 会被提示词显式写成"没有邻域可用" —— **绝不退而用引用自己当邻域**：
+ * 那会让"是否超出原文"退化成拿引用证明引用，而它恰恰是 A1 的全部内容。
+ */
+function neighborhoodOf(
+  impact: QuotedImpactPoint,
+  sources: readonly DraftSource[],
+): string | null {
+  if (impact.source === null || impact.source === '') return null;
+  const source = sources.find((item) => item.name === impact.source);
+  if (source === undefined) return null;
+  return neighborhoodForQuote(source.text, impact.quote);
 }
 
 /** 一条条目的结局（`error` 与日志、告警里那一句**同源**，不另写一遍）。 */
@@ -452,6 +529,23 @@ export async function summarizeOneNotice(
      * 用的同一个字符串，两个数因此不可能分家。
      */
     const changeTable = buildChangeTable(changeText, quoted.changes);
+    /**
+     * 审读（issue #47 建立，#50 接真模型）：判读在**落库之前**先过一路独立模型。
+     *
+     * 位置刻意在 `buildQuotedSummaryWithTally` **之后**：审读的输入是"真的落进库的那几条
+     * 判读"（过了逐字反查、带着算出来的出处），而不是模型吐出来而可能被丢掉的原始条目 ——
+     * 否则审读记录里会有一堆挂不到任何判读上的结论。
+     *
+     * 它也刻意在 `buildSummaryDiagnostics` **之前**：审读的结果要进同一份诊断
+     * （`review` 那一格），否则"这条判读为什么没有审读记录"在库里读不出来。
+     */
+    const review = await reviewImpactsForSummary({
+      target,
+      impacts: quoted.impacts,
+      // 邻域要从这一轮真喂进去的正文里取（只有这里手上有正文）
+      sources: draftSources,
+      logger,
+    });
     // 诊断与摘要**一起**落库：它描述的就是这一列摘要是哪一次调用产出的
     const diagnostics = buildSummaryDiagnostics(summary.diagnostics, {
       model,
@@ -461,23 +555,15 @@ export async function summarizeOneNotice(
       quoteNotFound: tally.quoteNotFound,
       // 喂入清单（第 3 刀）：端口看不到选取过程，只有这里知道"哪一份被预算挤掉了"
       feed: feedReport,
+      // 审读那一步的结果（#50）：同样只有这里知道
+      review: review.diagnostics,
     });
-    /**
-     * 审读（issue #47）：判读在**落库之前**先过一路独立模型。
-     *
-     * 位置刻意在 `buildQuotedSummaryWithTally` **之后**：审读的输入是"真的落进库的那几条
-     * 判读"（过了逐字反查、带着算出来的出处），而不是模型吐出来而可能被丢掉的原始条目 ——
-     * 否则审读记录里会有一堆挂不到任何判读上的结论。
-     */
-    const impactReviewJson = serializeImpactReviews(
-      await reviewImpactsForSummary({ target, impacts: quoted.impacts, logger }),
-    );
     await saveNoticeSummary({
       id: target.id,
       summaryJson: JSON.stringify({ ...quoted, changeTable }),
       summaryModel: model,
       diagnosticsJson: JSON.stringify(diagnostics),
-      impactReviewJson,
+      impactReviewJson: serializeImpactReviews(review.records),
     });
     // 只有**摘要真的用了**才标记（失败重试耗尽的条目不能留下「条文已接入」的痕迹，
     // 否则详情页会宣布一件没发生过的事）。
