@@ -39,6 +39,16 @@ import {
 export type SummaryStatus = 'pending' | 'done' | 'failed_review';
 
 /**
+ * 人工复核录入的摘要用的模型名（issue #12）。
+ *
+ * 它原先住在 `src/app/admin/review/route.ts`（那里是唯一的写入口）。issue #48 把它搬到这里：
+ * 现在有**第二处**要判"这份摘要是人写的吗" —— 存量重跑工具的候选判据（人写的那一份不许被
+ * 重跑覆盖）。判据跟着字面量走、字面量只留一处，否则两处各写一个 `'manual'`，某天一处改了、
+ * 另一处照旧认不出来，而表现是"重跑把人工的活清了"。
+ */
+export const MANUAL_SUMMARY_MODEL = 'manual';
+
+/**
  * 摘要状态标签（`SummaryPlaceholder` 用）。
  *
  * 这**不是**「摘要区该显示什么」的判据 —— 那在 `summary-display.ts`

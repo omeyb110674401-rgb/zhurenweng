@@ -17,6 +17,13 @@
  * `draftSourcesForSummary()`（同一份门槛、同一份预算、同一个档位判断），
  * 脚本里不另写一遍 —— 另写的后果是脚本说"有条文"、真跑起来却没有。
  *
+ * 「这条还缺哪一件、要不要重跑」的判据**不在这里**，在 `src/lib/redraft-candidates.ts`
+ * （issue #48）：它过去是脚本里的一行幂等过滤，只判"有没有条文要点"，判不出 L2/L3 的差别，
+ * 于是把最该重跑的那一批整批跳过（87 号文档 §9.5 现场读数：38 条被跳过、池子里只剩 9 条
+ * 真会被喂进条文）。判据搬进 `.ts` 之后能被单测直读、被 pin 表钉住，而**本脚本只负责
+ * 取数与逐条打印理由**。两条硬红线保持不变且更严：已截止（清了永久失去）与
+ * 人工复核录入（重跑等于毁掉人的活，`--ids` 也绕不过）。
+ *
  * 用法（在部署了本仓库的容器里跑，需要 DATABASE_URL）：
  *   docker compose run --rm worker node scripts/reset-summaries-for-redraft.mjs
  *       # 只读：列出候选与"会被喂进提示词的条文份数/字数"，不动库
@@ -52,8 +59,9 @@ import { getDb } from '../src/db/client.ts';
 import { notices } from '../src/db/schema/sqlite.ts';
 import { clearSummaryForRedraft } from '../src/db/repo/summaries.ts';
 import { draftSourcesForSummary } from '../worker/jobs/summarize-notices.ts';
+import { redraftCandidate } from '../src/lib/redraft-candidates.ts';
+import { MANUAL_SUMMARY_MODEL } from '../src/lib/summary-content.ts';
 import { SUMMARY_NOT_SUMMARIZED_STATUS } from '../src/lib/summary-display.ts';
-import { parseQuotedSummary } from '../src/lib/summary-content.ts';
 import { safeParseJson } from '../src/db/types.ts';
 
 const args = new Set(process.argv.slice(2));
@@ -90,7 +98,8 @@ if (idsIndex >= 0 && idArgs.length === 0) {
 
 const db = await getDb();
 
-// 候选：已有摘要、且不是"摘要任务永远不会再碰"的已截止条目
+// 候选：已有摘要的条目。**哪一条该重跑由 `src/lib/redraft-candidates.ts` 判**
+// （issue #48：判据搬进 `.ts` 才能被单测直读、被 pin 表钉住 —— 脚本这一层只负责取数与打印）。
 const withSummary = await db
   .select({
     id: notices.id,
@@ -103,31 +112,48 @@ const withSummary = await db
     audience: notices.audience,
     status: notices.status,
     summaryStatus: notices.summaryStatus,
+    // 摘要模型名（issue #48）：`manual` = 人工复核录入，重跑等于毁掉人的活（硬红线之一）
+    summaryModel: notices.summaryModel,
     summaryJson: notices.aiSummaryJson,
   })
   .from(notices)
   .where(isNotNull(notices.aiSummaryJson));
 
-const blocked = withSummary.filter((row) => row.status === SUMMARY_NOT_SUMMARIZED_STATUS);
 /**
- * 已经有"带出处的条文要点"的条目不再是候选（用详情页同一个解析器判，不另写口径）。
- * 少了这条，工具就不幂等：重跑一次会把刚补好的条目再清一遍，白花调用；
- * 有了它，`--apply --all` 可以随时补上漏网的，而不必先算还剩几条。
+ * 逐条判「还缺哪一件」（issue #48）：进 / 不进候选，各带一句人话的理由。
+ *
+ * 为什么逐条给理由而不是只印一个数：这条清单是**回填的依据**（第 5 条 #51），
+ * 而"看不见的缺口"正是本项目定义缺陷的方式 —— 只印"可置换池 41 条"，
+ * 读的人没法核对那 41 条是不是真该跑，也无从发现判据把某一批整批漏掉。
  */
-function alreadyHasDraftPoints(row) {
-  const parsed = parseQuotedSummary(safeParseJson(row.summaryJson));
-  if (parsed === null) return false;
-  return parsed.keyPoints.some((point) => typeof point.source === 'string' && point.source !== '');
-}
-const pool = withSummary.filter(
-  (row) => row.status !== SUMMARY_NOT_SUMMARIZED_STATUS && !alreadyHasDraftPoints(row),
-);
-const redone = withSummary.length - pool.length - blocked.length;
+const verdicts = withSummary.map((row) => ({
+  row,
+  ...redraftCandidate({
+    status: row.status,
+    summaryModel: row.summaryModel,
+    summary: safeParseJson(row.summaryJson),
+  }),
+}));
+const pool = verdicts.filter((item) => item.candidate).map((item) => item.row);
+const skipped = verdicts.filter((item) => !item.candidate);
 
 console.log(
-  `已有摘要 ${withSummary.length} 条：${blocked.length} 条已截止（清了就不会再生成，排除）、` +
-    `${redone} 条已带上可核对的条文要点（跳过，工具因此可重复跑）⇒ 可置换池 ${pool.length} 条`,
+  `已有摘要 ${withSummary.length} 条：不进候选 ${skipped.length} 条、⇒ 可置换池 ${pool.length} 条`,
 );
+/**
+ * 候选逐条列出（含理由），**并且**把不进候选的也逐条列出（含理由）：
+ * 后者看着啰嗦，但它正是这一刀要修的那件事的另一面 —— 旧判据把 38 条整批跳过、
+ * 而输出里一个字都没说（读的人只会觉得"池子里本来就没东西"）。
+ */
+console.log('不进候选的条目（逐条给出为什么）：');
+for (const item of skipped) {
+  console.log(`  ${item.row.id.slice(0, 8)}  ${item.reason}`);
+}
+console.log('候选的条目（逐条给出为什么进；真正动手时还要看"能不能喂进条文"）：');
+for (const item of verdicts) {
+  if (!item.candidate) continue;
+  console.log(`  ${item.row.id.slice(0, 8)}  ${item.reason}  ${item.row.title.slice(0, 34)}`);
+}
 
 /**
  * 点名名单 → 条目。三种情况都要吵出来而不是静默缩小工作范围：
@@ -150,6 +176,17 @@ if (idArgs.length > 0) {
     }
     if (hits[0].status === SUMMARY_NOT_SUMMARIZED_STATUS) {
       problems.push(`--ids ${prefix}：这条已截止，清空等于永久失去摘要 —— 本工具不动它`);
+      continue;
+    }
+    /**
+     * 人工复核录入的那一份（issue #48）：`--ids` 从前也绕得过去，而它比"已截止"更该拦 ——
+     * 清了不是"永久失去"，是**直接毁掉人的活**（那份摘要是有人读原文写出来的）。
+     * 真要覆盖它，正确入口是 `scripts/summarize-now.mjs --replace`（那条路会先打印旧值）。
+     */
+    if (hits[0].summaryModel === MANUAL_SUMMARY_MODEL) {
+      problems.push(
+        `--ids ${prefix}：这条摘要是**人工复核录入**的（summary_model=manual），重跑等于毁掉人的活 —— 本工具不动它`,
+      );
       continue;
     }
     matched.push(hits[0]);

@@ -113,6 +113,10 @@ const TARGETS = {
   // 2026-09-30：点名补摘要的工具（`--ids`，默认只读）。它是一条**生产写入**通道，
   // 所以"默认不写库""已有摘要要 --replace""覆盖前先备份"这三条各自要被撤一次。
   summarizeNow: 'scripts/summarize-now.mjs',
+  // issue #48：存量重跑工具。把"候选判据"从脚本里搬进 `.ts`（脚本进不了单测、也进不了 pin 表），
+  // 这两处靶点分别钉"判据本身"与"脚本真的用了那份判据"。
+  redraftCandidates: 'src/lib/redraft-candidates.ts',
+  redraftScript: 'scripts/reset-summaries-for-redraft.mjs',
   // issue #86 第 3 刀：喂入侧的档位与预算。这一处撤掉之后**一个字都不会报错** ——
   // 档位判错就是"还是老样子"（回到标准档，页面照常出摘要），喂少了只是模型看到的东西变少，
   // 而那正是这一刀要消灭的静默失败，所以它必须有"撤掉实现必须变红"的钉子。
@@ -1701,6 +1705,48 @@ const CASES = [
     to: 'if (false) {',
     pattern: '缺省不让一次点超过 5 条',
     test: 'tests/e2e/summarize-now.test.mjs',
+  },
+  // ── issue #48：存量重跑工具的候选判据（缺 L2/L3 就算候选）──────────────────────
+  {
+    // 这一刀最要紧的一行：**键缺席**才说明"那次调用没问过 L2/L3"，空数组是"问过、模型说没有"。
+    // 撤成"空数组也算缺"的后果不是多跑几条，而是毁掉工具的**幂等** —— 一份本来就产不出
+    // 改动对照的条目会被一遍遍清空重跑，每次一次境外调用，而且看不出来是谁的问题。
+    label: '「没问过 L2/L3」被放宽成「空数组也算缺」（幂等失守：条目被反复重跑）',
+    file: 'redraftCandidates',
+    from: "  if (!('impacts' in fields)) {",
+    to: "  if (!Array.isArray(fields.impacts) || fields.impacts.length === 0) {",
+    pattern: '空数组',
+    test: 'tests/unit/redraft-candidates.test.mjs',
+  },
+  {
+    // 两条硬红线各钉一次。**已截止**那条尤其要紧：摘要队列的入队过滤排除了它们，
+    // 清了就是永久失去一份能看的摘要（旧脚本有这条，判据搬家时不许丢）。
+    label: '重跑候选不再排除已截止条目（清了就永久失去摘要）',
+    file: 'redraftCandidates',
+    from: '  if (input.status === SUMMARY_NOT_SUMMARIZED_STATUS) {',
+    to: '  if (false) {',
+    pattern: '已截止',
+    test: 'tests/unit/redraft-candidates.test.mjs',
+  },
+  {
+    // 旧脚本**没有**这条红线：人工写的摘要没有条文要点 ⇒ 按旧判据反而更容易进池子被清掉。
+    // 新判据把它挡在外面，"重跑等于毁掉人的活"这句话才有实现。
+    label: '重跑候选不再排除人工复核录入的摘要（重跑等于毁掉人的活）',
+    file: 'redraftCandidates',
+    from: '  if (input.summaryModel === MANUAL_SUMMARY_MODEL) {',
+    to: '  if (false) {',
+    pattern: '人工复核录入',
+    test: 'tests/unit/redraft-candidates.test.mjs',
+  },
+  {
+    // 接线：判据写对了、脚本没用它（自己又判一遍或干脆全收）—— 与页面接线同一类断线，
+    // 而它在单测里看不见，所以由 e2e 那条"走池子"的用例按**行为**钉住（池子会变成 3 条）。
+    label: '重跑工具不再用那份候选判据（人工录入与已截止一起进池子）',
+    file: 'redraftScript',
+    from: '  ...redraftCandidate({',
+    to: "  ...{ candidate: row.status !== 'closed', reason: '撤掉实现：不用判据' },",
+    pattern: '不带 --ids 时走池子',
+    test: 'tests/e2e/redraft-ids.test.mjs',
   },
   // 2026-09-30：引号字形归一（生产实测：附件原文是中文引号、模型某几遍吐 ASCII 直引号，
   // 词句逐字一致却整行被判"对不上" —— 那一遍 9 行全丢，页面上「改了哪几处」只剩事实行）。

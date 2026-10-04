@@ -256,11 +256,12 @@ select count(*) filter (where not has_diag and s is not null)          as "无�
   from l3;
 
 \echo ''
-\echo '=== 9. 重跑杠杆的真实边界（与 reset-summaries-for-redraft.mjs 的过滤逐条对齐）==='
-\echo '   「已带上可核对的条文要点」= keyPoints 里有一项带 source，也就是那个工具的幂等过滤'
-\echo '   （alreadyHasDraftPoints）。它写于 issue #67，当时的缺口是**条文要点**；'
-\echo '   现在缺的是 L2/L3，而这条过滤**判不出这个差别** —— 若本节的第 1 列很大，'
-\echo '   说明工具正静默跳过最该重跑的那一批（处置：加一档判据，或 --ids 点名）。'
+\echo '=== 9. 重跑杠杆的真实边界（**旧判据**的口径，留作与 87 号文档 §9.5 对读）==='
+\echo '   「已带上可核对的条文要点」= keyPoints 里有一项带 source，那曾是那个工具的幂等过滤'
+\echo '   （alreadyHasDraftPoints，写于 issue #67，当时的缺口是**条文要点**）。'
+\echo '   2026-10-04（issue #48）起工具的判据换成「缺 L2/L3 就算候选」，落点是'
+\echo '   src/lib/redraft-candidates.ts —— 本节与 9b 量的是**旧判据**，所以第 1 列大不代表'
+\echo '   工具还在漏跑；要看新判据的清单请用第 9c 节，或将工具本身当 dry-run 跑一遍。'
 select count(*) filter (where not has_diag and s is not null)                     as "无诊断但有摘要",
        count(*) filter (where not has_diag and s is not null
                           and summary_model = 'manual')                           as "其中人工录入(不许覆盖)",
@@ -278,7 +279,7 @@ select count(*) filter (where not has_diag and s is not null)                   
   from l3;
 
 \echo ''
-\echo '=== 9b. 只要给重跑工具一个"缺 L2/L3 就重跑"的判据，这一批立刻能补上判读 ==='
+\echo '=== 9b. **旧判据**那一步能捞回多少（口径 = 无诊断 + 未截止 + 非人工 + 已有带出处要点）==='
 \echo '   筛选口径 = 无诊断 + 未截止 + 非人工录入 + **已有带出处的条文要点**。'
 \echo '   最后一条是关键：它证明这些条目今天**读得到条文** —— 也就是说重跑不是白花一次调用，'
 \echo '   而是"材料已在手、只是当初那次调用没问 L2/L3"。'
@@ -296,6 +297,23 @@ select id, coalesce(audience, '(未判定)') as "受众面", status as "库内�
                  case when jsonb_typeof(s -> 'keyPoints') = 'array'
                       then s -> 'keyPoints' else '[]'::jsonb end) k
                 where coalesce(k ->> 'source', '') <> '')
+ order by deadline_at nulls last;
+
+\echo ''
+\echo '=== 9c. 新判据下的清单（与 src/lib/redraft-candidates.ts **同源**）==='
+\echo '   「缺 L2/L3」= 摘要 JSON 里**没有 impacts 键或没有 changes 键** —— 键缺席只可能来自'
+\echo '   "那次调用的提示词里还没有这一问"；键在而值是空数组是"问过了、模型说没有"，**不算缺**'
+\echo '   （这一条正是工具幂等的依据：产不出改动对照的条目不会被反复清空重跑）。'
+\echo '   另有两条候选理由 SQL 这一层不表达：缺带出处的条文要点（旧判据）、判读缺 point 键（旧形状）。'
+\echo '   而且"能不能真动手"还要过工具的第二步 —— 这条今天**读得到条文**（重跑不是白花一次调用）。'
+select id, coalesce(audience, '(未判定)') as "受众面", status as "库内状态",
+       deadline_at as "截止",
+       (s ? 'impacts') as "问过L3", (s ? 'changes') as "问过L2",
+       left(title, 40) as "标题"
+  from l3
+ where s is not null and still_open
+   and summary_model is distinct from 'manual'
+   and (not (s ? 'impacts') or not (s ? 'changes'))
  order by deadline_at nulls last;
 
 \echo ''

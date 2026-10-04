@@ -1,6 +1,10 @@
 import { getNoticeSummary, resetNoticeSummaryForRetry, saveNoticeSummary } from '@/db/repo/summaries';
 import { normalizeDateText } from '@/lib/dates';
-import { buildQuotedSummary, normalizeChannels } from '@/lib/summary-content';
+import {
+  MANUAL_SUMMARY_MODEL,
+  buildQuotedSummary,
+  normalizeChannels,
+} from '@/lib/summary-content';
 import type { SummaryChannelKind } from '@/lib/ports';
 import { syncNoticesToSearchIndex } from '@/lib/search/sync';
 import { adminGuard, redirectToAdmin } from '../guard';
@@ -20,8 +24,10 @@ import { adminGuard, redirectToAdmin } from '../guard';
 // 每次提交都实时读写库并同步索引，禁止静态优化与缓存。
 export const dynamic = 'force-dynamic';
 
-/** 人工保存的摘要模型名（详情页「摘要模型」位展示，与自动摘要区分） */
-export const MANUAL_SUMMARY_MODEL = 'manual';
+/** 人工保存的摘要模型名（详情页「摘要模型」位展示，与自动摘要区分）。
+ *  字面量本身已搬到 `lib/summary-content.ts`（issue #48：重跑工具的候选判据也要认它），
+ *  这里原样转出去，免得调用方改 import 路径。 */
+export { MANUAL_SUMMARY_MODEL };
 
 /**
  * 渠道人工录入：每行一条，格式 `类型|值`（类型可省略，留空则按值自动判断）。

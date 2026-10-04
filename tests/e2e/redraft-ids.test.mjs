@@ -34,6 +34,8 @@ const WITH_POINTS = 'a1'.repeat(16);
 const PLAIN = 'b2'.repeat(16);
 /** 已截止（硬红线：不许清）。同样以 b 开头，所以 `--ids b` 必须报歧义 */
 const CLOSED = 'b3'.repeat(16);
+/** 人工复核录入的摘要（issue #48 的第二条硬红线：重跑等于毁掉人的活） */
+const MANUAL = 'c4'.repeat(16);
 
 let db;
 
@@ -94,6 +96,7 @@ before(async () => {
     [WITH_POINTS, '甲：已带条文要点', 'open'],
     [PLAIN, '乙：普通条目', 'open'],
     [CLOSED, '丙：已截止', 'closed'],
+    [MANUAL, '丁：人工复核录入', 'open'],
   ]) {
     await noticesRepo.upsertNotice({
       id,
@@ -127,6 +130,7 @@ beforeEach(() => {
   setSummaryFor.run(summaryJson('甲', true), 'mimo-v2.5', 'done', WITH_POINTS);
   setSummaryFor.run(summaryJson('乙', false), 'mimo-v2.5', 'done', PLAIN);
   setSummaryFor.run(summaryJson('丙', false), 'mimo-v2.5', 'done', CLOSED);
+  setSummaryFor.run(summaryJson('丁', true), 'manual', 'done', MANUAL);
 });
 
 describe('issue #79：--ids 点名重跑', () => {
@@ -174,13 +178,27 @@ describe('issue #79：--ids 点名重跑', () => {
     assert.match(summaryOf(CLOSED).json, /丙：旧摘要/, '已截止条目的摘要必须原样留着');
   });
 
-  it('不带 --ids 时行为不变：仍走池子 + 幂等过滤（甲被跳过、丙被排除、乙没有可读条文 ⇒ 不动）', async () => {
+  it('人工复核录入的条目：--ids 也绕不过（重跑等于毁掉人的活，比"永久失去"更该拦）', async () => {
+    const { code, output } = await runScript(['--apply', '--ids', MANUAL.slice(0, 8)]);
+    assert.equal(code, 1, output);
+    assert.match(output, /人工复核录入/);
+    assert.match(output, /一个字节都没改/);
+    assert.match(summaryOf(MANUAL).json, /丁：旧摘要/, '人写的那一份必须原样留着');
+  });
+
+  it('不带 --ids 时走池子：判据换成"缺 L2/L3 就算候选"（甲进候选，不再被幂等过滤跳过）', async () => {
+    // issue #48：甲有带出处的条文要点、但摘要里**没有 `impacts` 键**（那次调用没问过 L3）。
+    // 旧判据（只判"有没有条文要点"）会把它跳过 —— 而那正是这一刀要修的整批漏掉。
     const { code, output } = await runScript(['--apply', '--limit', '1']);
     assert.equal(code, 0, output);
-    assert.match(output, /可置换池 1 条/, '甲已带条文要点、丙已截止 ⇒ 池子里只剩乙');
-    // 乙没有任何附件 ⇒ `draftSourcesForSummary` 返回空 ⇒ 不在候选里（重跑只会白花一次调用）
+    assert.match(output, /可置换池 2 条/, '甲（缺 L3）+ 乙（缺条文要点）；丙已截止、丁人工录入都不进');
+    assert.match(output, /候选的条目/, '清单要逐条列出候选');
+    assert.match(output, /没问过 L3/, '甲的理由是"那次调用没问过 L3"（键缺席），不是"模型没想到"');
+    assert.match(output, /不进候选的条目/, '不进候选的也要逐条给理由（旧输出一个字都没说）');
+    // 甲乙都没有任何附件 ⇒ `draftSourcesForSummary` 返回空 ⇒ 不在候选里（重跑只会白花一次调用）
     assert.match(output, /没有可置换的条目/);
     assert.match(summaryOf(PLAIN).json, /乙：旧摘要/, '一个字都不该动');
     assert.match(summaryOf(CLOSED).json, /丙：旧摘要/);
+    assert.match(summaryOf(WITH_POINTS).json, /甲：旧摘要/, '甲进了候选但没有可读条文 ⇒ 也不许被清');
   });
 });
