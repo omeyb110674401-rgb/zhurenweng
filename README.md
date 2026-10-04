@@ -3,7 +3,7 @@
 政府公示与征求意见信息聚合网站：把分散在官方渠道的国家级公示 / 征求意见稿聚合起来，
 用 AI 摘要帮助公众「**发现 → 读懂 → 行动**」，行动指引永远指向官方渠道提交意见。
 
-- PRD：`docs/prd/v1.md`
+- PRD：`docs/prd/v1.md`（产品级）、`docs/prd/v2.md`（判读的合规审读门）
 - 架构裁决：`docs/adr/0001-local-dev-without-docker.md`（开发与测试环境脱离 Docker）
 
 ## 技术栈
