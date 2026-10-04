@@ -443,3 +443,47 @@ e2e **444/444 绿**。两组 e2e 夹具跟着改了语义：`notice-audience` �
 **本地测不到的一件**：审计 SQL 要 Postgres 才跑得起来，而本机没有（e2e 走 sqlite）——
 已做的只是结构性自查（括号 285/285、`$$` 配平、三段 create）；**语法与读数只有在服务器上
 跑过才算数**，那正是开门核验那一步。
+
+### 9.7 上线运行手册（**每一步都要逐次授权**，顺序不能换）
+
+第 4–6 条剩下的全是**生产动作**。下面这份清单把"谁在哪一步、判据是什么"写死，
+免得授权时各说各话。所有命令都在仓库根目录、面向生产 compose 环境跑。
+
+**A. 配审读侧（#50，厂商已定：DeepSeek）** —— 凭据不进仓库、不进对话：
+
+1. 生成一份只含审读侧四行的清单文件（**不要在命令行里写 key**）：
+   ```
+   IMPACT_REVIEW_PROVIDER=openai-compatible
+   IMPACT_REVIEW_API_KEY=<DeepSeek 的 key>
+   IMPACT_REVIEW_API_BASE=https://api.deepseek.com/v1
+   IMPACT_REVIEW_MODEL=<deepseek 的模型名，如 deepseek-chat>
+   ```
+2. `bash deploy/set-env-keys.sh /tmp/impact-review.env`（脚本会先备份 `.env`、收紧 600，
+   并跑 `docker compose config --quiet` 自检）。
+3. **金丝雀**（一条真条目，最能看出问题的一步）——只读地看一眼 + 只写审读列：
+   `docker compose run --rm worker node scripts/review-impacts-now.mjs --ids <8 位前缀>`（只读）
+   → 再 `--apply` 同一条；判据：输出里 `审读完成：送审 N 条 / 采信 M 条`，
+   库里 `impact_review_json` 有记录、`summary_diagnostics_json -> 'review' -> 'status' = 'ok'`，
+   且**摘要那几列一个字节没动**。三种结论要各实测到一次：
+   `IMPACT_REVIEW_STUB_STATUS` 只对 stub 有效，真模型就看这一条的结论是不是「通过」；
+   若想确认「已改/剔除」在真模型上也走得通，挑一条判读内容更"越界"的条目再跑一次。
+
+**B. 回填（#51）** —— 顺序：先补审读（保住线上那 5 条）→ 再重跑 → 再补一次：
+
+1. `docker compose run --rm worker node scripts/review-impacts-now.mjs`（**只读**）
+   → 看清"缺口清单与分布"（这一步的输出请贴回来，我据此定批次）；
+2. `--apply --limit 3`（金丝雀）→ 抽查页面与库 → `--apply --all`（全量，带 `tee` 或 `-v` 存备份）；
+3. `docker compose run --rm worker node scripts/reset-summaries-for-redraft.mjs`（只读，看候选）
+   → `--apply --all`（重跑 6 条行业档 + 19 条积压；`#41` 在同一次回填里收口）；
+4. 重跑完**再跑一次** `review-impacts-now.mjs --apply`（新判读要重新审读）；
+5. **对账**：`review-impacts-now.mjs`（只读）输出里"缺口 0"；
+   再跑 `cat deploy/audit-l3-reach.sql | docker compose exec -T db psql -U zhurenweng -d zhurenweng`
+   看第 12 节：**错挂记录数 = 0**、门放行条数 = 判读条数 − 被剔除条数，并把三种结论的分布留档。
+
+**C. 翻转与开门核验（#52）** —— **B 的第 5 步没过就不许做**：
+
+1. `git push`（按批推、一次推送一次 CI）+ 在服务器上 `docker compose build web worker && docker compose up -d`；
+2. **逐条实取**：`deploy/audit-l3-reach.sql` 第 6 节（真渲染得出来的那些）与线上首页/详情页逐条对 —
+   红线两条：**公众广域那 5 条一条都没消失**、可见判读条目从 5 条扩到约 11 条；
+3. 列表标记与详情页**逐格一致**（同一个门，`notice-marks.test.mjs` 的契约测试已经在管这条）；
+4. 措辞核验：列表标记与详情页免责声明**一个字没改**（不出现"已审读"字样）。
