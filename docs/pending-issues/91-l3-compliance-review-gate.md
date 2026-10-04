@@ -344,3 +344,37 @@ pin 表，而"哪一条该重跑"正是这一刀最该被钉住的东西。`rese
 
 **门**：单测 +27（`tests/unit/impact-review-rules.test.mjs`）、pin +6（六条各自实测变红）。
 **未做**：本切片不接模型 —— 提示词的消费者是第 4 条（#50）的审读端口，按依赖顺序如此。
+
+### 9.4 第 4 条 #50：第二路审读端口接真实模型（代码已落地；真模型待定厂商与 key）
+
+**落地**：
+
+- `src/lib/adapters/impact-review-llm.ts`：OpenAI 兼容的审读端口（**审读侧自己的 env 族**：
+  `IMPACT_REVIEW_API_KEY` / `_API_BASE` / `_MODEL` / `_TIMEOUT_MS` / `_EXTRA_HEADERS`，
+  一个都不与生成侧的 `LLM_*` / `GLM_*` 共用）。境内厂商的兼容端点直接填 base
+  （智谱 / DeepSeek / 通义），代码不猜厂商、不猜默认模型 —— 三项缺一即抛配置错。
+- **失败分三类、诊断分六种**（`ReviewOutcome`）：`not-configured` / `not-independent` /
+  `port-error` / `timeout` / `request-failed` / `invalid-shape` / `ok` / `skipped`，
+  全部写进 `summary_diagnostics_json.review`（诊断版本升到 **v3**）—— 这正是"这条判读为什么
+  没有审读记录"在库里能读出来的前提（六种原因的处置完全相反）。
+- **独立性核对**（`impactReviewIndependence`）：审读侧必须有自己的一套配置、端点与密钥都不许
+  与生成侧撞车；撞了就**跳过审读**并记 `not-independent` —— 一份同源模型的"通过"比没有审读更坏。
+  **"境内直连"代码核不了**，所以把两侧主机名原样报进日志与诊断，交给人核（不拿域名白名单
+  假装核过了）。
+- **输出解析**（`parseImpactReviewVerdicts`）：容忍 markdown 围栏与前后解释文字；元素缺逐字回显
+  ⇒ 丢掉那一条；**状态认不出 ⇒ 整份作废**（宁可这一轮没有记录，也不要把模型没说过的结论读成某一种）。
+- **worker 两处接线**：① 邻域按 `impact.source`（附件名）回查到本轮真喂进去的正文，
+  再按引用前后各 200 字取（取不到给 null，提示词会显式写"没有邻域可用"）；
+  ② 审读结果进同一份摘要诊断。
+- `docker-compose.yml`（worker 块）声明了审读侧六个变量、缺省为空 —— **空 = 不跑审读**，
+  判读没有记录；门翻转之后等于不渲染（fail-closed 的方向）。密钥经 `deploy/set-env-keys.sh`
+  落 `.env`：不进仓库、不进对话（脚本本来就是通用的 KEY=VALUE 合并，不用改）。
+
+**门（本地实跑）**：pin 自证 **239/239 红**（本刀 +7）、单测 **849/849 绿**（+25）、
+e2e **439/439 绿**（+1：**打到本地假端点**跑完整条真实 HTTP 路 —— 邻域真的送出去、
+结论按指纹落库、诊断写 `review.status=ok`、密钥不进请求体）。
+
+**未做（要用户拍两件）**：审读侧的**厂商**与 **key**。代码侧已能接任何 OpenAI 兼容端点，
+但"不同厂商、境内直连"是配置事实、不是代码事实，且实测那条验收
+（"对一条真条目跑一遍，三种结论各实测到"）需要真实 key —— 凭据不进仓库、不进对话。
+在此之前，生产上 `IMPACT_REVIEW_PROVIDER` 为空 ⇒ 审读不跑 ⇒ 记 `not-configured`（诚实、可见）。
