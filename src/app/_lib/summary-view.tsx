@@ -183,7 +183,6 @@ export function SummaryView({
    * **同一个**结果。
    */
   const impacts = impactsToRender({
-    audience: notice.audience,
     impacts: summary.impacts,
     reviews: impactReviews,
   });

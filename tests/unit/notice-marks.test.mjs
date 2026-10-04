@@ -66,58 +66,69 @@ function reviewRecords(status) {
   });
 }
 
-describe('issue #87：列表标记的判据（只说"有"，不说"无"）', () => {
-  it('公众广域 + 有判读 ⇒ 含 impacts', () => {
-    assert.deepEqual(noticeMarks({ audience: 'public', summary: summary({ impacts: [IMPACT] }) }), [
-      'impacts',
-    ]);
+describe('issue #87 / #52：列表标记的判据（只说"有"，不说"无"）', () => {
+  it('有有效审读记录 ⇒ 含 impacts（门放行，列表就跟着打标）', () => {
+    assert.deepEqual(
+      noticeMarks({ summary: summary({ impacts: [IMPACT] }), reviews: reviewRecords('passed') }),
+      ['impacts'],
+    );
+    assert.deepEqual(
+      noticeMarks({ summary: summary({ impacts: [IMPACT] }), reviews: reviewRecords('revised') }),
+      ['impacts'],
+    );
   });
 
-  it('行业专业 / 未判定 / null + **同样有判读** ⇒ 不含 impacts（不许承诺详情页不存在的东西）', () => {
-    for (const audience of ['sector', 'unknown', null]) {
-      assert.deepEqual(
-        noticeMarks({ audience, summary: summary({ impacts: [IMPACT] }) }),
-        [],
-        `受众面 ${audience} 的条目详情页不渲染判读，列表就不许打标`,
-      );
-    }
+  it('**没有审读记录 ⇒ 不打标**（#52 起门是 fail-closed，详情页一个字都不渲染）', () => {
+    assert.deepEqual(noticeMarks({ summary: summary({ impacts: [IMPACT] }) }), []);
+    assert.deepEqual(
+      noticeMarks({ summary: summary({ impacts: [IMPACT] }), reviews: [] }),
+      [],
+      '空记录与没传记录是同一件事 —— 列表不许承诺详情页不存在的东西',
+    );
+  });
+
+  it('受众面**不再是判据**：行业专业 / 未判定 + 有效记录 ⇒ 与公众广域一样打标', () => {
+    // #52 之前这三个受众面一律不打标（那时候门里还有受众面）；现在门只认审读记录，
+    // 列表必须跟着走 —— 否则行业档的读者在列表上看不到标记、点进去却有内容。
+    // （`noticeMarks` 的入参里已经**没有** audience 了：用不上的入参就是下一轮的幽灵旋钮。）
+    assert.deepEqual(
+      noticeMarks({ summary: summary({ impacts: [IMPACT] }), reviews: reviewRecords('passed') }),
+      ['impacts'],
+    );
   });
 
   it('判读为空数组 ⇒ 不含 impacts（空壳比没有更坏，与详情页同一条）', () => {
-    assert.deepEqual(noticeMarks({ audience: 'public', summary: summary() }), []);
+    assert.deepEqual(noticeMarks({ summary: summary() }), []);
   });
 
   it('改动对照：`changes` 非空而 `changeTable` 为 null（历史行）⇒ 含 changes', () => {
     assert.deepEqual(
-      noticeMarks({ audience: 'public', summary: summary({ changes: [{ clause: '第三十六条' }] }) }),
+      noticeMarks({ summary: summary({ changes: [{ clause: '第三十六条' }] }) }),
       ['changes'],
     );
   });
 
   it('改动对照：`changeTable` 非空而 `changes` 为空 ⇒ **也**含 changes（与详情页那个提前返回逐字对齐）', () => {
     assert.deepEqual(
-      noticeMarks({
-        audience: 'public',
-        summary: summary({ changeTable: { entries: [], headers: 0 } }),
-      }),
+      noticeMarks({ summary: summary({ changeTable: { entries: [], headers: 0 } }) }),
       ['changes'],
     );
   });
 
   it('摘要为 null（没生成 / 旧形状解析失败）⇒ 空数组，且不抛错', () => {
-    assert.deepEqual(noticeMarks({ audience: 'public', summary: null }), []);
-    assert.deepEqual(noticeMarks({ audience: null, summary: null }), []);
+    assert.deepEqual(noticeMarks({ summary: null }), []);
+    assert.deepEqual(noticeMarks({ summary: null, reviews: reviewRecords('passed') }), []);
   });
 
   it('既没有判读也没有改动对照 ⇒ 空数组（不许出现「暂无判读」那类灰标记）', () => {
-    assert.deepEqual(noticeMarks({ audience: 'public', summary: summary() }), []);
+    assert.deepEqual(noticeMarks({ summary: summary() }), []);
   });
 
   it('两种都有 ⇒ impacts 在前（判读是更值得读的那一段）', () => {
     assert.deepEqual(
       noticeMarks({
-        audience: 'public',
         summary: summary({ impacts: [IMPACT], changes: [{ clause: '第五十八条第二款' }] }),
+        reviews: reviewRecords('passed'),
       }),
       ['impacts', 'changes'],
     );
@@ -125,11 +136,8 @@ describe('issue #87：列表标记的判据（只说"有"，不说"无"）', () 
 
   /**
    * 契约测试：把"同一道门"钉成**可执行**的东西，而不是注释里的一句话。
-   * 有效组合只有 4×2×4 种（受众面 × 有没有判读 × 审读结论），穷举比举例子更难写错。
-   *
-   * issue #47 把审读结论加进输入空间：审读**剔除**掉唯一一条之后，详情页不渲染那一段，
-   * 列表也就不许再打标 —— 这正是这条契约测试存在的意义（它每次都是靠"列表与详情页
-   * 逐格对齐"把上一刀的风险挡住的：库里存着判读，而门不放行）。
+   * 有效组合是 2×4 种（有没有判读 × 审读结论）—— #52 起受众面**不在输入空间里**了
+   * （它已退出判据），所以这一格从矩阵里消失，而"两边逐格对齐"这件事一个字没变。
    */
   it('契约：impacts 那一支的结论与 `impactsToRender` 逐格一致（同一道门）', () => {
     const reviewCases = [
@@ -138,41 +146,29 @@ describe('issue #87：列表标记的判据（只说"有"，不说"无"）', () 
       { label: '已改', reviews: reviewRecords('revised') },
       { label: '剔除', reviews: reviewRecords('rejected') },
     ];
-    for (const audience of ['public', 'sector', 'unknown', null]) {
-      for (const impacts of [[], [IMPACT]]) {
-        for (const { label, reviews } of reviewCases) {
-          const viaMarks = noticeMarks({ audience, summary: summary({ impacts }), reviews }).includes(
-            'impacts',
-          );
-          const viaGate = impactsToRender({ audience, impacts, reviews }) !== null;
-          assert.equal(
-            viaMarks,
-            viaGate,
-            `audience=${audience} impacts=${impacts.length} 审读=${label}：列表标记与详情页门控结论必须一致`,
-          );
-        }
+    for (const impacts of [[], [IMPACT]]) {
+      for (const { label, reviews } of reviewCases) {
+        const viaMarks = noticeMarks({ summary: summary({ impacts }), reviews }).includes('impacts');
+        const viaGate = impactsToRender({ impacts, reviews }) !== null;
+        assert.equal(
+          viaMarks,
+          viaGate,
+          `impacts=${impacts.length} 审读=${label}：列表标记与详情页门控结论必须一致`,
+        );
       }
     }
   });
 
   it('审读把唯一一条**剔除** ⇒ 不打标（列表不许承诺详情页不存在的东西）', () => {
     assert.deepEqual(
-      noticeMarks({
-        audience: 'public',
-        summary: summary({ impacts: [IMPACT] }),
-        reviews: reviewRecords('rejected'),
-      }),
+      noticeMarks({ summary: summary({ impacts: [IMPACT] }), reviews: reviewRecords('rejected') }),
       [],
     );
   });
 
   it('审读**已改** ⇒ 照常打标（那一段还在，只是换了文本 —— 标记说的是"这里有判读"）', () => {
     assert.deepEqual(
-      noticeMarks({
-        audience: 'public',
-        summary: summary({ impacts: [IMPACT] }),
-        reviews: reviewRecords('revised'),
-      }),
+      noticeMarks({ summary: summary({ impacts: [IMPACT] }), reviews: reviewRecords('revised') }),
       ['impacts'],
     );
   });
@@ -198,8 +194,8 @@ describe('issue #87：接线（源码）', () => {
   it('组件真的用了 noticeMarks，并把解析后的摘要**与审读记录**一起喂给它', () => {
     assert.match(
       item,
-      /noticeMarks\(\{[\s\S]*?audience: notice\.audience,[\s\S]*?summary: parseQuotedSummary\(notice\.aiSummary\),[\s\S]*?reviews: notice\.impactReviews,[\s\S]*?\}\)/,
-      '判据必须走 lib/notice-marks.ts，而不是在组件里另写一个 if；审读记录也要喂进同一道门（否则列表会承诺详情页已剔除的判读）',
+      /noticeMarks\(\{[\s\S]*?summary: parseQuotedSummary\(notice\.aiSummary\),[\s\S]*?reviews: notice\.impactReviews,[\s\S]*?\}\)/,
+      '判据必须走 lib/notice-marks.ts，而不是在组件里另写一个 if；审读记录也要喂进同一道门（否则列表会承诺详情页已剔除或无记录的判读）',
     );
   });
 

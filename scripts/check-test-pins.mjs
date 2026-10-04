@@ -1388,17 +1388,16 @@ const CASES = [
     test: 'tests/unit/summary-impacts.test.mjs',
   },
   {
-    // issue #47：门由谓词变**选择器**之后，这两条靶点跟着搬（#86 那两条钉的是"受众面在不在
-    // 门里"与"空数组渲不渲染"，判据一个字没改，只是实现形状换了）。
+    // issue #47：门由谓词变**选择器**之后这两条靶点跟着搬；issue #52 又把门翻成**严格版**
+    // （受众面退出判据），所以第一条靶点从"过渡回落那一行"变成"fail-closed 那一行"。
     //
-    // 这一条撤的是**过渡回落**那一行：受众面是否退出判读的渲染判据定在第 6 条（#52），
-    // 本切片撤掉它 = 行业专业 / 未判定也把推断推给读者 —— 而那正是用户 2026-09-27
-    // 拍板要挡的那一档（"先只上公众广域 + 人工过一遍"）。
-    label: '判读的过渡回落被撤（非公众广域也把"可能的争议点"推给读者）',
+    // 撤掉它 = 没有有效审读记录也照渲染 ⇒ 门形同虚设（判读说错的代价是误导，
+    // 而这正是这一整条链路存在的理由）。
+    label: '判读的门不再是 fail-closed（没有审读记录也照渲染）',
     file: 'impactDisplay',
-    from: "  if (input.audience !== 'public') return null;",
-    to: '',
-    pattern: '过渡回落',
+    from: '    if (review === null) continue;',
+    to: '    if (review === null) { rendered.push(impact); continue; }',
+    pattern: '没有记录',
     test: 'tests/unit/summary-impacts.test.mjs',
   },
   {
@@ -2383,13 +2382,15 @@ const CASES = [
     // 这一条是整刀的风险所在：生产库里有一批 `sector` 条目**存着判读但详情页一个字都不渲染**
     // （受众面门控）。列表页若照库里的数组打标记，读者点进去会发现什么都没有 ——
     // 列表在承诺详情页不存在的东西，那比没有标记坏得多。所以靶点就是那道门本身。
-    // issue #47 起门多了**审读**这一维：审读剔除掉唯一一条之后，同样的缺口会以新形状出现
-    // （列表按库里的数组打标、详情页已剔除），而靶点仍然是这一次调用。
+    // issue #47 起门多了**审读**这一维；#52 起受众面退出判据，门是 fail-closed 的
+    // （没有有效记录就不渲染）。列表若照库里的数组打标，就会承诺详情页不存在的东西。
+    // pattern 取"没有审读记录 ⇒ 不打标"那条：撤掉门的调用之后，它正是会翻红的那一条
+    // （"库里有判读"与"门放行"从此分家）。
     label: '列表标记不再经由渲染门（列表承诺详情页不存在的东西）',
     file: 'noticeMarks',
-    from: '  if (impactsToRender({ audience, impacts, reviews }) !== null) {',
+    from: '  if (impactsToRender({ impacts, reviews }) !== null) {',
     to: '  if (impacts.length > 0) {',
-    pattern: '行业专业',
+    pattern: '没有审读记录 ⇒ 不打标',
     test: 'tests/unit/notice-marks.test.mjs',
   },
   {

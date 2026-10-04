@@ -32,12 +32,16 @@
 --   · `feed.sources` / `emitted.impacts` / `kept.impacts` 取 `summary_diagnostics_json`。
 --     `feed` 是 **v2** 才有的键；v1 的存量行没有它，而**"没记"与"喂了 0 份"处置相反**
 --     （前者是没量具，后者是抓取侧没给料）⇒ v1 行在分档里**单列一档**，不混进 a 档。
---   · 「能不能渲染」= 渲染门 `impactsToRender` 的判据（2026-10-04 起它是**选择器**，此前那个
---     谓词叫 `shouldRenderImpacts`）：本脚本第 ⑥⑦ 两条量的是**过渡期**的口径
---     （`audience = 'public'` 且非空），与列表页标记（`notice-marks.ts`）**同源** ——
---     这里只是把它翻成 SQL，不重写它。**两处已知的过渡偏差**（都在第 6 条 #52 收口）：
---     ① 受众面还没退出判据（翻转后才退出）；② 审读可以**逐条剔除**，本脚本数不出那一层
---     （它读不到 `impact_review_json`）⇒ 第 ⑥⑦ 与第 5/6 节眼下是**上限**，不是精确值。
+--   · 「能不能渲染」= 渲染门 `impactsToRender` 的判据（issue #52 起是**严格版**）：
+--     **只有"有有效审读记录"的判读才渲染**，而"有效"= `impact_review_json` 里存在一条记录，
+--     它的 `quoteFingerprint` / `textFingerprint` 与这条判读的 `quote` / `text`
+--     **归一化之后**相等、且 `status` 不是 `rejected`（`revised` 渲染审读后文本、`passed` 渲染原文）。
+--     **受众面已退出判据**（第 ⑥⑦ 与第 5/6 节据此改写）。归一化口径与 JS 侧
+--     `quoteFingerprint` 同一把尺子（引号字形归一 → 去空白 → 去包裹引号），由本会话里的
+--     `pg_temp.zw_fingerprint()` 表达；**已知的一处残留差异**：JS 的 `\s` 还覆盖 NBSP 等
+--     Unicode 空白，而 Postgres 的 `[[:space:]]` 在 C locale 下只覆盖 ASCII（全角空格已显式列出）。
+--     这类字符在实际正文里未出现过，且方向是"SQL 少数"（更保守）；开门核验时把本脚本与
+--     `scripts/review-impacts-now.mjs`（走 JS 那份判据）对一遍即可确认逐条一致。
 --   · 「还没截止」用展示口径（`effectiveStatus`）：库内 `status` 是抓取时推导的，刚过截止的
 --     条目能挂十几个小时仍是 `open`（见 `notice-status.ts` 头注的生产实测）⇒ 两列都看，
 --     并按 **Asia/Shanghai** 的当天比较（库容器是 UTC，`now()::date` 会在北京时间 0–8 点差一天）；
@@ -45,15 +49,15 @@
 --
 -- 跑法（**不写库、不碰 /opt**）：
 --   cat deploy/audit-l3-reach.sql | docker compose exec -T db psql -U zhurenweng -d zhurenweng
--- 迁移 0019 之前会报 `column "summary_diagnostics_json" does not exist`，那是预期。
+-- 迁移 0019 / 0020 之前会分别报 `summary_diagnostics_json` / `impact_review_json` 不存在，那是预期。
 --
--- 唯一"写"的东西是两个 **TEMPORARY VIEW**：只活在这个 psql 会话里、断开即消失，
--- 对库不留任何痕迹。用它们的理由是不必把上面那四十行口径在十个小节里抄十遍 ——
--- 抄十遍的那一份，迟早有几处走样，而这类脚本一旦两节口径不一致，
+-- 唯一"写"的东西是两个 **TEMPORARY VIEW** 与一个 **`pg_temp` 函数**（归一化指纹那个）：
+-- 只活在这个 psql 会话里、断开即消失，对库不留任何痕迹。用它们的理由是不必把上面那四十行
+-- 口径在十个小节里抄十遍 —— 抄十遍的那一份，迟早有几处走样，而这类脚本一旦两节口径不一致，
 -- 读的人不会怀疑脚本，会怀疑数据。
 --
 -- 结构上有两处**不是风格问题**：
---   ① `s` / `d` 必须在 `base` 这一层就物化成列，不能在同一个 select 列表里往下引用
+--   ① `s` / `d` / `r` 必须在 `base` 这一层就物化成列，不能在同一个 select 列表里往下引用
 --      （Postgres 里同一层 select 的别名互不可见，写成一层的直接报 `column "s" does not exist`）。
 --   ② 归因分档必须是**一个 `case` 表达式**（互斥），不能是一串 `count(*) filter (...)`
 --      —— 后者各档可以重叠，而重叠的表现是**各档之和 > 总数**：本脚本第一版就在 97 行的
@@ -63,6 +67,23 @@
 
 \pset border 2
 
+/**
+ * 判读/审读记录的**内容指纹**（issue #47/#52）：与 JS 侧 `quoteFingerprint` 同一把尺子 ——
+ * 引号字形归一 → 去全部空白（含全角空格）→ 去掉包裹引号。
+ *
+ * 为什么要它：审读记录里存的就是**归一化之后的**两个指纹，而判读里存的是原样的 `quote`/`text`。
+ * 门是这么比的，量具就必须这么比 —— 各写一份的表现是"量具说能渲染、页面却不渲染"。
+ */
+create function pg_temp.zw_fingerprint(t text) returns text language sql immutable as $$
+  select regexp_replace(
+           regexp_replace(
+             regexp_replace(
+               regexp_replace(coalesce(t, ''), '[“”＂〝〞「」『』]', '"', 'g'),
+               '[‘’＇]', '''', 'g'),
+             '[[:space:]　]+', '', 'g'),
+           '^["''”“「『]|["''”」』]$', '', 'g')
+$$;
+
 create temp view l3 as
 with base as (
   select n.id,
@@ -70,12 +91,14 @@ with base as (
          n.audience,
          n.status,
          n.deadline_at,
-         -- 摘要是谁写的：`manual` = 人工复核录入（`admin/review/route.ts` 的 MANUAL_SUMMARY_MODEL）。
+         -- 摘要是谁写的：`manual` = 人工复核录入（`lib/summary-content.ts` 的 MANUAL_SUMMARY_MODEL）。
          -- 这一列决定重跑时**能不能覆盖**它 —— 人工写的那一份不是模型产出，重跑等于毁掉人的活。
          n.summary_model,
          n.summary_status,
          case when n.ai_summary_json like '{%' then n.ai_summary_json::jsonb end as s,
-         case when n.summary_diagnostics_json like '{%' then n.summary_diagnostics_json::jsonb end as d
+         case when n.summary_diagnostics_json like '{%' then n.summary_diagnostics_json::jsonb end as d,
+         -- 审读记录（issue #47；判读的渲染门只认它）：非数组一律当"没有记录"
+         case when n.impact_review_json like '[%' then n.impact_review_json::jsonb end as r
     from notices n
 ), shaped as (
   select id,
@@ -110,6 +133,36 @@ with base as (
               then coalesce((d -> 'dropped' ->> 'quoteNotFound')::int, 0) else 0 end as dropped_quotes,
          (d is not null)                                                         as has_diag,
          coalesce(d ->> 'v', '')                                                 as diag_v,
+         -- 「能不能渲染」（issue #52 的严格门）：判读里**有有效审读记录**的条数。
+         -- 有效 = 两个指纹（归一化后）全等、且结论不是剔除（revised 渲染审读后文本、passed 渲染原文）。
+         (select count(*)
+            from jsonb_array_elements(
+                   case when jsonb_typeof(s -> 'impacts') = 'array' then s -> 'impacts' else '[]'::jsonb end) i
+           where exists (
+                   select 1
+                     from jsonb_array_elements(coalesce(r, '[]'::jsonb)) rec
+                    where rec ->> 'quoteFingerprint' = pg_temp.zw_fingerprint(i ->> 'quote')
+                      and rec ->> 'textFingerprint' = pg_temp.zw_fingerprint(i ->> 'text')
+                      and coalesce(rec ->> 'status', '') in ('passed', 'revised')))  as renderable_impacts,
+         -- 被审读**剔除**的条数（"审读真的在减"看得见的那一层）
+         (select count(*)
+            from jsonb_array_elements(
+                   case when jsonb_typeof(s -> 'impacts') = 'array' then s -> 'impacts' else '[]'::jsonb end) i
+           where exists (
+                   select 1
+                     from jsonb_array_elements(coalesce(r, '[]'::jsonb)) rec
+                    where rec ->> 'quoteFingerprint' = pg_temp.zw_fingerprint(i ->> 'quote')
+                      and rec ->> 'textFingerprint' = pg_temp.zw_fingerprint(i ->> 'text')
+                      and rec ->> 'status' = 'rejected'))                           as rejected_impacts,
+         -- **错挂**的记录：一条记录（两个指纹）匹配不上任何一条判读（#51 的"指纹匹配率 100%"）
+         (select count(*)
+            from jsonb_array_elements(coalesce(r, '[]'::jsonb)) rec
+           where not exists (
+                   select 1
+                     from jsonb_array_elements(
+                            case when jsonb_typeof(s -> 'impacts') = 'array' then s -> 'impacts' else '[]'::jsonb end) i
+                    where pg_temp.zw_fingerprint(i ->> 'quote') = rec ->> 'quoteFingerprint'
+                      and pg_temp.zw_fingerprint(i ->> 'text') = rec ->> 'textFingerprint'))  as misattached_records,
          -- 展示口径：还没截止（Asia/Shanghai 的当天；截止日为空按"还没截止"）
          coalesce(substr(deadline_at, 1, 10)
                   >= to_char(now() at time zone 'Asia/Shanghai', 'YYYY-MM-DD'), true) as still_open
@@ -118,11 +171,11 @@ with base as (
 select * from shaped;
 
 -- 归因分档：**互斥**（见文件头 ②）。优先级 = 处置的先后：先看有没有料可读（a0/a），
--- 再看模型问没问出来（b），再看我们丢没丢（c），最后才是产品决定挡不挡（ok/d）。
+-- 再看模型问没问出来（b），再看我们丢没丢（c），最后才看**门放不放行**（ok/e）。
 create temp view l3b as
 select id, title, audience, status, deadline_at, s, impacts, changes, has_table,
        fed_count, fed_cjk, fed_draft, emitted_impacts, kept_impacts, dropped_quotes,
-       has_diag, diag_v, still_open,
+       has_diag, diag_v, still_open, renderable_impacts, rejected_impacts, misattached_records,
        case
          when s is null then 'z.没有摘要'
          when not has_diag then 'x.没有诊断(无法归因)'
@@ -131,8 +184,8 @@ select id, title, audience, status, deadline_at, s, impacts, changes, has_table,
          when fed_count = 0 then 'a.一份都没喂(抓取侧)'
          when emitted_impacts = 0 then 'b.喂了模型没吐(提示词/能力)'
          when impacts = 0 then 'c.吐了被反查全吃(校验器)'
-         when audience = 'public' then 'ok.真的渲染得出来'
-         else 'd.落库了被受众面挡住(产品决定)'
+         when renderable_impacts > 0 then 'ok.真的渲染得出来'
+         else 'e.有判读但门不放行(没有有效审读记录)'
        end as bucket
   from l3;
 
@@ -154,18 +207,19 @@ select count(*) filter (where s is not null)                                    
        count(*) filter (where s is not null and fed_draft > 0)                    as "③喂了条文侧",
        count(*) filter (where emitted_impacts > 0)                                as "④模型吐了判读",
        count(*) filter (where impacts > 0)                                        as "⑤落库判读",
-       count(*) filter (where impacts > 0 and audience = 'public')                as "⑥公众广域(可渲染)",
-       count(*) filter (where impacts > 0 and audience = 'public' and still_open) as "⑦其中还没截止"
+       count(*) filter (where renderable_impacts > 0)                             as "⑥门放行(有有效审读记录)",
+       count(*) filter (where renderable_impacts > 0 and still_open)              as "⑦其中还没截止"
   from l3;
 
 \echo ''
-\echo '=== 2. 受众面 × 漏斗（这一张表就是「要不要扩到行业专业档」的全部分母）==='
+\echo '=== 2. 受众面 × 漏斗（**受众面已退出判读的渲染判据**；这张表现在只说明产出分布）==='
 select coalesce(audience, '(未判定)')                                 as "受众面",
        count(*)                                                       as "条目",
        count(*) filter (where s is not null)                          as "有摘要",
        count(*) filter (where fed_draft > 0)                          as "喂了条文",
        count(*) filter (where emitted_impacts > 0)                    as "吐了判读",
        count(*) filter (where impacts > 0)                            as "落库判读",
+       count(*) filter (where renderable_impacts > 0)                 as "其中门放行",
        count(*) filter (where impacts > 0 and still_open)             as "其中未截止",
        round(100.0 * count(*) filter (where impacts > 0)
              / nullif(count(*) filter (where s is not null), 0), 1)   as "判读率%"
@@ -181,7 +235,7 @@ select count(*) filter (where bucket = 'x.没有诊断(无法归因)')          
        count(*) filter (where bucket = 'a.一份都没喂(抓取侧)')             as "a.一份都没喂(抓取侧)",
        count(*) filter (where bucket = 'b.喂了模型没吐(提示词/能力)')      as "b.喂了模型没吐(提示词/能力)",
        count(*) filter (where bucket = 'c.吐了被反查全吃(校验器)')         as "c.吐了被反查全吃(校验器)",
-       count(*) filter (where bucket = 'd.落库了被受众面挡住(产品决定)')   as "d.落库了被受众面挡住(产品决定)",
+       count(*) filter (where bucket = 'e.有判读但门不放行(没有有效审读记录)') as "e.有判读但门不放行(缺审读记录)",
        count(*) filter (where bucket = 'ok.真的渲染得出来')                as "ok.真的渲染得出来"
   from l3b
  where s is not null;
@@ -201,7 +255,7 @@ select count(*) filter (where bucket = 'x.没有诊断(无法归因)')          
        count(*) filter (where bucket = 'a.一份都没喂(抓取侧)')             as "a.一份都没喂",
        count(*) filter (where bucket = 'b.喂了模型没吐(提示词/能力)')      as "b.喂了模型没吐",
        count(*) filter (where bucket = 'c.吐了被反查全吃(校验器)')         as "c.被反查全吃",
-       count(*) filter (where bucket = 'd.落库了被受众面挡住(产品决定)')   as "d.被受众面挡住",
+       count(*) filter (where bucket = 'e.有判读但门不放行(没有有效审读记录)') as "e.有判读但门不放行",
        count(*) filter (where bucket = 'ok.真的渲染得出来')                as "ok.渲染得出来"
   from l3b
  where s is not null and still_open;
@@ -218,20 +272,24 @@ select split_part(bucket, '.', 1) as "档", id, coalesce(audience, '(未判定)'
  order by 1, still_open desc, id;
 
 \echo ''
-\echo '=== 5. d 档点名：落库了判读、详情页却一个字都不渲染的（扩档的全部收益）==='
+\echo '=== 5. e 档点名：**有判读、门却不放行**（一条有效审读记录都没有）—— 回填要补的就是这些 ==='
+\echo '   #52 之后门只认审读记录，所以这一节就是"开门那一刻会空掉的条目"的全部名单。'
+\echo '   处置：scripts/review-impacts-now.mjs（只审读不重跑）补记录，或重跑该条目。'
 select id, coalesce(audience, '(未判定)') as "受众面", status as "库内状态",
-       deadline_at as "截止", impacts as "判读条数", left(title, 46) as "标题"
+       deadline_at as "截止", impacts as "判读条数", fed_draft as "喂入条文份数",
+       left(title, 46) as "标题"
   from l3
- where impacts > 0 and audience <> 'public'
- order by impacts desc, deadline_at nulls last;
+ where impacts > 0 and renderable_impacts = 0
+ order by still_open desc, impacts desc, deadline_at nulls last;
 
 \echo ''
 \echo '=== 6. 真渲染得出来的那些（读者今天能看见的全部判读）==='
-select id, audience as "受众面", status as "库内状态", deadline_at as "截止",
-       impacts as "判读条数", fed_draft as "喂入条文份数", left(title, 46) as "标题"
+select id, coalesce(audience, '(未判定)') as "受众面", status as "库内状态", deadline_at as "截止",
+       impacts as "判读条数", renderable_impacts as "门放行条数", rejected_impacts as "被剔除条数",
+       fed_draft as "喂入条文份数", left(title, 46) as "标题"
   from l3
- where impacts > 0 and audience = 'public'
- order by still_open desc, impacts desc, deadline_at nulls last;
+ where impacts > 0 and renderable_impacts > 0
+ order by still_open desc, renderable_impacts desc, deadline_at nulls last;
 
 \echo ''
 \echo '=== 7. 判读的条数分布与类型分布（只统计真落库的那些）==='
@@ -338,4 +396,27 @@ select count(*) filter (where kept_impacts <> impacts) as "两者不一致的条
  where has_diag and diag_v in ('2', '3');
 
 \echo ''
-\echo '（本脚本除会话级临时视图外不写任何东西：无 insert / update / delete / ddl。）'
+\echo '=== 12. 审读记录覆盖面（issue #51 的两个验收数：缺口 0、指纹匹配率 100%）==='
+\echo '   · 「缺口」= 有判读、但按门判没有任何一条有有效记录（第 5 节逐条点名）。'
+\echo '   · 「错挂」= 一条记录（两个指纹）匹配不上本条目任何一条判读 —— **必须为 0**：'
+\echo '     错挂的表现是"一份没人做过的结论挂在别的判读上"，而页面上看不出来。'
+select count(*) filter (where impacts > 0)                        as "有判读的条目",
+       count(*) filter (where impacts > 0 and renderable_impacts = 0) as "缺口条目(门不放行)",
+       count(*) filter (where impacts > 0 and rejected_impacts > 0)   as "有被剔除的条目",
+       sum(impacts)                                              as "判读总条数",
+       sum(renderable_impacts)                                    as "门放行条数",
+       sum(rejected_impacts)                                      as "被剔除条数",
+       sum(misattached_records)                                   as "错挂记录数(必须0)"
+  from l3;
+
+\echo ''
+\echo '   审读结论的分布（按条目数；「三条记录」的条目会同时计入多列，所以这一节不求和）'
+select count(*) filter (where renderable_impacts > 0)                 as "至少一条放行",
+       count(*) filter (where rejected_impacts > 0)                   as "至少一条剔除",
+       count(*) filter (where impacts > 0
+                          and exists (select 1 from jsonb_array_elements(coalesce(r, '[]'::jsonb)) rec
+                                       where rec ->> 'status' = 'revised')) as "至少一条已改"
+  from l3;
+
+\echo ''
+\echo '（本脚本除会话级临时视图与一个 pg_temp 函数外不写任何东西：无 insert / update / delete / 表级 ddl。）'

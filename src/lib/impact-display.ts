@@ -47,15 +47,19 @@ import { IMPACT_KIND_LABELS, type QuotedImpactPoint } from './summary-content.ts
  * **指纹匹配判定就放在这个函数里**（不是放在调用方）：于是"生成侧重跑 ⇒ 审读层自动失效"
  * 是纯函数可测的行为，不必为时序语义另立一层测试。
  *
- * ## 过渡语义只有一处，是刻意的（issue #47；第 6 条 #52 翻掉）
+ * ## fail-closed：没有有效记录就不渲染（issue #52 的目标形态）
  *
- * 本切片里审读层只影响"**渲染什么文本**"，**不影响"要不要渲染"**：
- * - 没有有效记录 / 指纹对不上 ⇒ **按今天的行为**（原文 + 原来的受众面门）；
- * - 受众面还没有退出判据 ⇒ 非公众广域一律不渲染。
+ * **受众面退出判读的渲染判据**（第 14 条）：门从此只认"有没有有效审读记录"。
+ * - 没有记录 / 指纹对不上（生成侧重跑过）⇒ **这条不渲染**；
+ * - 有记录 ⇒ 按结论投影（通过 ⇒ 原文；已改 ⇒ 审读后文本；剔除 ⇒ 不渲染）。
  *
- * 两处都标着 `#52`。这样本切片上线后线上可见判读的条目数与今天逐条一致，
- * 且第 5 条回填跑完审读时也**不会**提前把行业专业档放出来。
- * 第 6 条把这两处改成目标形态：删掉受众面那一行、"无记录 ⇒ 原文"翻成"无记录 ⇒ 不渲染"。
+ * 为什么是 fail-closed：判读是**推断**，说错的代价是误导，而"判不出来就不给它加码"
+ * 是本仓既有的纪律 —— 它原先落在受众面上，现在接手这件事的是**审读**。
+ *
+ * ⚠️ **部署顺序是硬约束**：本形态要求**存量先补完审读记录**（第 5 条 #51 的
+ * `reset-summaries-for-redraft.mjs` 重跑 + `review-impacts-now.mjs` 只审读补记录）。
+ * 少了那一步就部署，今天在线的公众广域判读会**集体消失** —— 它们一条记录都没有。
+ * 这正是 #51 必须早于 #52 的全部理由。
  *
  * ## 空则 null
  *
@@ -72,26 +76,19 @@ import { IMPACT_KIND_LABELS, type QuotedImpactPoint } from './summary-content.ts
  * （「影响谁」只在行业专业档渲染，见下面的 `shouldRenderWho`）。
  */
 export function impactsToRender(input: {
-  audience: NoticeAudience | null;
   impacts: QuotedImpactPoint[];
   /**
    * 审读记录（`notices.impact_review_json`，读侧已过 `parseImpactReviews`）。
-   * 缺省 / null = 这一条没有审读层的数据（存量行、人工录入、审读还没跑过）。
+   * 缺省 / null = 这一条没有审读层的数据（存量行、人工录入、审读还没跑过）⇒ **一条都不渲染**。
    */
   reviews?: readonly ImpactReviewRecord[] | null;
 }): QuotedImpactPoint[] | null {
-  // #52 删除这一行：受众面退出判读的渲染判据
-  if (input.audience !== 'public') return null;
-
   const reviews = input.reviews ?? [];
   const rendered: QuotedImpactPoint[] = [];
   for (const impact of input.impacts) {
     const review = findImpactReview(reviews, impact);
-    if (review === null) {
-      // #52 翻成 fail-closed：没有有效记录 ⇒ 这条不渲染
-      rendered.push(impact);
-      continue;
-    }
+    // fail-closed：没有有效记录 ⇒ 这条不渲染（受众面已不再是判据）
+    if (review === null) continue;
     if (review.status === 'rejected') continue;
     if (review.status === 'revised') {
       const revised = review.revisedText;

@@ -6,6 +6,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { after, before, describe, it } from 'node:test';
 import Database from 'better-sqlite3';
+import { impactReviewRecordsFrom, serializeImpactReviews } from '../../src/lib/impact-review.ts';
 import { startAppServer } from './helpers/app-server.mjs';
 import { createFixtureServer } from './helpers/fixture-server.mjs';
 import { noticeItems, stripSsrComments as stripComments } from './helpers/html.mjs';
@@ -293,7 +294,7 @@ describe('issue #76：详情页体裁角标', () => {
  * 门控用的是两条**真实 fixture**（不是造的）：交通运输部那条判「公众广域」（法律修正草案），
  * 工信部那条判「行业专业」（无线电频率划分规定）—— 后者是用户拍板的"先不上"那一档。
  */
-describe('issue #86：详情页「可能的争议点」与受众面门控', () => {
+describe('issue #86 / #52：详情页「可能的争议点」与渲染门（只看审读记录）', () => {
   const IMPACTS = [
     {
       quote: '收费公路在收费偿债或者收费经营期间的管理养护费用，在车辆通行费中列支。',
@@ -305,7 +306,15 @@ describe('issue #86：详情页「可能的争议点」与受众面门控', () =
     },
   ];
 
-  function injectImpacts(title, impacts) {
+  /**
+   * 注入判读，并**默认同时注入与它匹配的审读记录**。
+   *
+   * 为什么要一起注入（#52）：门是 fail-closed 的 —— 只有"有有效审读记录"的判读才渲染。
+   * 只注入摘要的话，这一组测的就变成"没有记录 ⇒ 什么都不渲染"，而不是页面上那几行字。
+   * 反过来，`withRecords: false` 正是"没有记录"那一档的夹具。
+   */
+  function injectImpacts(title, impacts, options = {}) {
+    const { withRecords = true } = options;
     const db = new Database(dbFile);
     try {
       const original = db
@@ -314,10 +323,24 @@ describe('issue #86：详情页「可能的争议点」与受众面门控', () =
       assert.ok(original, `前提：${title} 要有摘要，否则下面测的是"没有摘要"那条路`);
       const summary = JSON.parse(original);
       summary.impacts = impacts;
-      db.prepare('update notices set ai_summary_json = ? where title = ?').run(
-        JSON.stringify(summary),
-        title,
-      );
+      // 记录按**写侧**造出来：指纹口径只有一处，夹具不手抄
+      const records = withRecords
+        ? serializeImpactReviews(
+            impactReviewRecordsFrom({
+              impacts,
+              verdicts: impacts.map((impact) => ({
+                quote: impact.quote,
+                text: impact.text,
+                status: 'passed',
+              })),
+              model: 'e2e',
+              reviewedAt: '2026-10-04T00:00:00.000Z',
+            }),
+          )
+        : null;
+      db.prepare(
+        'update notices set ai_summary_json = ?, impact_review_json = ? where title = ?',
+      ).run(JSON.stringify(summary), records, title);
     } finally {
       db.close();
     }
@@ -396,13 +419,28 @@ describe('issue #86：详情页「可能的争议点」与受众面门控', () =
     );
   });
 
-  it('行业专业条目：库里同样有判读，页面上一个字都不出现（受众面门控）', async () => {
+  it('行业专业条目：**有审读记录就渲染**（#52：受众面已退出判据）；没有记录才一个字都不出现', async () => {
+    // 这一条是 flip 前后语义变化最大的地方：从前行业档一律不渲染（受众面门控），
+    // 现在门只认审读记录 —— 而那正是"带门扩"要的效果。
     injectImpacts(NEW_DRAFT_TITLE, IMPACTS);
-    const html = await detailOf(NEW_DRAFT_TITLE);
-    assert.match(html, /data-testid="ai-summary"/, '摘要卡片本身要在，排除"整页没渲染"这种假通过');
-    assert.ok(!html.includes('data-testid="summary-impacts"'), '这一档先不给读者看');
-    assert.ok(!html.includes('可能的争议点'), '连标题都不出现');
-    assert.ok(!html.includes('期限届满后若继续收费'), '推断的正文也不出现');
+    const rendered = await detailOf(NEW_DRAFT_TITLE);
+    assert.match(rendered, /data-testid="ai-summary"/, '摘要卡片本身要在');
+    assert.match(
+      rendered,
+      /data-testid="summary-impacts"/,
+      '行业专业 + 有效审读记录 ⇒ 渲染（受众面不再是判据）',
+    );
+    assert.ok(rendered.includes('可能的争议点'));
+
+    injectImpacts(NEW_DRAFT_TITLE, IMPACTS, { withRecords: false });
+    const blocked = await detailOf(NEW_DRAFT_TITLE);
+    assert.match(blocked, /data-testid="ai-summary"/, '排除"整页没渲染"这种假通过');
+    assert.ok(
+      !blocked.includes('data-testid="summary-impacts"'),
+      '没有审读记录 ⇒ 不渲染（fail-closed）',
+    );
+    assert.ok(!blocked.includes('可能的争议点'), '连标题都不出现');
+    assert.ok(!blocked.includes('期限届满后若继续收费'), '推断的正文也不出现');
   });
 
   it('一条判读都没有时整块不渲染（连标题都不出现）', async () => {

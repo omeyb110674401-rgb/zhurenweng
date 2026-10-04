@@ -100,10 +100,9 @@ for (const row of rows) {
    */
   const feed = diagnostics?.feed ?? null;
 
-  // 「可能的争议点」——渲染门与页面同一份判据（issue #47 起门是**选择器**：
-  // 审读记录决定每条渲染哪一份文本、有没有被剔除，无记录时按今天的行为走）
+  // 「可能的争议点」——渲染门与页面同一份判据（issue #47 起门是**选择器**，#52 起是严格版：
+  // 只有"有有效审读记录"的判读才渲染，受众面已退出判据）
   const impacts = impactsToRender({
-    audience: row.audience,
     impacts: parsed.impacts,
     reviews: parseImpactReviews(safeParseJson(row.reviewJson)),
   });
@@ -129,17 +128,19 @@ for (const row of rows) {
     }
   } else {
     /**
-     * 门返回 null 有三种原因，**处置完全不同**，所以分开说 —— 这一句是验收门要说清的东西：
-     * 受众面没放行（过渡期语义，第 6 条翻转后会消失）、审读一条都没放行、或压根没有判读。
-     * 写成一句含糊的"本页不渲染"，读的人会把"被剔除"读成"模型没想到影响"。
+     * 门返回 null 有三种原因，**处置完全不同**，所以分开说 —— 这一句是验收门要说清的东西。
+     * #52 起受众面已退出判据，所以第一档不再是"受众面没放行"，而是"这一条压根没有审读记录"：
+     * 那正是门翻转之后最常见、也最需要被看见的一档（要跑 `review-impacts-now.mjs` 补）。
      */
     const total = parsed.impacts.length;
+    const reviews = parseImpactReviews(safeParseJson(row.reviewJson));
     const reason =
-      row.audience !== 'public'
-        ? `受众面 ${row.audience ?? '未判定'}，只给公众广域（过渡期语义，第 6 条起不再是判据）`
-        : total === 0
-          ? '一条都没有'
-          : `审读没有放行任何一条（剔除 / 已改却没有文本）—— 生成侧仍存着 ${total} 条`;
+      total === 0
+        ? '一条都没有'
+        : reviews.length === 0
+          ? `这一条还没有任何审读记录（门翻转之后一律不渲染）—— 生成侧存着 ${total} 条`
+          : `审读没有放行任何一条（剔除 / 已改却没有文本 / 记录与本条判读的指纹对不上）` +
+            ` —— 生成侧仍存着 ${total} 条，库里有 ${reviews.length} 条记录`;
     console.log(`\n  ── 可能的争议点：本页不渲染（${reason}） ──`);
   }
 

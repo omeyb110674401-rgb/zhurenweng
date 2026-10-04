@@ -1,4 +1,3 @@
-import type { NoticeAudience } from './audience.ts';
 import { impactsToRender } from './impact-display.ts';
 import type { ImpactReviewRecord } from './impact-review.ts';
 import type { QuotedSummary } from './summary-content.ts';
@@ -23,20 +22,16 @@ import type { QuotedSummary } from './summary-content.ts';
  * ## 硬约束：必须与详情页同一道门（这一条不是建议，是这一刀的全部风险所在）
  *
  * 「有判读」的判据**只能**经由 `impactsToRender` 判定（issue #47 起它是**选择器**，
- * 此前那个谓词叫 `shouldRenderImpacts`），**不许**在这里重写"受众面 + 非空"或
- * "有没有有效审读记录"这些表达式。
- * 后果是具体的、不是理论的：生产库里有一批 `sector` 条目**存着判读但详情页一个字都不渲染**
- * （受众面门控，用户 2026-09-27 拍板"先只上公众广域"）。列表页若照库里的数组打标记，
- * 读者点进去会发现**什么都没有** —— 列表页在承诺详情页不存在的东西，那比没有标记坏得多。
- * 审读层（issue #47）把这条硬约束又往前推了一步：某条判读被审读**剔除**时，详情页不再渲染它，
- * 列表也就不许靠"库里还存着"来打标 —— 标记与详情页必须**逐格一致**。
+ * 此前那个谓词叫 `shouldRenderImpacts`），**不许**在这里重写"有没有有效审读记录"这个判据。
+ * 后果是具体的、不是理论的：门是 fail-closed 的（#52 起），**没有有效审读记录的判读详情页不渲染**；
+ * 列表页若照库里的数组打标记，读者点进去会发现**什么都没有** —— 列表页在承诺详情页不存在的东西，
+ * 那比没有标记坏得多。审读**逐条剔除**时同理：剔除的那条详情页不渲染，列表也就不许靠"库里还存着"打标。
  *
  * 同一句话的另外两面：
- * - **未判定（`null` / `unknown`）不打标**：`impactsToRender` 的过渡回落已经这么判，
- *   跟它走即可（"判不出来就不给它加码"）。
- * - **只能说"有"，不能说"无"**：行业专业档、还没生成摘要的、复核没过的，一律**不打任何标记**。
- *   写一个灰色的「暂无判读」会变成一句关于内容质量的评语，而且会把门控暴露成
- *   "这条被判成行业专业了" —— 那是内部口径，不是读者要的信息。
+ * - **受众面不再是判据**（#52 起）：它退出的是判读的渲染判据，接手的是审读记录。
+ *   `noticeMarks` 的入参里因此**没有** `audience` —— 留一个用不上的入参就是下一轮的"幽灵旋钮"。
+ * - **只能说"有"，不能说"无"**：还没生成摘要的、复核没过的、判读被剔除光的，一律**不打任何标记**。
+ *   写一个灰色的「暂无判读」会变成一句关于内容质量的评语，也会把内部口径（审读状态）暴露给读者。
  *
  * ## 为什么不做物化列
  *
@@ -61,7 +56,6 @@ export type NoticeMarkKind = 'impacts' | 'changes';
  * 不在这里再解析一遍，否则同一份 JSON 在一次渲染里会被解析两次。
  */
 export function noticeMarks(input: {
-  audience: NoticeAudience | null;
   summary: QuotedSummary | null;
   /**
    * 审读记录（`notices.impact_review_json`，读侧已过 `parseImpactReviews`）。
@@ -70,7 +64,7 @@ export function noticeMarks(input: {
    */
   reviews?: readonly ImpactReviewRecord[] | null;
 }): NoticeMarkKind[] {
-  const { audience, summary, reviews } = input;
+  const { summary, reviews } = input;
   // 没有摘要（或旧形状解析失败）⇒ 不打标。`toNoticeRecordWithoutContent`（邮件那条路径）
   // 给的就是 aiSummary: null，标记自然为"无" —— 那是对的。
   if (summary === null) return [];
@@ -78,8 +72,10 @@ export function noticeMarks(input: {
   const marks: NoticeMarkKind[] = [];
 
   // 判读：**调用**详情页那道门，不抄它的表达式（见文件头"硬约束"）。
+  // 受众面已经不是门的判据了（第 6 条 #52 起，门只认审读记录），所以入参里也没有它 ——
+  // 留一个用不上的入参就是下一个人的"幽灵旋钮"。
   const impacts = summary.impacts;
-  if (impactsToRender({ audience, impacts, reviews }) !== null) {
+  if (impactsToRender({ impacts, reviews }) !== null) {
     marks.push('impacts');
   }
 

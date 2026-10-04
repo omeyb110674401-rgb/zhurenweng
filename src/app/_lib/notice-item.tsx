@@ -35,12 +35,12 @@ export function NoticeItem({
    * `notice.aiSummary` 是 `unknown`（列是 TEXT / JSON），`parseQuotedSummary` 对旧形状与
    * 缺键一律宽容 —— 存量行不会因为这一刀变成"形状异常"。
    *
-   * `notice.impactReviews`（issue #47）一并喂进同一道门：审读把某条判读**剔除**之后，
-   * 详情页不再渲染它，列表也就不许靠"库里还存着"打标 —— 标记与详情页必须逐格一致。
+   * `notice.impactReviews`（issue #47/#52）一并喂进同一道门：门是 fail-closed 的
+   * （没有有效审读记录就不渲染），审读把某条判读**剔除**之后详情页也不再渲染它 ——
+   * 列表也就不许靠"库里还存着"打标，标记与详情页必须逐格一致。
    */
   const marks = showMarks
     ? noticeMarks({
-        audience: notice.audience,
         summary: parseQuotedSummary(notice.aiSummary),
         reviews: notice.impactReviews,
       })

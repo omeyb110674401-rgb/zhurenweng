@@ -6,6 +6,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { after, before, describe, it } from 'node:test';
 import Database from 'better-sqlite3';
+import { impactReviewRecordsFrom, serializeImpactReviews } from '../../src/lib/impact-review.ts';
 import { startAppServer } from './helpers/app-server.mjs';
 import { createFixtureServer } from './helpers/fixture-server.mjs';
 import { noticeItems, stripSsrComments as stripComments } from './helpers/html.mjs';
@@ -259,18 +260,31 @@ describe('issue #83：受众面分类与筛选', () => {
 });
 
 /**
- * issue #87（2026-10-03 用户拍板「标记只放首页」）：列表页的「这条里有什么」。
+ * issue #87（2026-10-03 用户拍板「标记只放首页」）+ issue #52：列表页的「这条里有什么」。
  *
  * 为什么这一组放在**受众面**这个文件里：这一刀的全部风险就是**门控同源**。
- * 生产库里有一批 `sector` 条目存着判读、而详情页一个字都不渲染；列表页若照库里的
- * 数组打标记，读者点进去会发现什么都没有。所以判据必须经由 `shouldRenderImpacts`
- * （单测把这条契约定死了），这里钉的是**它真的到了首页 HTML 上**。
+ * 列表页若照库里的数组打标记，读者点进去会发现什么都没有 —— 所以判据必须经由
+ * `impactsToRender`（单测把这条契约定死了），这里钉的是**它真的到了首页 HTML 上**。
  *
- * 判据本身钉不住在 e2e 里（撤 `src/lib/**` 撤不出红，e2e 跑的是构建产物）——
- * 这一组的价值在"接线"：组件真的把那行字画出来了。
+ * **#52 之后门控换了判据**：受众面退出判读的渲染判据，门是 fail-closed 的 ——
+ * "有有效审读记录"才渲染。于是本组也跟着换：判读那条标记的开关是**审读记录**，
+ * 而"改动对照"从来不看这两样（它是事实、不是推断）。
  */
-describe('issue #87：列表标记与受众面门控同源', () => {
-  it('公众广域 ⇒ 两个标记都在；行业专业 ⇒ 判读标记不许有、改动对照照样有（两个标记门控不同）', async () => {
+describe('issue #87 / #52：列表标记与渲染门同源（门只看审读记录）', () => {
+  /** 注入用的那一批判读（三处共用：摘要 JSON、审读记录、断言） */
+  const IMPACTS = [
+    {
+      quote: '收费公路在收费偿债或者收费经营期间的管理养护费用，在车辆通行费中列支。',
+      who: '高速公路通行车主',
+      point: '通行费用支出',
+      text: '期限届满后可能继续收费。',
+      kind: 'burden',
+      source: null,
+      sourceUrl: null,
+    },
+  ];
+
+  it('有审读记录 ⇒ 打标（**不分受众面**）；没有记录 ⇒ 不打标（fail-closed）', async () => {
     // 直接注入一份**已知**的摘要（不依赖 stub 产出什么），这样断言才是确定的。
     // 注意 `what` / `deadline` / `howToComment` 这三段是 `parseQuotedSummary` 的**必需段**
     // （`summary-content.ts` 里 `if (!what || !deadline || !howToComment) return null`）——
@@ -279,17 +293,7 @@ describe('issue #87：列表标记与受众面门控同源', () => {
       what: { text: '关于某规定的征求意见稿。', quote: null },
       deadline: { text: '2026-10-24', quote: null },
       howToComment: { text: '可通过电子邮件提交意见。', quote: null },
-      impacts: [
-        {
-          quote: '收费公路在收费偿债或者收费经营期间的管理养护费用，在车辆通行费中列支。',
-          who: '高速公路通行车主',
-          point: '通行费用支出',
-          text: '期限届满后可能继续收费。',
-          kind: 'burden',
-          source: null,
-          sourceUrl: null,
-        },
-      ],
+      impacts: IMPACTS,
       // 一条**完整**的改动行：`quote` 与 `text` 缺一即被读侧丢掉（与判读同一条不变量），
       // 所以夹具必须给全，否则"改动对照打标"那条断言会红在一个与判据无关的地方。
       changes: [
@@ -304,14 +308,34 @@ describe('issue #87：列表标记与受众面门控同源', () => {
       ],
       changeTable: { entries: [], headers: 0 },
     });
+    // 审读记录按**写侧**造出来（指纹口径只有一处，夹具不手抄）
+    const records = serializeImpactReviews(
+      impactReviewRecordsFrom({
+        impacts: IMPACTS.map((impact) => ({ ...impact, source: null, sourceUrl: null })),
+        verdicts: IMPACTS.map((impact) => ({
+          quote: impact.quote,
+          text: impact.text,
+          status: 'passed',
+        })),
+        model: 'e2e',
+        reviewedAt: '2026-10-04T00:00:00.000Z',
+      }),
+    );
+    assert.ok(records, '前提：这一批判读造得出记录');
+
     const db = new Database(dbFile);
-    db.prepare('update notices set ai_summary_json = ? where title = ?').run(injected, PUBLIC_TITLES[0]);
-    db.prepare('update notices set ai_summary_json = ? where title = ?').run(injected, SECTOR_TITLES[0]);
+    // 公众广域那条：摘要 + 审读记录；行业专业那条：摘要 + **没有**记录
+    db.prepare(
+      'update notices set ai_summary_json = ?, impact_review_json = ? where title = ?',
+    ).run(injected, records, PUBLIC_TITLES[0]);
+    db.prepare(
+      'update notices set ai_summary_json = ?, impact_review_json = null where title = ?',
+    ).run(injected, SECTOR_TITLES[0]);
     db.close();
 
     const html = await fetchHome('');
-    const blockOf = (title) => {
-      const block = noticeItems(html).find((item) => itemTitle(item) === title);
+    const blockOf = (title, source = html) => {
+      const block = noticeItems(source).find((item) => itemTitle(item) === title);
       assert.ok(block, `首页应含条目「${title}」`);
       return block;
     };
@@ -320,7 +344,7 @@ describe('issue #87：列表标记与受众面门控同源', () => {
     assert.match(
       publicBlock,
       /data-testid="notice-mark"[^>]*data-mark="impacts"[^>]*>含本站推断（非官方）</,
-      '公众广域 + 有判读 ⇒ 列表要标出「含本站推断（非官方）」',
+      '有有效审读记录 ⇒ 列表要标出「含本站推断（非官方）」',
     );
     assert.match(
       publicBlock,
@@ -332,21 +356,35 @@ describe('issue #87：列表标记与受众面门控同源', () => {
     const sectorBlock = blockOf(SECTOR_TITLES[0]);
     /*
      * 两个标记的**门控不一样**，这一条断言把这件事钉死：
-     * - 「含本站推断」跟着 `shouldRenderImpacts` 走 ⇒ 行业专业档**不许**打
-     *   （详情页那一段对 sector 不渲染，列表打了就是在承诺不存在的东西）；
-     * - 「含改动对照」**不受受众面门控**（详情页「改了哪几处」对任何受众面都渲染，
+     * - 「含本站推断」跟着门走（#52 起 = 有没有有效审读记录）⇒ 这一条**没有记录**，所以不许打
+     *   （详情页那一段就不会渲染，列表打了就是在承诺不存在的东西）；
+     * - 「含改动对照」**既不受受众面门控、也不受审读门控**（详情页「改了哪几处」对任何条目都渲染，
      *   它是事实、不是推断）⇒ 这里**应当**有。
      * 第一版我断言的是"整个 sector 块一个标记都没有" —— 那是错的，而且错得很有价值：
      * 它说明"两个标记同门控"是个很容易想当然的假设。
      */
     assert.ok(
       !/data-mark="impacts"/.test(sectorBlock),
-      '行业专业条目详情页不渲染判读 —— 列表就不许打「含本站推断」（那是在承诺详情页不存在的东西）',
+      '这一条没有审读记录 ⇒ 详情页不渲染判读 ⇒ 列表不许打「含本站推断」',
     );
     assert.match(
       sectorBlock,
       /data-mark="changes"/,
-      '改动对照不受受众面门控：详情页那一段对任何受众面都渲染',
+      '改动对照既不看受众面、也不看审读：详情页那一段对任何条目都渲染',
+    );
+
+    /*
+     * 再把记录补给行业专业那条：**受众面已退出判据**（#52），所以标记应当出现 ——
+     * 这一半是"门只认记录"最直接的证据，也是"列表与详情页逐格一致"在 flip 后的新形状。
+     */
+    const db2 = new Database(dbFile);
+    db2.prepare('update notices set impact_review_json = ? where title = ?').run(records, SECTOR_TITLES[0]);
+    db2.close();
+    const after = await fetchHome('');
+    assert.match(
+      blockOf(SECTOR_TITLES[0], after),
+      /data-mark="impacts"/,
+      '行业专业 + 有效审读记录 ⇒ 照样打标（受众面不再是判据）',
     );
   });
 });

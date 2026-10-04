@@ -314,44 +314,32 @@ describe('issue #47：「可能的争议点」渲染门（选择器）', () => {
     });
   }
 
-  it('没有记录 ⇒ 行为与今天完全一致：公众广域渲染原文（过渡回落）', () => {
-    const rendered = impactsToRender({ audience: 'public', impacts: [IMPACT] });
-    assert.deepEqual(rendered, [IMPACT], '一条一字不改的原文，与今天逐条一致');
-    assert.deepEqual(
-      impactsToRender({ audience: 'public', impacts: [IMPACT], reviews: null }),
-      [IMPACT],
-    );
-    assert.deepEqual(
-      impactsToRender({ audience: 'public', impacts: [IMPACT], reviews: [] }),
-      [IMPACT],
-    );
-  });
-
-  it('过渡回落：行业专业 / 未判定 / null ⇒ null（受众面还没退出判据，第 6 条才翻）', () => {
-    for (const audience of ['sector', 'unknown', null]) {
+  it('**没有记录 ⇒ 一条都不渲染**（fail-closed：判不出来就不给它加码）', () => {
+    for (const reviews of [undefined, null, []]) {
       assert.equal(
-        impactsToRender({ audience, impacts: [IMPACT], reviews: recordsFor('passed') }),
+        impactsToRender({ impacts: [IMPACT], reviews }),
         null,
-        `受众面 ${audience}：这一条判读有**有效审读记录**，但受众面还没有退出判据（第 6 条才翻）`,
+        '没有有效审读记录 ⇒ 这一条不渲染（#52 的目标形态：门只认记录）',
       );
     }
   });
 
+  it('受众面**不再是判据**：行业专业 / 未判定 + 有效记录 ⇒ 照样渲染', () => {
+    // #52 之前这三个受众面一律不渲染（那时候门里还有受众面）。现在门只认审读记录，
+    // 而"内容可不可以见读者"这件事由审读接手 —— 受众面继续管与风险无关的事（「影响谁」）。
+    for (const status of ['passed', 'revised']) {
+      const rendered = impactsToRender({ impacts: [IMPACT], reviews: recordsFor(status) });
+      assert.notEqual(rendered, null, `有有效记录（${status}）就该渲染，与受众面无关`);
+    }
+  });
+
   it('有有效记录：通过 ⇒ 渲染原文', () => {
-    const rendered = impactsToRender({
-      audience: 'public',
-      impacts: [IMPACT],
-      reviews: recordsFor('passed'),
-    });
+    const rendered = impactsToRender({ impacts: [IMPACT], reviews: recordsFor('passed') });
     assert.deepEqual(rendered, [IMPACT]);
   });
 
   it('有有效记录：已改 ⇒ 渲染审读后文本，原文不出现', () => {
-    const rendered = impactsToRender({
-      audience: 'public',
-      impacts: [IMPACT],
-      reviews: recordsFor('revised'),
-    });
+    const rendered = impactsToRender({ impacts: [IMPACT], reviews: recordsFor('revised') });
     assert.equal(rendered.length, 1);
     assert.equal(rendered[0].text, REVISED_TEXT);
     assert.ok(!JSON.stringify(rendered).includes(IMPACT.text), '原文一个字都不该留在渲染结果里');
@@ -359,48 +347,53 @@ describe('issue #47：「可能的争议点」渲染门（选择器）', () => {
 
   it('有有效记录：剔除 ⇒ 该条不出现，同一段其余照常', () => {
     const rendered = impactsToRender({
-      audience: 'public',
       impacts: [IMPACT, OTHER],
-      reviews: recordsFor('rejected'),
+      reviews: [...recordsFor('rejected'), ...recordsFor('passed', OTHER)],
     });
     assert.deepEqual(rendered, [OTHER], '逐条剔除 —— 同一段里其余照常，不是整块消失');
   });
 
   it('全部剔除 ⇒ null（整段不渲染，连标题都不出现）', () => {
     const reviews = [...recordsFor('rejected', IMPACT), ...recordsFor('rejected', OTHER)];
-    assert.equal(impactsToRender({ audience: 'public', impacts: [IMPACT, OTHER], reviews }), null);
-    assert.equal(impactsToRender({ audience: 'public', impacts: [IMPACT], reviews: recordsFor('rejected') }), null);
+    assert.equal(impactsToRender({ impacts: [IMPACT, OTHER], reviews }), null);
+    assert.equal(impactsToRender({ impacts: [IMPACT], reviews: recordsFor('rejected') }), null);
   });
 
-  it('指纹对不上（生成侧重跑）⇒ 视为没有记录 ⇒ 按今天的行为渲染原文', () => {
-    // 上一轮的记录：审的是**改动前**的推断正文
-    const stale = recordsFor('rejected');
+  it('指纹对不上（生成侧重跑）⇒ 视为没有记录 ⇒ **不渲染**（不沿用旧结论、也不退回原文）', () => {
+    // 上一轮的记录：审的是**改动前**的推断正文，而且它是一条「通过」——
+    // 所以只要配对放宽一点（例如只看引用不看正文），它就会把**旧结论**照旧用上：
+    // 那条记录会渲染出改动前的原文，而读者以为自己看到的是新文本的合规结论。
+    const stale = recordsFor('passed');
     const rerun = { ...IMPACT, text: '重跑之后模型换了一种说法。' };
-    const rendered = impactsToRender({ audience: 'public', impacts: [rerun], reviews: stale });
-    assert.deepEqual(rendered, [rerun], '没被审读过的文本不许配着别人的结论，也不该因此消失');
+    assert.equal(
+      impactsToRender({ impacts: [rerun], reviews: stale }),
+      null,
+      '没被审读过的文本不许配着别人的结论，也不许因为没记录而被放行',
+    );
   });
 
   it('指纹全等（内容一字未变）⇒ 旧记录幂等有效（同一份内容、同一份结论）', () => {
     const records = recordsFor('revised');
     const rerun = { ...IMPACT, quote: `${IMPACT.quote}\n` };
-    const rendered = impactsToRender({ audience: 'public', impacts: [rerun], reviews: records });
+    const rendered = impactsToRender({ impacts: [rerun], reviews: records });
     assert.equal(rendered[0].text, REVISED_TEXT, '内容没变 ⇒ 结论照旧成立');
   });
 
   it('一条判读都没有 ⇒ null（空壳比没有更坏，连标题都不出现）', () => {
-    assert.equal(impactsToRender({ audience: 'public', impacts: [] }), null);
+    assert.equal(impactsToRender({ impacts: [] }), null);
   });
 
   it('审读只动 text：who / point / kind / quote / 出处原样带出去', () => {
-    const rendered = impactsToRender({
-      audience: 'public',
-      impacts: [IMPACT],
-      reviews: recordsFor('revised'),
-    });
+    const rendered = impactsToRender({ impacts: [IMPACT], reviews: recordsFor('revised') });
     const { text, ...rest } = rendered[0];
     const { text: originalText, ...expected } = IMPACT;
     assert.deepEqual(rest, expected);
     assert.equal(text, REVISED_TEXT);
+  });
+
+  it('一条有记录、一条没有 ⇒ 只渲染有记录的那条（缺的那条不把整段拖掉）', () => {
+    const rendered = impactsToRender({ impacts: [IMPACT, OTHER], reviews: recordsFor('passed') });
+    assert.deepEqual(rendered, [IMPACT], '缺记录的逐条不渲染 —— 与"整段不渲染"是两回事');
   });
 });
 

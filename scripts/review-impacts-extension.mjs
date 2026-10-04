@@ -99,7 +99,6 @@ for (const row of picked) {
   const audience = row.audience ?? 'unknown';
   const gate =
     impactsToRender({
-      audience: row.audience,
       impacts,
       reviews: parseImpactReviews(safeParseJson(row.reviewJson)),
     }) !== null;
