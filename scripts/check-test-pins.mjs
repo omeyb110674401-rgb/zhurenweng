@@ -124,6 +124,9 @@ const TARGETS = {
   impactReviewAdapter: 'src/lib/adapters/impact-review-llm.ts',
   // 端口工厂与独立性核对住在 ports.ts 里（审读侧与生成侧各一套 env 族的判据）
   impactReviewPort: 'src/lib/ports.ts',
+  // issue #51：只审读不重跑那条通道（存量里"摘要已经完整、不该重跑"的条目也要有审读记录，
+  // 否则门翻转之后它们会集体不渲染 —— 公众广域那几条正在线上的判读就是这么走的）
+  reviewImpactsNow: 'scripts/review-impacts-now.mjs',
   // issue #86 第 3 刀：喂入侧的档位与预算。这一处撤掉之后**一个字都不会报错** ——
   // 档位判错就是"还是老样子"（回到标准档，页面照常出摘要），喂少了只是模型看到的东西变少，
   // 而那正是这一刀要消灭的静默失败，所以它必须有"撤掉实现必须变红"的钉子。
@@ -1880,6 +1883,46 @@ const CASES = [
     to: '        neighborhood: null,',
     pattern: '真实审读端点',
     test: 'tests/e2e/summarize-now.test.mjs',
+  },
+  // ── issue #51：只审读不重跑（存量补审读记录）──────────────────────────────────
+  {
+    // 覆盖判据必须与渲染门**同一份**（`findImpactReview` 的两个指纹全等）。撤成"随便拿一条记录"
+    // 之后，量具会说"覆盖了"，而门照样不渲染 —— 正是本仓反复栽的"量具与页面各说各话"。
+    label: '审读覆盖不按指纹配对（量具说覆盖了、门却不渲染）',
+    file: 'impactReview',
+    from: '    const record = findImpactReview(records, impact);',
+    to: '    const record = records[0] ?? null;',
+    pattern: '审读覆盖',
+    test: 'tests/unit/impact-review.test.mjs',
+  },
+  {
+    // 这一列的写入口只写一列：撤成"连模型名一起清掉"之后，摘要那几列会被这条通道悄悄改掉，
+    // 而它本来承诺"只审读、不重跑"。
+    label: '补审读记录时顺手改了摘要那几列（"只审读不重跑"的承诺失效）',
+    file: 'summariesRepo',
+    from: '.set({ impactReviewJson })',
+    to: '.set({ impactReviewJson, summaryModel: null })',
+    pattern: '只写审读那一列',
+    test: 'tests/e2e/review-impacts-now.test.mjs',
+  },
+  {
+    // 只读模式是这条生产写入通道的第一道闸：撤掉它，一次手滑就把整库写一遍。
+    label: '审读回填不再有只读模式（一次手滑就写库）',
+    file: 'reviewImpactsNow',
+    from: 'if (!apply) {',
+    to: 'if (false) {',
+    pattern: '只读：逐条列出覆盖与缺口',
+    test: 'tests/e2e/review-impacts-now.test.mjs',
+  },
+  {
+    // 没跑到 ok 就不许写：写了空记录会让下一轮以为"这条已经跑过"，
+    // 而缺口会因此在库里静默地留在原地（回填的验收正是"缺口为 0"）。
+    label: '审读没跑成也照写（缺口静默留着，回填看似成功）',
+    file: 'reviewImpactsNow',
+    from: "  if (review.diagnostics.status !== 'ok') {",
+    to: '  if (false) {',
+    pattern: '审读端口没配',
+    test: 'tests/e2e/review-impacts-now.test.mjs',
   },
   // 2026-09-30：引号字形归一（生产实测：附件原文是中文引号、模型某几遍吐 ASCII 直引号，
   // 词句逐字一致却整行被判"对不上" —— 那一遍 9 行全丢，页面上「改了哪几处」只剩事实行）。

@@ -4,6 +4,7 @@ import {
   IMPACT_REVIEW_STATUSES,
   IMPACT_REVIEW_STATUS_LABELS,
   findImpactReview,
+  impactReviewCoverage,
   impactReviewRecordsFrom,
   parseImpactReviews,
   serializeImpactReviews,
@@ -193,6 +194,58 @@ describe('issue #47：审读记录只接受"逐字回显同一对 (quote, text)"
     const records = recordsFor([{ ...spaced, status: 'passed' }]);
     assert.equal(records.length, 1);
     assert.equal(records[0].quoteFingerprint, quoteFingerprint(IMPACT.quote));
+  });
+});
+
+describe('issue #51：审读覆盖（回填的验收判据：缺口为 0）', () => {
+  const THIRD = {
+    quote: '收费公路的收费期限，由省、自治区、直辖市人民政府规定。',
+    who: '高速公路通行车主',
+    point: '',
+    text: '期限的确定权在省级政府。',
+    kind: 'risk',
+    source: 'aaa.docx',
+    sourceUrl: null,
+  };
+
+  it('覆盖判据与渲染门同一份：两个指纹全等才算覆盖', () => {
+    const records = recordsFor([{ ...IMPACT, status: 'passed' }], [IMPACT]);
+    const coverage = impactReviewCoverage([IMPACT, THIRD], records);
+    assert.equal(coverage.total, 2);
+    assert.equal(coverage.covered, 1);
+    assert.equal(coverage.missing.length, 1, '没有记录的那条要进缺口');
+    assert.equal(coverage.missing[0].quote, THIRD.quote, '缺口给的是它本身，不是一个数');
+    assert.deepEqual(coverage.statuses, { passed: 1, revised: 0, rejected: 0 });
+  });
+
+  it('**生成侧重跑改了 text** ⇒ 旧记录不再覆盖它（缺口重新出现）', () => {
+    const records = recordsFor([{ ...IMPACT, status: 'passed' }], [IMPACT]);
+    const rerun = { ...IMPACT, text: '重跑之后换了一种说法。' };
+    const coverage = impactReviewCoverage([rerun], records);
+    assert.equal(coverage.covered, 0, '内容变了 ⇒ 那份旧结论不再算覆盖');
+    assert.equal(coverage.missing.length, 1);
+  });
+
+  it('三种结论各自进分布（通过 / 已改 / 剔除）', () => {
+    const records = [
+      ...recordsFor([{ ...IMPACT, status: 'passed' }], [IMPACT]),
+      ...recordsFor([{ ...SECOND, status: 'revised', revisedText: '改过的正文' }], [SECOND]),
+      ...recordsFor([{ ...THIRD, status: 'rejected' }], [THIRD]),
+    ];
+    const coverage = impactReviewCoverage([IMPACT, SECOND, THIRD], records);
+    assert.equal(coverage.covered, 3);
+    assert.equal(coverage.missing.length, 0);
+    assert.deepEqual(coverage.statuses, { passed: 1, revised: 1, rejected: 1 });
+  });
+
+  it('一条判读都没有 ⇒ 分布全 0、缺口为空（那是"不适用"，不是"缺口"）', () => {
+    const coverage = impactReviewCoverage([], []);
+    assert.deepEqual(coverage, {
+      total: 0,
+      covered: 0,
+      missing: [],
+      statuses: { passed: 0, revised: 0, rejected: 0 },
+    });
   });
 });
 

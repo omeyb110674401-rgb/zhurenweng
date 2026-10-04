@@ -333,8 +333,14 @@ export interface SummarizeOneNoticeDeps {
  *
  * 没有判读就没有可审的东西：调一次等于白花一次出境调用，而"审读跑了但没东西可判"与
  * "根本没跑"在库里应当长得一样（都是没有记录）。
+ *
+ * ## 导出给谁
+ *
+ * `scripts/review-impacts-now.mjs`（issue #51 的**只审读不重跑**那条通道）直接 import 本函数：
+ * 存量里已经有好摘要、不该重跑的条目（例如公众广域那几条）也要有审读记录，否则门翻转之后
+ * 它们会集体不渲染。**一份实现两处调用** —— 各写一份的表现是其中一处悄悄漏了邻域或独立性核对。
  */
-async function reviewImpactsForSummary(input: {
+export async function reviewImpactsForSummary(input: {
   target: PendingSummaryTarget;
   impacts: readonly QuotedImpactPoint[];
   /** 本轮喂进提示词的那几份正文：审读要按引用回它们里取邻域（只有 worker 手上有正文） */

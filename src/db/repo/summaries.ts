@@ -189,6 +189,25 @@ export async function clearSummaryForRedraft(
   return before;
 }
 
+/**
+ * 只写审读那一列（issue #51 的"只审读不重跑"通道用）。
+ *
+ * 为什么不复用 `saveNoticeSummary`：那个函数写的是**整份摘要**（摘要 JSON / 模型名 / 诊断 /
+ * 状态），而这条通道恰恰要**一个字节都不动摘要** —— 存量的摘要已经能看、只是没有审读记录，
+ * 重写摘要等于白花一次生成调用，而且会把 `summary_diagnostics_json` 里"这一份摘要是哪一次
+ * 调用产出的"那件事冲掉。所以这里只碰一列。
+ *
+ * `impactReviewJson` 为 null = 把这一条目的审读记录清空（`serializeImpactReviews` 的约定：
+ * 一条记录都没有就写 NULL，见 `src/lib/impact-review.ts`）。
+ */
+export async function saveImpactReviewJson(
+  id: string,
+  impactReviewJson: string | null,
+): Promise<void> {
+  const db = await getDb();
+  await db.update(notices).set({ impactReviewJson }).where(eq(notices.id, id));
+}
+
 /** 详情页 / 复核队列所需的摘要列信息；条目不存在返回 null。 */
 export interface NoticeSummaryInfo {
   summaryStatus: SummaryStatus;

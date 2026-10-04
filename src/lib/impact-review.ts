@@ -374,3 +374,43 @@ export function findImpactReview(
   }
   return null;
 }
+
+/**
+ * 一批判读被审读覆盖到什么程度（issue #51 的回填要靠它核"缺口为 0"）。
+ *
+ * **判据与渲染门共用同一个 `findImpactReview`**：覆盖与否就是"门认不认这份记录"。
+ * 两处各判一份的表现是 —— 量具说覆盖了、门却把它当无记录，而那正是本仓反复栽的
+ * "量具与页面各说各话"。
+ *
+ * `missing` 给的是**缺口本身**（引用 + 推断正文），不是一个数：回填要点名跑哪几条、
+ * 事后核对也要能逐条对上。
+ */
+export interface ImpactReviewCoverage {
+  /** 这一批判读共几条 */
+  total: number;
+  /** 有有效记录的条数 */
+  covered: number;
+  /** 没有有效记录的那些（逐条给出引用与推断正文） */
+  missing: { quote: string; text: string }[];
+  /** 有效记录按结论分布（通过 / 已改 / 剔除） */
+  statuses: Record<ImpactReviewStatus, number>;
+}
+
+export function impactReviewCoverage(
+  impacts: readonly QuotedImpactPoint[],
+  records: readonly ImpactReviewRecord[],
+): ImpactReviewCoverage {
+  const statuses: Record<ImpactReviewStatus, number> = { passed: 0, revised: 0, rejected: 0 };
+  const missing: { quote: string; text: string }[] = [];
+  let covered = 0;
+  for (const impact of impacts) {
+    const record = findImpactReview(records, impact);
+    if (record === null) {
+      missing.push({ quote: impact.quote, text: impact.text });
+      continue;
+    }
+    covered += 1;
+    statuses[record.status] += 1;
+  }
+  return { total: impacts.length, covered, missing, statuses };
+}
