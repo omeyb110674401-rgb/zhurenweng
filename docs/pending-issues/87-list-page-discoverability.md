@@ -530,3 +530,7 @@ cat deploy/audit-l3-reach.sql | docker compose exec -T db psql -U zhurenweng -d 
 
 **不建议先做重跑**：它单独做一点读者收益都没有（19 条全部落在被挡住的那一档）。
 
+**2026-10-04 用户拍板：带门扩**（独立模型做合规性二次复核、有问题先改、改完才渲染发布）——
+本节上面那些建议与最终决定的关系、以及新能力的全部硬约束与待拷问问题（A–G），
+见 **`91-l3-compliance-review-gate.md`**。
+
