@@ -223,6 +223,9 @@ const lines = before.map((row) =>
     // 诊断也一起备份（issue #86）：清空会把那一列一起抹掉，而"上一次调用到底怎么了"
     // 恰恰是重跑之后最想回头对比的东西（重跑前后的 emitted/kept/丢弃数就在这两份里）
     previousDiagnosticsJson: row.previousDiagnosticsJson,
+    // 审读记录也一起备份（issue #47）：它同样是"清空即抹掉"的一列，而且是**可抛弃**的 ——
+    // 重跑会产出新的审读结论，旧的只在"想知道上一轮判了什么"时有用，而那正是备份的用处
+    previousImpactReviewJson: row.previousImpactReviewJson,
     backedUpAt: new Date().toISOString(),
   }),
 );
@@ -268,6 +271,8 @@ async function peekSummaries(ids) {
       previousSummaryJson: notices.aiSummaryJson,
       previousModel: notices.summaryModel,
       previousDiagnosticsJson: notices.summaryDiagnosticsJson,
+      // 同上（issue #47）：审读记录也由 `clearSummaryForRedraft` 一起清掉
+      previousImpactReviewJson: notices.impactReviewJson,
     })
     .from(notices)
     .where(inArray(notices.id, ids));

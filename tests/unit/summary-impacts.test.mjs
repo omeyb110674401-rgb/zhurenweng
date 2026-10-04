@@ -1,4 +1,7 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { describe, it } from 'node:test';
 import { SYSTEM_PROMPT, normalizeModelSummary } from '../../src/lib/adapters/openai-compatible-llm.ts';
 import {
@@ -9,7 +12,8 @@ import {
   parseQuotedSummary,
   quoteSegments,
 } from '../../src/lib/summary-content.ts';
-import { shouldRenderImpacts } from '../../src/lib/impact-display.ts';
+import { impactsToRender } from '../../src/lib/impact-display.ts';
+import { impactReviewRecordsFrom } from '../../src/lib/impact-review.ts';
 
 /**
  * 单元：影响判读（issue #86 第 1 刀）与**容忍省略号的逐字反查**。
@@ -261,34 +265,174 @@ describe('issue #86：落库形状与旧行兼容', () => {
 });
 
 /**
- * 判据抽在 `lib/impact-display.ts` 而不是写在 `.tsx` 里，为的就是这一组能跑起来 ——
- * 页面组件进不了本仓库的单测，而**钉不住的判据等于没有判据**（自证框架撤 `.tsx` 撤不出红）。
+ * issue #47：判读的渲染门 —— **选择器**（读者到底看到哪几条、看到的是哪一句）。
+ *
+ * 这一组是本功能**唯一的测试缝**（`docs/prd/v2.md`「Testing Decisions」）：审读的判定与存储
+ * 都在它上游，而它们的全部读者可见后果最终必须表现为**这个函数的输出**。所以这里断言的
+ * 全是外部行为 —— "读者会不会看到这一段、看到的是哪一句"，不是"函数被调了几次"。
+ *
+ * 判据仍然抽在 `lib/impact-display.ts`（页面 `.tsx` 进不了单测，撤 `.tsx` 撤不出红）。
+ * 审读记录的**形状与接受条件**在 `tests/unit/impact-review.test.mjs`；两组分开的理由：
+ * 那边判的是"模型说了什么我们才认"，这边判的是"认下来之后读者看到什么"。
  */
-describe('issue #86：「可能的争议点」给谁看', () => {
-  const point = {
+describe('issue #47：「可能的争议点」渲染门（选择器）', () => {
+  const IMPACT = {
     quote: '收费公路在收费偿债期间的管理养护费用，在车辆通行费中列支。',
-    who: '',
-    text: '推断',
-    kind: 'risk',
-    source: 'aaa.docx',
+    who: '高速公路通行车主',
+    point: '通行费用支出',
+    text: '期限届满后可能继续收费，通行者的支出预期被改变。',
+    kind: 'burden',
+    source: '中华人民共和国公路法（修正草案征求意见稿）.docx',
     sourceUrl: null,
   };
+  const OTHER = {
+    quote: '收费公路的收费期限，由省、自治区、直辖市人民政府规定。',
+    who: '高速公路通行车主',
+    point: '收费期限',
+    text: '期限的确定权在省级政府，通行者难以预期何时停止收费。',
+    kind: 'risk',
+    source: '中华人民共和国公路法（修正草案征求意见稿）.docx',
+    sourceUrl: null,
+  };
+  // 审读后文本刻意**不含**原推断正文的任何一截：下面那条断言要能证明"原文一个字都不出现"
+  const REVISED_TEXT = '审读后：收费期限的延续缺乏明确表述，车主难以预期何时停止付费。';
 
-  it('公众广域 + 有判读 ⇒ 渲染', () => {
-    assert.equal(shouldRenderImpacts({ audience: 'public', impacts: [point] }), true);
+  /** 一条审读记录：走**写侧**造出来（指纹的口径只有一处，测试里不手抄）。 */
+  function recordsFor(status, impact = IMPACT) {
+    return impactReviewRecordsFrom({
+      impacts: [impact],
+      verdicts: [
+        {
+          quote: impact.quote,
+          text: impact.text,
+          status,
+          revisedText: status === 'revised' ? REVISED_TEXT : null,
+        },
+      ],
+      model: 'stub',
+      reviewedAt: '2026-10-04T12:00:00.000Z',
+    });
+  }
+
+  it('没有记录 ⇒ 行为与今天完全一致：公众广域渲染原文（过渡回落）', () => {
+    const rendered = impactsToRender({ audience: 'public', impacts: [IMPACT] });
+    assert.deepEqual(rendered, [IMPACT], '一条一字不改的原文，与今天逐条一致');
+    assert.deepEqual(
+      impactsToRender({ audience: 'public', impacts: [IMPACT], reviews: null }),
+      [IMPACT],
+    );
+    assert.deepEqual(
+      impactsToRender({ audience: 'public', impacts: [IMPACT], reviews: [] }),
+      [IMPACT],
+    );
   });
 
-  it('行业专业条目不渲染（用户拍板先只上公众广域）', () => {
-    assert.equal(shouldRenderImpacts({ audience: 'sector', impacts: [point] }), false);
+  it('过渡回落：行业专业 / 未判定 / null ⇒ null（受众面还没退出判据，第 6 条才翻）', () => {
+    for (const audience of ['sector', 'unknown', null]) {
+      assert.equal(
+        impactsToRender({ audience, impacts: [IMPACT], reviews: recordsFor('passed') }),
+        null,
+        `受众面 ${audience}：这一条判读有**有效审读记录**，但受众面还没有退出判据（第 6 条才翻）`,
+      );
+    }
   });
 
-  it('未判定也不渲染（判不出来就不给它加码）', () => {
-    assert.equal(shouldRenderImpacts({ audience: 'unknown', impacts: [point] }), false);
-    assert.equal(shouldRenderImpacts({ audience: null, impacts: [point] }), false);
+  it('有有效记录：通过 ⇒ 渲染原文', () => {
+    const rendered = impactsToRender({
+      audience: 'public',
+      impacts: [IMPACT],
+      reviews: recordsFor('passed'),
+    });
+    assert.deepEqual(rendered, [IMPACT]);
   });
 
-  it('一条判读都没有时不渲染（空壳比没有更坏）', () => {
-    assert.equal(shouldRenderImpacts({ audience: 'public', impacts: [] }), false);
+  it('有有效记录：已改 ⇒ 渲染审读后文本，原文不出现', () => {
+    const rendered = impactsToRender({
+      audience: 'public',
+      impacts: [IMPACT],
+      reviews: recordsFor('revised'),
+    });
+    assert.equal(rendered.length, 1);
+    assert.equal(rendered[0].text, REVISED_TEXT);
+    assert.ok(!JSON.stringify(rendered).includes(IMPACT.text), '原文一个字都不该留在渲染结果里');
+  });
+
+  it('有有效记录：剔除 ⇒ 该条不出现，同一段其余照常', () => {
+    const rendered = impactsToRender({
+      audience: 'public',
+      impacts: [IMPACT, OTHER],
+      reviews: recordsFor('rejected'),
+    });
+    assert.deepEqual(rendered, [OTHER], '逐条剔除 —— 同一段里其余照常，不是整块消失');
+  });
+
+  it('全部剔除 ⇒ null（整段不渲染，连标题都不出现）', () => {
+    const reviews = [...recordsFor('rejected', IMPACT), ...recordsFor('rejected', OTHER)];
+    assert.equal(impactsToRender({ audience: 'public', impacts: [IMPACT, OTHER], reviews }), null);
+    assert.equal(impactsToRender({ audience: 'public', impacts: [IMPACT], reviews: recordsFor('rejected') }), null);
+  });
+
+  it('指纹对不上（生成侧重跑）⇒ 视为没有记录 ⇒ 按今天的行为渲染原文', () => {
+    // 上一轮的记录：审的是**改动前**的推断正文
+    const stale = recordsFor('rejected');
+    const rerun = { ...IMPACT, text: '重跑之后模型换了一种说法。' };
+    const rendered = impactsToRender({ audience: 'public', impacts: [rerun], reviews: stale });
+    assert.deepEqual(rendered, [rerun], '没被审读过的文本不许配着别人的结论，也不该因此消失');
+  });
+
+  it('指纹全等（内容一字未变）⇒ 旧记录幂等有效（同一份内容、同一份结论）', () => {
+    const records = recordsFor('revised');
+    const rerun = { ...IMPACT, quote: `${IMPACT.quote}\n` };
+    const rendered = impactsToRender({ audience: 'public', impacts: [rerun], reviews: records });
+    assert.equal(rendered[0].text, REVISED_TEXT, '内容没变 ⇒ 结论照旧成立');
+  });
+
+  it('一条判读都没有 ⇒ null（空壳比没有更坏，连标题都不出现）', () => {
+    assert.equal(impactsToRender({ audience: 'public', impacts: [] }), null);
+  });
+
+  it('审读只动 text：who / point / kind / quote / 出处原样带出去', () => {
+    const rendered = impactsToRender({
+      audience: 'public',
+      impacts: [IMPACT],
+      reviews: recordsFor('revised'),
+    });
+    const { text, ...rest } = rendered[0];
+    const { text: originalText, ...expected } = IMPACT;
+    assert.deepEqual(rest, expected);
+    assert.equal(text, REVISED_TEXT);
+  });
+});
+
+/**
+ * 接线（源码）：判据对了、页面没接上，是这一类改动最常见的断线 —— 而它在 e2e 里**看不见**
+ * （详情页 `.tsx` 跑的是 `.next` 构建产物，撤 SSR 侧源码不会红，见 `check-test-pins.mjs` 规则 1）。
+ *
+ * 这里钉三件事，正好对应 `docs/prd/v2.md`「要被断言的外部行为」第 11 条：
+ * ① 页面经由**同一道门**；② 具体读的**是门的返回值**（不是又去读 `summary.impacts`）；
+ * ③ 审读记录真的被喂进去了（没喂的话，审读层在页面上等于不存在）。
+ */
+describe('issue #47：接线（源码）', () => {
+  const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
+  const view = readFileSync(path.join(repoRoot, 'src/app/_lib/summary-view.tsx'), 'utf8');
+  const page = readFileSync(path.join(repoRoot, 'src/app/notices/[id]/page.tsx'), 'utf8');
+
+  it('详情页经同一道门取判读，且不再留第二份判据', () => {
+    assert.match(view, /const impacts = impactsToRender\(\{/, '渲染必须经由门（选择器）');
+    assert.doesNotMatch(view, /shouldRenderImpacts/, '旧谓词已删除，页面不许留着它当第二份判据');
+    assert.doesNotMatch(
+      view,
+      /const hasImpacts\s*=\s*summary\.impacts\.length/,
+      '底部「摘要依据」那句必须读门的结论，不许自己判一遍（否则它会指着一块不渲染的栏目说话）',
+    );
+  });
+
+  it('详情页把审读记录喂进摘要卡（没喂 = 审读层在页面上不存在）', () => {
+    assert.match(
+      page,
+      /impactReviews=\{parseImpactReviews\(summaryInfo\.impactReviewJson\)\}/,
+      '审读记录必须从库列读出来、解析后传进摘要卡',
+    );
   });
 });
 

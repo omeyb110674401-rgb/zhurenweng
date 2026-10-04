@@ -1,5 +1,6 @@
 import type { GenreEvidenceKind, NoticeGenre } from '../lib/notice-genre.ts';
 import type { NoticeAudience } from '../lib/audience.ts';
+import type { ImpactReviewRecord } from '../lib/impact-review.ts';
 
 /**
  * 中立的领域类型 —— 仓库层（src/db/repo）对外的数据形状，
@@ -83,6 +84,15 @@ export interface NoticeRecord {
   attachments: NoticeAttachment[];
   /** 结构化 AI 摘要（形状见 src/lib/ports.ts 的 StructuredSummary） */
   aiSummary: unknown;
+  /**
+   * 这一批判读的**审读记录**（issue #47）：读侧已经过 `parseImpactReviews`
+   * （形状的真相在 `src/lib/impact-review.ts`，这里只带出去）。
+   *
+   * 空数组 = 没有有效记录 —— 存量行、人工复核手工录入的摘要、审读还没跑或没跑成，
+   * 都是这一种。渲染门按它决定每条判读渲染哪一份文本 / 要不要剔除，
+   * 所以列表页与详情页必须看**同一份**（列表照库里数组打标就是承诺详情页不存在的东西）。
+   */
+  impactReviews: ImpactReviewRecord[];
   /** 摘要模型名与版本 */
   summaryModel: string | null;
   /** 抓取时间，ISO 8601（每轮 upsert 都会覆盖，不是"首次收录"） */

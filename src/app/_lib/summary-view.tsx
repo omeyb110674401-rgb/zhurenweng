@@ -23,7 +23,8 @@ import {
   draftProvenanceLine,
   type DraftAvailabilityInput,
 } from '@/lib/summary-display';
-import { impactLine, impactOverview, shouldRenderImpacts, shouldRenderWho } from '@/lib/impact-display';
+import { impactLine, impactOverview, impactsToRender, shouldRenderWho } from '@/lib/impact-display';
+import type { ImpactReviewRecord } from '@/lib/impact-review';
 import { summaryProvenance, summaryTemplateOf } from '@/lib/summary-basis';
 
 /**
@@ -139,6 +140,7 @@ export function SummaryView({
   summaryModel,
   attachmentReport,
   feedReport,
+  impactReviews,
 }: {
   notice: NoticeRecord;
   summaryJson: string;
@@ -156,12 +158,35 @@ export function SummaryView({
    * 判据全在 `.ts` 里（页面只传参）：这个文件进不了单测，而那句话正是这一刀要修的东西。
    */
   feedReport?: FeedReport | null;
+  /**
+   * 这一批判读的审读记录（issue #47，`notices.impact_review_json` 读侧解析后）。
+   *
+   * 与列表标记拿到的是**同一列**：门（`impactsToRender`）按它决定每条判读渲染哪一份文本、
+   * 有没有被剔除。缺省 / null = 没有审读层的数据（存量行、人工录入、审读没跑成）。
+   */
+  impactReviews?: readonly ImpactReviewRecord[] | null;
 }): ReactNode {
   const summary: QuotedSummary | null = parseQuotedSummary(safeParseJson(summaryJson));
   if (summary === null) {
     // 落库 JSON 形状异常（不应发生）：按待复核占位兜底，不让脏数据打断渲染
     return <SummaryPlaceholder status="failed_review" />;
   }
+
+  /**
+   * 判读那一段**该渲染哪几条**（issue #47）：门的唯一出口是 `impactsToRender`，
+   * 页面里不许再写第二份判据。
+   *
+   * 这一句为什么提到这么靠前：本文件此前在下面另有一份 `hasImpacts`（把"有判读"与
+   * "受众面是公众广域"两个条件各写了一遍）—— 那就是"两处各判一次"的雏形，而审读层一进来
+   * 它立刻变成真的缺口：某条判读被剔除、或在"已改"下换了文本之后，
+   * 底部「摘要依据」那句会**指着一块不渲染（或已换文）的栏目**说话。渲染与那句话从此读
+   * **同一个**结果。
+   */
+  const impacts = impactsToRender({
+    audience: notice.audience,
+    impacts: summary.impacts,
+    reviews: impactReviews,
+  });
 
   const deadlineText = summary.deadline.text ?? notice.deadlineAt ?? '未标注';
   /**
@@ -186,8 +211,12 @@ export function SummaryView({
    */
   const hasClausePoints =
     summary.keyPoints.length > 0 || summary.explanationPoints.length > 0;
-  /** 影响判读只对「公众广域」渲染（门控理由见上面那一块），底部那句说明要与它同源 */
-  const hasImpacts = summary.impacts.length > 0 && notice.audience === 'public';
+  /**
+   * 判读那一段渲染不渲染 —— **就是上面那道门的结论**（issue #47）。
+   * 此前这里是第二份判据（`length > 0 && audience === 'public'`），而它必须与渲染那一块同源：
+   * 一个说"有"、另一个不渲染，页面上那句话就指着一块不存在的栏目说话。
+   */
+  const hasImpacts = impacts !== null;
   /** 「改了哪几处」不设受众面门控：它是**事实**（每行都挂着可核对的原文），不是推断 */
   const hasChanges = summary.changes.length > 0;
   const hasAttachmentPoints = hasClausePoints || hasImpacts || hasChanges;
@@ -242,14 +271,19 @@ export function SummaryView({
          * 「影响：主体 · 方面」。两处的**措辞与空值判据都在 `lib/impact-display.ts`**，
          * 这里只负责摆放与"null 就不渲染"（页面 .tsx 进不了单测，拼接写在这里等于钉不住）。
          *
-         * **受众面门控**：只给「公众广域」渲染（用户 2026-09-27 拍板："先只上公众广域 +
-         * 人工过一遍"）。门放在**渲染侧**而不是生成侧：这一段与其余字段共用同一次模型调用，
+         * **审读层（issue #47）**：这一块渲染的**不是** `summary.impacts` 原文，而是
+         * `impactsToRender` 的结论 —— 有有效审读记录的按记录投影（通过 → 原文、
+         * 已改 → 审读后文本、剔除 → 不出现），没有的按今天的行为走。
+         * 页面上**不出现任何"已审读"字样**（决定 18）：读者能核对的仍然只有原文，
+         * 信任不建立在无法核对的元声明上；审读状态只进诊断与审计面。
+         * 受众面仍在门里（过渡期，第 6 条翻掉）——只给「公众广域」渲染。
+         * 门放在**渲染侧**而不是生成侧：这一段与其余字段共用同一次模型调用，
          * 多写一份不额外花钱，而这批数据正是将来放宽档位时要用的原样原料。
          */}
         {(() => {
-          const impacts = summary.impacts;
           // 判据在 lib/impact-display.ts（纯函数，能进单测也就能进自证框架 —— 页面 .tsx 两样都进不去）
-          if (!shouldRenderImpacts({ audience: notice.audience, impacts })) return null;
+          // 这里只按门给出的结论摆放：`null` = 一条都不剩（整块不渲染，连标题都不出现）
+          if (impacts === null) return null;
           /*
            * 块首概览（2026-10-02 第二刀「影响点」三件之一，规格 7.5）：计数行 + 主体行，
            * 两行都是**程序聚合**的（不额外调模型），因此措辞全部落在 `impactOverview` 里 ——

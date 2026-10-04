@@ -35,6 +35,7 @@ import { syncNoticesToSearchIndex } from '../../src/lib/search/sync.ts';
 import {
   buildQuotedSummaryWithTally,
   llmModelName,
+  type QuotedImpactPoint,
   type QuotedStructuredSummary,
 } from '../../src/lib/summary-content.ts';
 import {
@@ -49,6 +50,16 @@ import {
   saveNoticeSummary,
   type PendingSummaryTarget,
 } from '../../src/db/repo/summaries.ts';
+import {
+  createImpactReviewPort,
+  impactReviewReady,
+  type ImpactReviewPort,
+} from '../../src/lib/ports.ts';
+import {
+  impactReviewRecordsFrom,
+  serializeImpactReviews,
+  type ImpactReviewRecord,
+} from '../../src/lib/impact-review.ts';
 import type { LlmPort, LlmSummarizeInput } from '../../src/lib/ports.ts';
 import type { Job, JobContext } from '../registry.ts';
 
@@ -299,6 +310,72 @@ export interface SummarizeOneNoticeDeps {
   }) => Promise<void> | void;
 }
 
+/**
+ * 审读那一步（issue #47）：把这一条目的判读送交**第二路**模型判合规性，
+ * 拿回一组审读记录（形状与「只减不加」的接受条件全在 `src/lib/impact-review.ts`）。
+ *
+ * ## 失败一律跳过，绝不让审读把摘要生成带崩
+ *
+ * 三种失败（端口没配 / 端口构造失败 / 调用抛错与超时）走**同一条处置**：记一句日志、
+ * 返回空数组 ⇒ 这一批判读**没有审读记录**。这不是"放行"，而是本切片（#47）的过渡语义：
+ * 审读层此时只影响"渲染什么文本"，不影响"要不要渲染"，所以没有记录 = 按今天的行为渲染。
+ * 门翻转（第 6 条 #52）之后同一件事自动变成"不渲染"（无记录 ⇒ fail-closed），
+ * 不需要在这里再改一行 —— 这正是把 fail-closed 放在**门**里而不是放在**worker**里的好处。
+ *
+ * ## 为什么空判读不调用
+ *
+ * 没有判读就没有可审的东西：调一次等于白花一次出境调用，而"审读跑了但没东西可判"与
+ * "根本没跑"在库里应当长得一样（都是没有记录）。
+ */
+async function reviewImpactsForSummary(input: {
+  target: PendingSummaryTarget;
+  impacts: readonly QuotedImpactPoint[];
+  logger: (message: string) => void;
+}): Promise<ImpactReviewRecord[]> {
+  if (input.impacts.length === 0) return [];
+  if (!impactReviewReady()) {
+    input.logger(
+      `条目 ${input.target.id} 审读跳过：IMPACT_REVIEW_PROVIDER 未配置，这一批判读将没有审读记录`,
+    );
+    return [];
+  }
+  let port: ImpactReviewPort;
+  try {
+    port = createImpactReviewPort();
+  } catch (error) {
+    input.logger(
+      `条目 ${input.target.id} 审读端口构造失败，整条跳过：${errorMessage(error)}`,
+    );
+    return [];
+  }
+  try {
+    const verdicts = await port.review({
+      noticeId: input.target.id,
+      title: input.target.title,
+      items: input.impacts.map((impact) => ({
+        quote: impact.quote,
+        who: impact.who,
+        point: impact.point,
+        text: impact.text,
+      })),
+    });
+    return impactReviewRecordsFrom({
+      impacts: input.impacts,
+      verdicts,
+      model: port.model,
+      reviewedAt: new Date().toISOString(),
+    });
+  } catch (error) {
+    // 超时 / 网络 / 返回形状非法都落在这里。**不重试**：这一轮的判读本来就没渲染出去
+    // （过渡期按原文渲染、翻转后不渲染），而重试会把一轮摘要任务拖长 —— 下一轮回填
+    // 与审读会整体重跑，代价比重试一次小。
+    input.logger(
+      `条目 ${input.target.id} 审读失败，跳过（这一批判读将没有审读记录）：${errorMessage(error)}`,
+    );
+    return [];
+  }
+}
+
 /** 一条条目的结局（`error` 与日志、告警里那一句**同源**，不另写一遍）。 */
 export interface SummarizeOneNoticeResult {
   outcome: 'done' | 'failed_review';
@@ -385,11 +462,22 @@ export async function summarizeOneNotice(
       // 喂入清单（第 3 刀）：端口看不到选取过程，只有这里知道"哪一份被预算挤掉了"
       feed: feedReport,
     });
+    /**
+     * 审读（issue #47）：判读在**落库之前**先过一路独立模型。
+     *
+     * 位置刻意在 `buildQuotedSummaryWithTally` **之后**：审读的输入是"真的落进库的那几条
+     * 判读"（过了逐字反查、带着算出来的出处），而不是模型吐出来而可能被丢掉的原始条目 ——
+     * 否则审读记录里会有一堆挂不到任何判读上的结论。
+     */
+    const impactReviewJson = serializeImpactReviews(
+      await reviewImpactsForSummary({ target, impacts: quoted.impacts, logger }),
+    );
     await saveNoticeSummary({
       id: target.id,
       summaryJson: JSON.stringify({ ...quoted, changeTable }),
       summaryModel: model,
       diagnosticsJson: JSON.stringify(diagnostics),
+      impactReviewJson,
     });
     // 只有**摘要真的用了**才标记（失败重试耗尽的条目不能留下「条文已接入」的痕迹，
     // 否则详情页会宣布一件没发生过的事）。

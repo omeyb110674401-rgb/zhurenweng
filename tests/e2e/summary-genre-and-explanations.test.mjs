@@ -537,6 +537,8 @@ describe('issue #86：摘要调用的诊断随摘要落库', () => {
       summaryJson: JSON.stringify(before.json),
       summaryModel: 'manual',
       diagnosticsJson: null,
+      // 人工录入还替换掉了整份摘要（issue #47）：上一份判读的审读记录同样挂不上任何东西了
+      impactReviewJson: null,
     });
 
     const after = readSummary(FRESH_ID);

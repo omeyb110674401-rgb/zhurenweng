@@ -1,3 +1,4 @@
+import { parseImpactReviews } from '../../lib/impact-review.ts';
 import { notices } from '../schema/sqlite.ts';
 import { safeParseJson, safeParseJsonArray, type NoticeAttachment, type NoticeRecord } from '../types.ts';
 
@@ -20,6 +21,11 @@ export function toNoticeRecord(row: typeof notices.$inferSelect): NoticeRecord {
     ...baseFields(row),
     attachments: parseAttachments(row.attachmentsJson),
     aiSummary: safeParseJson(row.aiSummaryJson),
+    // 审读记录（issue #47）：与 `aiSummary` 不同，它在**这里**就解析成形 ——
+    // 摘要的形状有三个消费方各有各的读法（页面 / 检索 / feed），而审读记录只有一个读法，
+    // 且**列表页与详情页必须拿到同一份**。让两个调用点各解析一次，就是给"两处口径分家"
+    // 留一个口子（那正是本仓栽过多次的那类缺口）。坏数据由 `parseImpactReviews` 吞掉。
+    impactReviews: parseImpactReviews(safeParseJson(row.impactReviewJson)),
   };
 }
 
@@ -35,11 +41,15 @@ export function toNoticeRecordWithoutContent(row: typeof notices.$inferSelect): 
     ...baseFields(row),
     attachments: [],
     aiSummary: null,
+    // 同上：邮件那条路径不读摘要，也不读审读记录（它两个都是"内容"）
+    impactReviews: [],
   };
 }
 
 /** 两个入口共用的字段映射（加列只改这里）。 */
-function baseFields(row: typeof notices.$inferSelect): Omit<NoticeRecord, 'attachments' | 'aiSummary'> {
+function baseFields(
+  row: typeof notices.$inferSelect,
+): Omit<NoticeRecord, 'attachments' | 'aiSummary' | 'impactReviews'> {
   return {
     id: row.id,
     sourceId: row.sourceId,

@@ -7,7 +7,7 @@
  * 读者会看到什么"，那是**部署前**的预演，不能当验收证据。
  *
  * 与页面同源的三处判据一律 import，脚本里不重写：
- *   - `shouldRenderImpacts`（给谁看 / 空则不渲染）
+ *   - `impactsToRender`（渲染门选择器：受众面 + 审读记录 → 该渲染的那几条 / null）
  *   - `draftProvenanceLine`（「出处」那一行按来路分开写。**2026-09-28 补**：脚本原先自己
  *     拼 `附件《<来源>》`，于是"正文就是条文"那类条目在这里被印成
  *     `附件《本页正文（公告里直接给出的条文）》` —— 页面是对的、量具在说谎，
@@ -37,7 +37,8 @@ import {
   parseQuotedSummary,
   IMPACT_KIND_LABELS,
 } from '../src/lib/summary-content.ts';
-import { impactLine, impactOverview, shouldRenderImpacts } from '../src/lib/impact-display.ts';
+import { impactLine, impactOverview, impactsToRender } from '../src/lib/impact-display.ts';
+import { parseImpactReviews } from '../src/lib/impact-review.ts';
 import { changeCoverageVerdict, changeFactNote, changeTableNote } from '../src/lib/change-coverage.ts';
 import { explanationCoverageVerdict } from '../src/lib/explanation-coverage.ts';
 import { changeTableCounts, changeTableRows } from '../src/lib/change-table.ts';
@@ -59,6 +60,9 @@ const rows = await db
     deadlineAt: notices.deadlineAt,
     summaryJson: notices.aiSummaryJson,
     diagnosticsJson: notices.summaryDiagnosticsJson,
+    // 审读记录（issue #47）：门的结论由它决定（渲染哪一份文本 / 有没有被剔除），
+    // 所以这只量具必须读它 —— 不读就是"印的不是读者真会看到的"，而这一条是本脚本的立身之本
+    reviewJson: notices.impactReviewJson,
   })
   .from(notices)
   .where(
@@ -96,9 +100,14 @@ for (const row of rows) {
    */
   const feed = diagnostics?.feed ?? null;
 
-  // 「可能的争议点」——渲染门控与页面同一份判据
-  const impacts = parsed.impacts;
-  if (shouldRenderImpacts({ audience: row.audience, impacts })) {
+  // 「可能的争议点」——渲染门与页面同一份判据（issue #47 起门是**选择器**：
+  // 审读记录决定每条渲染哪一份文本、有没有被剔除，无记录时按今天的行为走）
+  const impacts = impactsToRender({
+    audience: row.audience,
+    impacts: parsed.impacts,
+    reviews: parseImpactReviews(safeParseJson(row.reviewJson)),
+  });
+  if (impacts !== null) {
     console.log('\n  ── 可能的争议点（本站 AI 推断，非官方表述，可能错） ──');
     /**
      * 块首概览（issue #88 第二刀）：**与页面同源** —— 这两行也是 `impactOverview` 算出来的，
@@ -118,10 +127,20 @@ for (const row of rows) {
       console.log(`     引用：${item.quote}`);
       console.log(`     ${draftProvenanceLine(item.source, '出处：（无出处）')}`);
     }
-  } else if (impacts.length > 0) {
-    console.log(`\n  ── 可能的争议点：本页不渲染（受众面 ${row.audience ?? '未判定'}，只给公众广域） ──`);
   } else {
-    console.log('\n  ── 可能的争议点：本页不渲染（一条都没有） ──');
+    /**
+     * 门返回 null 有三种原因，**处置完全不同**，所以分开说 —— 这一句是验收门要说清的东西：
+     * 受众面没放行（过渡期语义，第 6 条翻转后会消失）、审读一条都没放行、或压根没有判读。
+     * 写成一句含糊的"本页不渲染"，读的人会把"被剔除"读成"模型没想到影响"。
+     */
+    const total = parsed.impacts.length;
+    const reason =
+      row.audience !== 'public'
+        ? `受众面 ${row.audience ?? '未判定'}，只给公众广域（过渡期语义，第 6 条起不再是判据）`
+        : total === 0
+          ? '一条都没有'
+          : `审读没有放行任何一条（剔除 / 已改却没有文本）—— 生成侧仍存着 ${total} 条`;
+    console.log(`\n  ── 可能的争议点：本页不渲染（${reason}） ──`);
   }
 
   // 「改了哪几处」——表 + 交代那一句（与页面同源：`changeTableNote` / `changeCoverageVerdict`

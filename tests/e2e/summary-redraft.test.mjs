@@ -29,8 +29,32 @@ function summaryJson(marker) {
   return JSON.stringify({ what: { text: `${marker}：这是旧摘要`, quote: null, source: null } });
 }
 
+/**
+ * 一份审读记录（issue #47），形状见 `src/lib/impact-review.ts`。
+ *
+ * 这一组只关心两件事：**它有没有被交还、有没有被清掉**，所以内容取最小可辨识值
+ * （每一份都能看出属于哪一条）。形状是否被读侧接受不在这里验 —— 那是
+ * `tests/unit/impact-review.test.mjs` 的活。
+ */
+function reviewJson(id) {
+  return JSON.stringify([
+    {
+      quoteFingerprint: `引用${id.slice(0, 4)}`,
+      textFingerprint: `推断${id.slice(0, 4)}`,
+      status: 'passed',
+      revisedText: null,
+      model: 'stub',
+      reviewedAt: '2026-10-04T12:00:00.000Z',
+    },
+  ]);
+}
+
 function row(id) {
-  const rowValue = db.prepare('select ai_summary_json, summary_model, summary_status from notices where id = ?').get(id);
+  const rowValue = db
+    .prepare(
+      'select ai_summary_json, summary_model, summary_status, impact_review_json from notices where id = ?',
+    )
+    .get(id);
   return rowValue;
 }
 
@@ -69,10 +93,10 @@ before(async () => {
 
   db = new Database(dbFile);
   const setSummary = db.prepare(
-    'update notices set ai_summary_json = ?, summary_model = ?, summary_status = ? where id = ?',
+    'update notices set ai_summary_json = ?, summary_model = ?, summary_status = ?, impact_review_json = ? where id = ?',
   );
   for (const id of [WITH_SUMMARY, ALSO_SUMMARY, KEPT]) {
-    setSummary.run(summaryJson(id.slice(0, 4)), 'mimo-v2.5', 'done', id);
+    setSummary.run(summaryJson(id.slice(0, 4)), 'mimo-v2.5', 'done', reviewJson(id), id);
   }
   // 连接留到 after() 再关：下面几个用例要直接读库核对"改了什么、没改什么"
 });
@@ -91,6 +115,12 @@ describe('issue #67：clearSummaryForRedraft', () => {
       const previous = byId.get(id);
       assert.ok(previous.previousSummaryJson.includes(id.slice(0, 4)), '旧摘要内容要原样返回');
       assert.equal(previous.previousModel, 'mimo-v2.5', '模型名也一起留着（恢复时要对得上）');
+      // 审读记录（issue #47）同样是"清空即抹掉"的一列，所以同样必须在清空**之前**交还：
+      // 重跑失败时它是唯一能说明"上一次审读判了什么"的东西（备份的用处正在这里）。
+      assert.ok(
+        previous.previousImpactReviewJson.includes(`引用${id.slice(0, 4)}`),
+        '审读记录也要原样交还，否则"清空前的值一律交还调用方"这条规矩在这新一列上静默失效',
+      );
     }
   });
 
@@ -105,10 +135,21 @@ describe('issue #67：clearSummaryForRedraft', () => {
     }
   });
 
+  it('审读记录随重跑一起清空（重跑即失效：新判读不许继承上一轮的结论）', () => {
+    for (const id of [WITH_SUMMARY, ALSO_SUMMARY]) {
+      assert.equal(
+        row(id).impact_review_json,
+        null,
+        '摘要都清了还留着审读记录，就会配出一对"没有摘要、却有审读结论"的行',
+      );
+    }
+  });
+
   it('名单外的条目一个字不动（包括同样有摘要的丁）', () => {
     const kept = row(KEPT);
     assert.ok(kept.ai_summary_json.includes(KEPT.slice(0, 4)), '丁的摘要必须还在');
     assert.equal(kept.summary_status, 'done');
+    assert.ok(kept.impact_review_json, '丁的审读记录也必须还在（没进名单就不许被牵连）');
     assert.ok(row(NO_SUMMARY).ai_summary_json === null, '丙本来就没有摘要，不该被牵连');
   });
 

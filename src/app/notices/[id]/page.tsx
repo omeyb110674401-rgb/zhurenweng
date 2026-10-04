@@ -12,6 +12,7 @@ import { SummaryNotGenerated, SummaryPlaceholder, SummaryUnavailable, SummaryVie
 import { buildNoticeBrief, mergeSubmissionChannels } from '@/lib/notice-brief';
 import { channelGuidance } from '@/lib/channel-guidance';
 import { parseQuotedSummary } from '@/lib/summary-content';
+import { parseImpactReviews } from '@/lib/impact-review';
 import { parseSummaryDiagnostics } from '@/lib/summary-diagnostics';
 import { summaryDisplayState } from '@/lib/summary-display';
 import { buildNoticeJsonLd, serializeJsonLd } from '@/lib/notice-jsonld';
@@ -270,6 +271,7 @@ export default async function NoticeDetailPage({ params }: NoticeDetailPageProps
                 summaryModel={summaryInfo.summaryModel}
                 attachmentReport={draftReport}
                 feedReport={feedReport}
+                impactReviews={parseImpactReviews(summaryInfo.impactReviewJson)}
               />
             ) : (
               <>

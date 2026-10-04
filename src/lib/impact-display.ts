@@ -1,4 +1,5 @@
 import type { NoticeAudience } from './audience.ts';
+import { findImpactReview, type ImpactReviewRecord } from './impact-review.ts';
 import type { ImpactKind } from './ports.ts';
 import { IMPACT_KIND_LABELS, type QuotedImpactPoint } from './summary-content.ts';
 
@@ -24,20 +25,87 @@ import { IMPACT_KIND_LABELS, type QuotedImpactPoint } from './summary-content.ts
  */
 
 /**
- * 「可能的争议点」该不该渲染（issue #86 第 1 刀）。
+ * 「可能的争议点」**该渲染哪几条、渲染哪一份文本**（issue #86 第 1 刀建立，
+ * issue #47 由谓词改形为**选择器**；决定台账见
+ * `docs/pending-issues/91-l3-compliance-review-gate.md` 第八节第 6、19 条与硬约束 10）。
  *
- * 两条判据，缺一不可：
- * - **受众面**：用户 2026-09-27 拍板"先只上公众广域 + 人工过一遍"。判读说错的代价不是
- *   "不准确"而是"误导公众"，所以第一版只给最该看见它的那一档。未判定（`null` / `unknown`）
- *   同样不渲染 —— 判不出来就不给它加码。
- * - **非空**：一条都没有时整块不出现，连标题都不出现。空壳比没有更坏（#85 的教训：
- *   一个写着标题、内容却空着的栏目，读者读到的是"这一栏没东西可看"）。
+ * ## 为什么不再是谓词
+ *
+ * 审读层（`docs/prd/v2.md`）要在渲染前**改文本**（审读后文本）与**逐条剔除** ——
+ * 一个 boolean 交不出"渲染哪一份"。名字跟着改掉：返回数组却叫 `should…` 是名不副实，
+ * 而本仓对"doc 与代码各说各话"很敏感。它仍是**唯一**出口：详情页与列表标记都只经由它，
+ * 两边各判一次就会开始各说各话（列表承诺详情页不存在的东西）。
+ *
+ * ## 投影规则
+ *
+ * 一条判读有**有效审读记录**（`quote` 与生成侧 `text` **两个指纹都全等**，见
+ * `impact-review.ts`）时按结论投影：
+ * - 通过 ⇒ 原文进渲染数组；
+ * - 已改 ⇒ **审读后文本**进渲染数组（原文不出现；"改了什么"由两份文本并存本身可审计）；
+ * - 剔除 ⇒ 不进渲染数组（同一段里其余照常 —— 逐条剔除，不是整块消失）。
+ *
+ * **指纹匹配判定就放在这个函数里**（不是放在调用方）：于是"生成侧重跑 ⇒ 审读层自动失效"
+ * 是纯函数可测的行为，不必为时序语义另立一层测试。
+ *
+ * ## 过渡语义只有一处，是刻意的（issue #47；第 6 条 #52 翻掉）
+ *
+ * 本切片里审读层只影响"**渲染什么文本**"，**不影响"要不要渲染"**：
+ * - 没有有效记录 / 指纹对不上 ⇒ **按今天的行为**（原文 + 原来的受众面门）；
+ * - 受众面还没有退出判据 ⇒ 非公众广域一律不渲染。
+ *
+ * 两处都标着 `#52`。这样本切片上线后线上可见判读的条目数与今天逐条一致，
+ * 且第 5 条回填跑完审读时也**不会**提前把行业专业档放出来。
+ * 第 6 条把这两处改成目标形态：删掉受众面那一行、"无记录 ⇒ 原文"翻成"无记录 ⇒ 不渲染"。
+ *
+ * ## 空则 null
+ *
+ * 一条都不剩（全被剔除 / 传进来就是空数组）⇒ `null`：整段不渲染，连标题都不出现。
+ * 空壳比没有更坏（#85 的教训：一个写着标题、内容却空着的栏目，读者读到的
+ * 是"这一栏没东西可看"）。
+ *
+ * ## 受众面为什么曾经在门里（这段历史留着，别把它的理由丢了）
+ *
+ * 用户 2026-09-27 拍板"先只上公众广域 + 人工过一遍"。判读说错的代价不是"不准确"
+ * 而是"误导公众"，所以第一版只给最该看见它的那一档；未判定（`null` / `unknown`）
+ * 同样不渲染 —— 判不出来就不给它加码。它退出判据（第 14 条）不等于这套理由作废：
+ * 接手"内容可不可以见读者"这件事的是**审读**，而受众面继续管与风险无关的事
+ * （「影响谁」只在行业专业档渲染，见下面的 `shouldRenderWho`）。
  */
-export function shouldRenderImpacts(input: {
+export function impactsToRender(input: {
   audience: NoticeAudience | null;
   impacts: QuotedImpactPoint[];
-}): boolean {
-  return input.audience === 'public' && input.impacts.length > 0;
+  /**
+   * 审读记录（`notices.impact_review_json`，读侧已过 `parseImpactReviews`）。
+   * 缺省 / null = 这一条没有审读层的数据（存量行、人工录入、审读还没跑过）。
+   */
+  reviews?: readonly ImpactReviewRecord[] | null;
+}): QuotedImpactPoint[] | null {
+  // #52 删除这一行：受众面退出判读的渲染判据
+  if (input.audience !== 'public') return null;
+
+  const reviews = input.reviews ?? [];
+  const rendered: QuotedImpactPoint[] = [];
+  for (const impact of input.impacts) {
+    const review = findImpactReview(reviews, impact);
+    if (review === null) {
+      // #52 翻成 fail-closed：没有有效记录 ⇒ 这条不渲染
+      rendered.push(impact);
+      continue;
+    }
+    if (review.status === 'rejected') continue;
+    if (review.status === 'revised') {
+      const revised = review.revisedText;
+      // 「已改」而没有文本 ⇒ 这条不渲染。读侧已经拦过一遍（这种记录不成立），
+      // 这里是第二道：**渲染侧绝不许退回原文** —— 那会让"原文不出现"这条规矩
+      // 在没有真文本时静默失效。
+      if (revised === null || revised === '') continue;
+      rendered.push({ ...impact, text: revised });
+      continue;
+    }
+    rendered.push(impact);
+  }
+  // 一条都不剩 ⇒ null（整段不渲染，连标题都不出现）
+  return rendered.length > 0 ? rendered : null;
 }
 
 /**
@@ -59,7 +127,7 @@ export function shouldRenderImpacts(input: {
  * 这与 #55/#85 的教训同源 —— 一个写着标题、下面空着的栏目比没有更坏（线上真出现过
  * 一条空的「影响谁」）。
  *
- * 未判定（`null` / `unknown`）同样不渲染：判不出来就不给它加码，与 `shouldRenderImpacts` 同规矩。
+ * 未判定（`null` / `unknown`）同样不渲染：判不出来就不给它加码，与 `impactsToRender` 同规矩。
  */
 export function shouldRenderWho(input: {
   audience: NoticeAudience | null;
@@ -148,7 +216,7 @@ const IMPACT_KIND_ORDER: ImpactKind[] = ['risk', 'loophole', 'burden', 'other'];
  *
  * 两条空值规矩与页面上的两个 `<p>` 一一对应，**判在这里、不判在页面**：
  * - `total === 0` ⇒ `countsLine` 为 null。调用方本来就有"一条都没有整块不渲染"的门
- *   （`shouldRenderImpacts`），这里再判一次是因为**这一行印出来就是"共 0 处"**——
+ *   （`impactsToRender`），这里再判一次是因为**这一行印出来就是"共 0 处"**——
  *   一句自相矛盾的话，比少一行难看得多。
  * - `topWho` 为空 ⇒ `whoLine` 为 null：一条判读都没写出主体时（模型留空是允许的，
  *   见提示词的"宁可空着"），不许印一行光秃秃的「影响：」。

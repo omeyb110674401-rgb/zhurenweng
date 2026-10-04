@@ -85,6 +85,17 @@ export const notices = sqliteTable('notices', {
    * NULL = 本列上线前的存量，或那份摘要是人工复核手工录入的（没有调用可描述）。
    */
   summaryDiagnosticsJson: text('summary_diagnostics_json'),
+  /**
+   * 审读记录（issue #47）：产出当前这列摘要的那一批判读，各自被一路**独立模型**
+   * 判过合规性没有、判成了什么。形状与理由见 src/lib/impact-review.ts。
+   *
+   * 为什么是独立的列、而不是塞进 `ai_summary_json`：那一列是**渲染契约**，往里加键
+   * 就要同时改读侧（#85 的教训同上一条）。而且审读层必须**可抛弃** ——
+   * 生成侧重跑之后，旧的审读结论按内容指纹自动失效，这一列要能被独立清空、独立裁剪，
+   * 坏掉也不牵动任何页面。NULL = 这一条没有审读层的数据（本列上线前的存量、
+   * 人工复核手工录入的摘要、或审读还没跑/没跑成）。
+   */
+  impactReviewJson: text('impact_review_json'),
   /** 抓取时间，ISO 8601。**每轮 upsert 都会覆盖**，所以它不是"首次收录"。 */
   fetchedAt: text('fetched_at').notNull(),
   /**

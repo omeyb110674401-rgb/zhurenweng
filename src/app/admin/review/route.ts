@@ -111,6 +111,11 @@ export async function POST(request: Request): Promise<Response> {
       // 人工录入没有调用可描述（issue #86）：显式写 null，而不是把上一次失败留下的诊断
       // 留在那一列里 —— 否则"这份摘要是哪一次调用产出的"这个问题的答案会是一份假证据。
       diagnosticsJson: null,
+      // 审读记录同理，而且更强（issue #47）：这里清掉的不只是"上一次调用"，而是**上一份判读**
+      // 的审读结论 —— 人工录入替换了整份摘要（`buildQuotedSummary` 不含 impacts），
+      // 旧记录已经挂不到任何判读上了。门翻转（第 6 条）之后留着它等于让一组
+      // 没人做过的结论停在库里等一次指纹巧合。
+      impactReviewJson: null,
     });
     // 索引同步钩子：人工摘要即刻可被检索；失败只降级记日志，由重建任务兜底
     try {

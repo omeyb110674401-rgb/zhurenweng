@@ -1,5 +1,6 @@
 import type { NoticeAudience } from './audience.ts';
-import { shouldRenderImpacts } from './impact-display.ts';
+import { impactsToRender } from './impact-display.ts';
+import type { ImpactReviewRecord } from './impact-review.ts';
 import type { QuotedSummary } from './summary-content.ts';
 
 /**
@@ -21,15 +22,18 @@ import type { QuotedSummary } from './summary-content.ts';
  *
  * ## 硬约束：必须与详情页同一道门（这一条不是建议，是这一刀的全部风险所在）
  *
- * 「有判读」的判据**只能**经由 `shouldRenderImpacts` 判定，**不许**在这里重写
- * `audience === 'public' && impacts.length > 0` 这个表达式。
+ * 「有判读」的判据**只能**经由 `impactsToRender` 判定（issue #47 起它是**选择器**，
+ * 此前那个谓词叫 `shouldRenderImpacts`），**不许**在这里重写"受众面 + 非空"或
+ * "有没有有效审读记录"这些表达式。
  * 后果是具体的、不是理论的：生产库里有一批 `sector` 条目**存着判读但详情页一个字都不渲染**
  * （受众面门控，用户 2026-09-27 拍板"先只上公众广域"）。列表页若照库里的数组打标记，
  * 读者点进去会发现**什么都没有** —— 列表页在承诺详情页不存在的东西，那比没有标记坏得多。
+ * 审读层（issue #47）把这条硬约束又往前推了一步：某条判读被审读**剔除**时，详情页不再渲染它，
+ * 列表也就不许靠"库里还存着"来打标 —— 标记与详情页必须**逐格一致**。
  *
  * 同一句话的另外两面：
- * - **未判定（`null` / `unknown`）不打标**：`shouldRenderImpacts` 已经这么判，跟它走即可
- *   （"判不出来就不给它加码"）。
+ * - **未判定（`null` / `unknown`）不打标**：`impactsToRender` 的过渡回落已经这么判，
+ *   跟它走即可（"判不出来就不给它加码"）。
  * - **只能说"有"，不能说"无"**：行业专业档、还没生成摘要的、复核没过的，一律**不打任何标记**。
  *   写一个灰色的「暂无判读」会变成一句关于内容质量的评语，而且会把门控暴露成
  *   "这条被判成行业专业了" —— 那是内部口径，不是读者要的信息。
@@ -59,8 +63,14 @@ export type NoticeMarkKind = 'impacts' | 'changes';
 export function noticeMarks(input: {
   audience: NoticeAudience | null;
   summary: QuotedSummary | null;
+  /**
+   * 审读记录（`notices.impact_review_json`，读侧已过 `parseImpactReviews`）。
+   * 与详情页**同一份输入**：缺了它，列表会按"库里存着判读"打标，
+   * 而详情页可能已经把那条剔除了 —— 那正是这一刀要避免的事。
+   */
+  reviews?: readonly ImpactReviewRecord[] | null;
 }): NoticeMarkKind[] {
-  const { audience, summary } = input;
+  const { audience, summary, reviews } = input;
   // 没有摘要（或旧形状解析失败）⇒ 不打标。`toNoticeRecordWithoutContent`（邮件那条路径）
   // 给的就是 aiSummary: null，标记自然为"无" —— 那是对的。
   if (summary === null) return [];
@@ -69,7 +79,7 @@ export function noticeMarks(input: {
 
   // 判读：**调用**详情页那道门，不抄它的表达式（见文件头"硬约束"）。
   const impacts = summary.impacts;
-  if (shouldRenderImpacts({ audience, impacts })) {
+  if (impactsToRender({ audience, impacts, reviews }) !== null) {
     marks.push('impacts');
   }
 

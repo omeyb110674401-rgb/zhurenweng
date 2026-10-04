@@ -147,6 +147,14 @@ export async function clearSummaryForRedraft(
     previousModel: string | null;
     /** 清空前的诊断（issue #86）：重跑会把这一列一起清掉，所以旧值必须交出去，备份才不丢 */
     previousDiagnosticsJson: string | null;
+    /**
+     * 清空前的审读记录（issue #47）：同上 —— 重跑会把这一列一起清掉。
+     *
+     * 为什么必须交出去：审读记录是**可抛弃的**（硬约束 7），但它不是"没有价值"——
+     * 重跑失败时那一份旧记录是唯一能说明"上一次审读判了什么"的东西，
+     * 而本函数的既有语义就是"清空前的值一律交还调用方备份"（issue #67 立的规矩）。
+     */
+    previousImpactReviewJson: string | null;
   }[]
 > {
   if (ids.length === 0) return [];
@@ -157,6 +165,7 @@ export async function clearSummaryForRedraft(
       previousSummaryJson: notices.aiSummaryJson,
       previousModel: notices.summaryModel,
       previousDiagnosticsJson: notices.summaryDiagnosticsJson,
+      previousImpactReviewJson: notices.impactReviewJson,
     })
     .from(notices)
     .where(inArray(notices.id, ids));
@@ -169,6 +178,11 @@ export async function clearSummaryForRedraft(
       // 就会配出一对"没有摘要、却有诊断"的行，而下一轮无论成功失败都会再写一份新的。
       // 一起清掉，返回给调用方存备份。
       summaryDiagnosticsJson: null,
+      // 审读记录同理、且更强（issue #47，硬约束 7）：它描述的是**那一份判读文本**被审读过什么，
+      // 而判读随摘要一起没了。不清的后果是具体的 —— 重跑产出的新判读若与旧文本碰巧指纹相同
+      // （一字未改），它会**静默继承**上一轮的审读结论，而那份结论审的是"上一次那一份"。
+      // 本条目的规矩是"重跑即失效"，所以这里不能指望指纹自己拦（指纹相同本来就该幂等有效）。
+      impactReviewJson: null,
       summaryStatus: 'pending',
     })
     .where(inArray(notices.id, ids));
@@ -192,6 +206,15 @@ export interface NoticeSummaryInfo {
    * 形状的真相在 `summary-diagnostics.ts` 一处，仓储层不再抄一遍。
    */
   summaryDiagnosticsJson: string | null;
+  /**
+   * 审读记录（issue #47，`notices.impact_review_json`）。
+   *
+   * 读者侧**要读它**：渲染门（`impactsToRender`）按它决定那几条判读渲染哪一份文本、
+   * 有没有被剔除 —— 没有它，审读层在页面上等于不存在。形状的真相在
+   * `src/lib/impact-review.ts` 的 `parseImpactReviews`（这里只负责原样交出去，
+   * 仓储层不抄第二遍形状）。
+   */
+  impactReviewJson: string | null;
 }
 
 export async function getNoticeSummary(id: string): Promise<NoticeSummaryInfo | null> {
@@ -203,6 +226,8 @@ export async function getNoticeSummary(id: string): Promise<NoticeSummaryInfo | 
       summaryModel: notices.summaryModel,
       // issue #86 §19.4：读者侧要拿它说"本轮喂了几份、几份被截"（那一列 v2 起带 feed）
       summaryDiagnosticsJson: notices.summaryDiagnosticsJson,
+      // issue #47：渲染门要按它投影（审读后文本 / 逐条剔除）—— 读者可见后果由这一列决定
+      impactReviewJson: notices.impactReviewJson,
     })
     .from(notices)
     .where(eq(notices.id, id))
@@ -214,6 +239,7 @@ export async function getNoticeSummary(id: string): Promise<NoticeSummaryInfo | 
     aiSummaryJson: row.aiSummaryJson,
     summaryModel: row.summaryModel,
     summaryDiagnosticsJson: row.summaryDiagnosticsJson,
+    impactReviewJson: row.impactReviewJson,
   };
 }
 
@@ -230,6 +256,15 @@ export async function saveNoticeSummary(input: {
    * 必须有答案；写成可选的话，"忘了传"与"确实没有调用"在库里长得一模一样。
    */
   diagnosticsJson: string | null;
+  /**
+   * 这一批判读的审读记录（issue #47，`src/lib/impact-review.ts` 的 `serializeImpactReviews`）。
+   *
+   * **同样必填、可为 null**，理由与 `diagnosticsJson` 一字不差，而且是同一类不变式的两半：
+   * 「这一列判读被审读过什么」必须有答案。可选的话，"审读还没接线"与"审读跑了但一条都没
+   * 通过"在库里长得一样 —— 而这两种情况在门翻转（第 6 条）之后处置完全相反：
+   * 前者要重跑，后者是审读**真的判负了**。
+   */
+  impactReviewJson: string | null;
 }): Promise<void> {
   const db = await getDb();
   await db
@@ -238,6 +273,7 @@ export async function saveNoticeSummary(input: {
       aiSummaryJson: input.summaryJson,
       summaryModel: input.summaryModel,
       summaryDiagnosticsJson: input.diagnosticsJson,
+      impactReviewJson: input.impactReviewJson,
       summaryStatus: 'done',
     })
     .where(eq(notices.id, input.id));

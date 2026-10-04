@@ -38,7 +38,8 @@ import { getDb } from '../src/db/client.ts';
 import { notices } from '../src/db/schema/sqlite.ts';
 import { isNotNull, ne, sql } from 'drizzle-orm';
 import { parseQuotedSummary, IMPACT_KIND_LABELS } from '../src/lib/summary-content.ts';
-import { impactLine, impactOverview, shouldRenderImpacts } from '../src/lib/impact-display.ts';
+import { impactLine, impactOverview, impactsToRender } from '../src/lib/impact-display.ts';
+import { parseImpactReviews } from '../src/lib/impact-review.ts';
 import { draftProvenanceLine } from '../src/lib/summary-display.ts';
 import { AUDIENCE_LABELS } from '../src/lib/audience.ts';
 import { safeParseJson } from '../src/db/types.ts';
@@ -58,6 +59,8 @@ const rows = await db
     status: notices.status,
     deadlineAt: notices.deadlineAt,
     summaryJson: notices.aiSummaryJson,
+    // 审读记录（issue #47）：渲染门是选择器，它决定每条渲染哪一份文本 / 有没有被剔除
+    reviewJson: notices.impactReviewJson,
   })
   .from(notices)
   // 默认口径 = 「有摘要、且受众面不是公众广域」——判读只能藏在这些人身上。
@@ -94,7 +97,12 @@ for (const row of picked) {
   shown += 1;
 
   const audience = row.audience ?? 'unknown';
-  const gate = shouldRenderImpacts({ audience: row.audience, impacts });
+  const gate =
+    impactsToRender({
+      audience: row.audience,
+      impacts,
+      reviews: parseImpactReviews(safeParseJson(row.reviewJson)),
+    }) !== null;
   const label = AUDIENCE_LABELS[audience] ?? audience;
 
   console.log(`\n${'═'.repeat(96)}`);
@@ -112,7 +120,7 @@ for (const row of picked) {
    * 少了它，读的人很容易把下面那段读成"页面上已经有了"。
    */
   console.log(
-    `    ⚠ 今天的渲染门 shouldRenderImpacts = ${gate}` +
+    `    ⚠ 今天的渲染门 impactsToRender ≠ null = ${gate}` +
       `（受众面 ${label}）⇒ 读者**一个字都看不到**；下面这段是"扩档后才会出现"的样子`,
   );
 

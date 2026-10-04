@@ -34,9 +34,16 @@ export function NoticeItem({
    * 摘要**只解析一次**并复用（`noticeMarks` 收已解析的形状，不再自己解析一遍）。
    * `notice.aiSummary` 是 `unknown`（列是 TEXT / JSON），`parseQuotedSummary` 对旧形状与
    * 缺键一律宽容 —— 存量行不会因为这一刀变成"形状异常"。
+   *
+   * `notice.impactReviews`（issue #47）一并喂进同一道门：审读把某条判读**剔除**之后，
+   * 详情页不再渲染它，列表也就不许靠"库里还存着"打标 —— 标记与详情页必须逐格一致。
    */
   const marks = showMarks
-    ? noticeMarks({ audience: notice.audience, summary: parseQuotedSummary(notice.aiSummary) })
+    ? noticeMarks({
+        audience: notice.audience,
+        summary: parseQuotedSummary(notice.aiSummary),
+        reviews: notice.impactReviews,
+      })
     : [];
   return (
     <li className="notice-item" data-testid="notice-item">

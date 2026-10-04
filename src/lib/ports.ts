@@ -1,7 +1,9 @@
 import { createGlmLlm } from './adapters/glm-llm.ts';
 import type { SummaryTier } from './attachment-feed.ts';
 import type { ChangeKind } from './change-coverage.ts';
+import type { ImpactReviewVerdict } from './impact-review.ts';
 import { createOpenAiLlmFromEnv } from './adapters/openai-compatible-llm.ts';
+import { StubImpactReview } from './adapters/stubs/stub-impact-review.ts';
 import { StubLlm } from './adapters/stubs/stub-llm.ts';
 import { StubMailer } from './adapters/stubs/stub-mailer.ts';
 import { createSmtpMailerFromEnv } from './adapters/smtp-mailer.ts';
@@ -285,6 +287,82 @@ export function createLlmPort(): LlmPort {
       return createOpenAiLlmFromEnv();
     default:
       throw new Error(`未知的 LLM_PROVIDER "${provider}"（可选：stub | glm | openai）`);
+  }
+}
+
+/**
+ * 一次审读要看的判读（issue #47）。粒度是**每条条目一次调用**（PRD「审读的调用」）：
+ * 一个条目里的多条判读常出自同一份附件，一次调用还能看见条目内的一致性；
+ * 调用次数因此从"按判读约 163 次"降到"按条目约 25 次"。
+ */
+export interface ImpactReviewItem {
+  /** 这一条推断依据的逐字引用 */
+  quote: string;
+  /** 可能受影响的主体（可空） */
+  who: string;
+  /** 受影响的东西/方面（可空） */
+  point: string;
+  /** 推断正文 */
+  text: string;
+}
+
+export interface ImpactReviewInput {
+  /** 条目 id（日志与诊断用） */
+  noticeId: string;
+  title: string;
+  items: ImpactReviewItem[];
+}
+
+/**
+ * 审读端口（issue #47）—— **第二路** LLM 通道，审读专用的接口。
+ *
+ * 为什么必须新开一路，而不是给 `LlmPort` 加个方法：审读的**独立性**是这一整功能的前提
+ * （用户 2026-10-04 拍板"带门扩"的理由就是"由与被审读内容不同来源的模型判一遍"）。
+ * 今天这套代码里"独立模型"**没有容器**：`createLlmPort()` 全进程只造一个端口、由单一
+ * `LLM_PROVIDER` 单选。所以审读侧有自己的端口、自己的环境变量族（`IMPACT_REVIEW_*`），
+ * 两侧各自配厂商 —— 生成侧本次**不动**，本功能的效果是"不再增加新的出境调用"。
+ *
+ * 端口只负责"把判读送出去、把结论拿回来"；**结论如何被接受**（只减不加、指纹配对、
+ * 同一条判读收到两份结论怎么办）是 `src/lib/impact-review.ts` 的纯函数判据，端口不许自己判。
+ */
+export interface ImpactReviewPort {
+  readonly provider: string;
+  /** 审读模型标识（落进审读记录的 `model` 字段，审计用） */
+  readonly model: string;
+  /** 一次审读一个条目的全部判读；返回与 `items` 对应的结论（缺项 = 那条没结论）。 */
+  review(input: ImpactReviewInput): Promise<ImpactReviewVerdict[]>;
+}
+
+/**
+ * 审读侧配置好了没有（issue #47）。
+ *
+ * **缺省不是 stub**（与 `createLlmPort` 的缺省不同，这一点是刻意的）：生成侧缺省成 stub
+ * 最多是"页面上的摘要没内容"，而审读侧缺省成 stub 意味着**合规审读是一枚橡皮章** ——
+ * 它会给每一条判读写一份"通过"，页面上看不出来（残余风险第 1 条"门空转不可发现"由此成真）。
+ * 所以没配就**不跑审读**：那条判读没有记录，而"没有记录"在门翻转之后等于不渲染
+ * （fail-closed 的方向正确）。
+ */
+export function impactReviewReady(env: NodeJS.ProcessEnv = process.env): boolean {
+  return (env.IMPACT_REVIEW_PROVIDER ?? '') !== '';
+}
+
+/**
+ * 按环境变量创建审读端口（issue #47；真实模型在第 4 条 #50 接上）。
+ *
+ * 未配置时抛错而不是回落到 stub：调用方（worker）先问 `impactReviewReady()`，
+ * 走到这里还没配就是配置事故，说清楚比悄悄给一枚橡皮章好。
+ */
+export function createImpactReviewPort(): ImpactReviewPort {
+  const provider = process.env.IMPACT_REVIEW_PROVIDER ?? '';
+  switch (provider) {
+    case 'stub':
+      return new StubImpactReview();
+    case '':
+      throw new Error(
+        '审读端口未配置（IMPACT_REVIEW_PROVIDER 为空）：审读侧不会跑，判读将没有审读记录',
+      );
+    default:
+      throw new Error(`未知的 IMPACT_REVIEW_PROVIDER "${provider}"（可选：stub）`);
   }
 }
 

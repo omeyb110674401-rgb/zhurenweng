@@ -6,6 +6,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { before, beforeEach, describe, it } from 'node:test';
 import Database from 'better-sqlite3';
+import { quoteFingerprint } from '../../src/lib/summary-content.ts';
 
 /**
  * 端到端（2026-09-30）：`scripts/summarize-now.mjs` —— **点名给已截止条目补摘要**。
@@ -92,6 +93,10 @@ function runScript(args, extraEnv = {}) {
         DATABASE_URL: dbFile,
         LLM_PROVIDER: 'stub',
         MAILER_PROVIDER: 'stub',
+        // 审读那一路（issue #47）显式配 stub：缺省是**不跑**（`impactReviewReady()` 为假），
+        // 而这一条要断言的正是"审读记录与摘要一起落库"，所以必须真跑一遍。
+        // 这也顺便钉住了"两路端口各自独立"：生成侧与审读侧各有一个 env，谁都不读对方那个。
+        IMPACT_REVIEW_PROVIDER: 'stub',
         ATTACHMENT_TEXT: 'on',
         // 重试退避基数调小：失败路径的总耗时可忽略（与 summary-pipeline 同一手法）
         SUMMARY_RETRY_DELAY_MS: '10',
@@ -259,7 +264,30 @@ describe('2026-09-30：summarize-now 点名给已截止条目补摘要', () => {
     assert.match(row.ai_summary_json, /条文要点/, '正文自带条文的条目应当产出可核对的条文要点');
     assert.ok(row.summary_diagnostics_json, '诊断与摘要一起落库');
     assert.match(row.summary_diagnostics_json, /"origin":"body"/, '诊断里记着这一份来自公告正文');
-    assert.equal(callsFor(CLOSED_INLINE_TITLE) - closedCalls, 1, '一条一次调用');
+    /**
+     * 审读记录（issue #47）：与摘要**同一份调用链**落库，而且指纹必须与**真的落库的那几条判读**
+     * 对得上。三条一起钉：
+     * ① 这一列不是空的（审读那一路真的跑了 —— 没有它，门翻转之后这些判读会集体消失）；
+     * ② 条数与落库判读数相等（审读在反查之后调用，审的是"真的进库的那几条"）；
+     * ③ 指纹由本仓从判读现算（错挂 = 一份没人做过的结论挂在别人的判读上，页面上看不出来）。
+     */
+    const reviews = JSON.parse(row.impact_review_json);
+    const storedImpacts = JSON.parse(row.ai_summary_json).impacts ?? [];
+    assert.ok(
+      Array.isArray(reviews) && reviews.length > 0,
+      '审读记录必须与摘要一起落库（否则这一批判读在门翻转之后一条都渲染不出来）',
+    );
+    assert.equal(reviews.length, storedImpacts.length, '每条落库的判读各有一份审读记录');
+    assert.deepEqual(
+      reviews.map((item) => item.quoteFingerprint).sort(),
+      storedImpacts.map((impact) => quoteFingerprint(impact.quote)).sort(),
+      '指纹必须是本仓从判读现算的那一对（决定 19：内容指纹 join）',
+    );
+    assert.ok(
+      reviews.every((item) => item.status === 'passed'),
+      'stub 的缺省结论是通过 —— 这一刀（#47）的可见结果因此与今天逐条一致',
+    );
+    assert.equal(callsFor(CLOSED_INLINE_TITLE) - closedCalls, 1, '一条一次调用（审读走另一路端口，不占生成侧这一路）');
     // 索引同步也在共用链路里（失败只降级，但正常路径下它必须发生）
     assert.equal(
       db.prepare('select count(*) as n from notices_fts where notice_id = ?').get(CLOSED_INLINE).n,

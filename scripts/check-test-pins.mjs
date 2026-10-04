@@ -86,6 +86,9 @@ const TARGETS = {
   llmAdapter: 'src/lib/adapters/openai-compatible-llm.ts',
   // issue #86 第 1 刀：影响判读的展示判据（页面 .tsx 进不了单测，所以判据抽在 .ts 里）
   impactDisplay: 'src/lib/impact-display.ts',
+  // issue #47：审读记录的形状、读侧容错与「只减不加」的接受条件。它同样是"撤掉之后
+  // 一个字都不报错"的一类 —— 指纹比对放宽一点，页面照常渲染，只是可能配着别人的结论。
+  impactReview: 'src/lib/impact-review.ts',
   // issue #87（2026-10-03）：列表页「这条里有什么」的标记。判据在 `.ts`，渲染在 `.tsx` ——
   // 而 `.tsx` 撤不出红（e2e 跑构建产物），所以接线由 `tests/unit/notice-marks.test.mjs`
   // 最后那一组按**源码**钉。这两个键就是给它用的。
@@ -885,6 +888,28 @@ const CASES = [
     test: 'tests/e2e/summary-redraft.test.mjs',
   },
   {
+    // issue #47：这一列描述的是**那一份判读文本**被审读过什么，而判读随摘要一起没了。
+    // 不清的后果是具体的：重跑产出的新判读若与旧文本指纹相同（一字未改），它会静默继承
+    // 上一轮的审读结论 —— 而那份结论审的是"上一次那一份"。
+    label: '重跑不清审读记录（新判读静默继承上一轮的审读结论）',
+    file: 'summariesRepo',
+    from: '      impactReviewJson: null,',
+    to: '      // 撤掉实现：不清审读记录',
+    pattern: '审读记录随重跑一起清空',
+    test: 'tests/e2e/summary-redraft.test.mjs',
+  },
+  {
+    // issue #47：审读记录必须**与摘要同一次写入**（"这一列摘要是哪一次调用产出的"只有一个答案）。
+    // 撤成 null 之后摘要照常生成、页面照常渲染，只是这一批判读在门翻转之后会集体不渲染 ——
+    // 而那时看不出是"审读根本没跑"还是"审读把它们都判负了"。
+    label: '摘要落库时不写审读记录（翻转后这批判读集体消失且看不出原因）',
+    file: 'summariesRepo',
+    from: '      impactReviewJson: input.impactReviewJson,',
+    to: '      impactReviewJson: null,',
+    pattern: '名单外的条目一个字节不动',
+    test: 'tests/e2e/summarize-now.test.mjs',
+  },
+  {
     label: '探针没看到备份目录也报健康（把"我不知道"折叠成"没问题"）',
     file: 'pipelineHealth',
     from: '  if (!input.seenDir) {',
@@ -1349,20 +1374,70 @@ const CASES = [
     test: 'tests/unit/summary-impacts.test.mjs',
   },
   {
-    label: '影响判读不再看受众面（行业专业条目也把"可能的争议点"推给读者）',
+    // issue #47：门由谓词变**选择器**之后，这两条靶点跟着搬（#86 那两条钉的是"受众面在不在
+    // 门里"与"空数组渲不渲染"，判据一个字没改，只是实现形状换了）。
+    //
+    // 这一条撤的是**过渡回落**那一行：受众面是否退出判读的渲染判据定在第 6 条（#52），
+    // 本切片撤掉它 = 行业专业 / 未判定也把推断推给读者 —— 而那正是用户 2026-09-27
+    // 拍板要挡的那一档（"先只上公众广域 + 人工过一遍"）。
+    label: '判读的过渡回落被撤（非公众广域也把"可能的争议点"推给读者）',
     file: 'impactDisplay',
-    from: "  return input.audience === 'public' && input.impacts.length > 0;",
-    to: '  return input.impacts.length > 0;',
-    pattern: '行业专业条目不渲染',
+    from: "  if (input.audience !== 'public') return null;",
+    to: '',
+    pattern: '过渡回落',
     test: 'tests/unit/summary-impacts.test.mjs',
   },
   {
+    // 撤掉"空则 null"（改成直接返回数组）= 页面上留下一个只有标题的空壳。
+    // #85 的教训：一个写着标题、内容却空着的栏目，读者读到的是"这一栏没东西可看"。
     label: '影响判读一条都没有也渲染（页面上留下一个只有标题的空壳）',
     file: 'impactDisplay',
-    from: "  return input.audience === 'public' && input.impacts.length > 0;",
-    to: "  return input.audience === 'public';",
-    pattern: '一条判读都没有时不渲染',
+    from: '  return rendered.length > 0 ? rendered : null;',
+    to: '  return rendered;',
+    pattern: '一条判读都没有',
     test: 'tests/unit/summary-impacts.test.mjs',
+  },
+  {
+    // issue #47 的两种读者可见投影，各钉一条（失效方式不同）：
+    // 撤掉「已改」那一支 ⇒ 退回渲染**原文**，而"原文不出现"正是并存语义的全部意义；
+    // 撤掉「剔除」那一行 ⇒ 被判负的那一条照旧推给读者（门形同虚设）。
+    // pattern 都取那一条用例独有的词：撤掉之后只有它翻红，别的用例本来就不走这一支。
+    label: '审读的「已改」被撤（退回渲染原文，"原文不出现"静默失效）',
+    file: 'impactDisplay',
+    from: "    if (review.status === 'revised') {",
+    to: '    if (false) {',
+    pattern: '已改',
+    test: 'tests/unit/summary-impacts.test.mjs',
+  },
+  {
+    label: '审读的「剔除」被撤（被判负的判读照旧推给读者）',
+    file: 'impactDisplay',
+    from: "    if (review.status === 'rejected') continue;",
+    to: '',
+    pattern: '剔除',
+    test: 'tests/unit/summary-impacts.test.mjs',
+  },
+  {
+    // 决定 19 的那一行：两个指纹**都**全等才算这份记录属于这条判读。
+    // 放宽成 `||` 的后果是"生成侧重跑改了 text 之后，旧结论照旧生效" ——
+    // 页面上看不出来（那段文本确实存在过一份结论），而它护的正是这一整层。
+    label: '审读记录按单个指纹配对（生成侧重跑后旧结论照旧生效）',
+    file: 'impactReview',
+    from: '    if (record.quoteFingerprint === quote && record.textFingerprint === text) return record;',
+    to: '    if (record.quoteFingerprint === quote || record.textFingerprint === text) return record;',
+    pattern: '指纹对不上',
+    test: 'tests/unit/summary-impacts.test.mjs',
+  },
+  {
+    // 硬约束 8（只减不加）的落地点：结论按**逐字回显的那一对 (quote, text)** 配对，
+    // 而不是按位置/顺序。改成按下标取之后，一条"想换引用"的结论也会被采信 ——
+    // 于是库里会出现一份挂在旧引用上的新结论，而读者读到的推断与它依据的原文对不上号。
+    label: '审读结论按位置配对（想换引用的结论也被接受：只减不加失守）',
+    file: 'impactReview',
+    from: '    const verdict = byKey.get(impactReviewKey(impact.quote, impact.text));',
+    to: '    const verdict = input.verdicts[records.length] ?? null;',
+    pattern: '想换 quote',
+    test: 'tests/unit/impact-review.test.mjs',
   },
   // ── 2026-10-02 两栏版式这一刀：摘要卡的段落顺序与「影响谁」的门控 ──────────────
   // 这三条里有两条的靶点在 `src/app/_lib/summary-view.tsx`（页面 .tsx）。为什么不配 e2e：
@@ -2010,6 +2085,17 @@ const CASES = [
     pattern: '页面真的用了 impactLine 与 impactOverview',
     test: 'tests/unit/who-display.test.mjs',
   },
+  {
+    // issue #47：详情页不再经由**门**取判读（直接读 `summary.impacts`）⇒ 审读层被整层绕开，
+    // 页面与列表又会各说各话。e2e 跑的是构建产物、撤 SSR 侧源码不红，所以由
+    // `tests/unit/summary-impacts.test.mjs` 的接线组按源码钉（与上面两条同一手法）。
+    label: '详情页不再经由渲染门取判读（审读层被整层绕开）',
+    file: 'summaryView',
+    from: '  const impacts = impactsToRender({',
+    to: '  const impacts = summary.impacts;',
+    pattern: '详情页经同一道门取判读',
+    test: 'tests/unit/summary-impacts.test.mjs',
+  },
   // ── 2026-10-02 收尾：概览的主体索引 + 两处版式宽度 + 列表页两栏 ──────────────
   {
     // 概览把主体用顿号连成一行，而旧行的 `who` 自己就带顿号（契约之前产的）：线上
@@ -2075,9 +2161,11 @@ const CASES = [
     // 这一条是整刀的风险所在：生产库里有一批 `sector` 条目**存着判读但详情页一个字都不渲染**
     // （受众面门控）。列表页若照库里的数组打标记，读者点进去会发现什么都没有 ——
     // 列表在承诺详情页不存在的东西，那比没有标记坏得多。所以靶点就是那道门本身。
-    label: '列表标记不再看受众面（列表承诺详情页不存在的东西）',
+    // issue #47 起门多了**审读**这一维：审读剔除掉唯一一条之后，同样的缺口会以新形状出现
+    // （列表按库里的数组打标、详情页已剔除），而靶点仍然是这一次调用。
+    label: '列表标记不再经由渲染门（列表承诺详情页不存在的东西）',
     file: 'noticeMarks',
-    from: '  if (shouldRenderImpacts({ audience, impacts })) {',
+    from: '  if (impactsToRender({ audience, impacts, reviews }) !== null) {',
     to: '  if (impacts.length > 0) {',
     pattern: '行业专业',
     test: 'tests/unit/notice-marks.test.mjs',
@@ -2096,10 +2184,12 @@ const CASES = [
   {
     // 接线：判据对了、组件没接上 —— 这一类改动最常见的断线，而它在 e2e 里**看不见**
     // （e2e 跑 `.next` 构建产物）。所以由单测那一组按**源码**钉，这里撤的是接线本身。
-    label: '组件不再把摘要喂给 noticeMarks（判据对、页面没接上）',
+    // issue #47 之后这一处多了一维输入（审读记录）：不喂的话，列表会按"库里存着判读"打标，
+    // 而详情页可能已经把那条剔除了 —— 正是这条接线要挡的事。
+    label: '组件不再把摘要与审读记录喂给 noticeMarks（判据对、页面没接上）',
     file: 'noticeItem',
-    from: '    ? noticeMarks({ audience: notice.audience, summary: parseQuotedSummary(notice.aiSummary) })',
-    to: '    ? []',
+    from: '        reviews: notice.impactReviews,',
+    to: '        // 撤掉实现：不喂审读记录',
     pattern: '组件真的用了 noticeMarks',
     test: 'tests/unit/notice-marks.test.mjs',
   },

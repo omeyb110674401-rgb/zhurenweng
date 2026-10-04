@@ -4,7 +4,8 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, it } from 'node:test';
 import { NOTICE_MARK_HINTS, NOTICE_MARK_LABELS, noticeMarks } from '../../src/lib/notice-marks.ts';
-import { shouldRenderImpacts } from '../../src/lib/impact-display.ts';
+import { impactsToRender } from '../../src/lib/impact-display.ts';
+import { impactReviewRecordsFrom } from '../../src/lib/impact-review.ts';
 
 /**
  * 单元：列表页的「这条里有什么」标记（issue #87，2026-10-03 拍板）。
@@ -17,6 +18,10 @@ import { shouldRenderImpacts } from '../../src/lib/impact-display.ts';
  * 判据抽在 `lib/notice-marks.ts` 而不是写在组件里，为的就是这一组能跑起来 ——
  * 页面 `.tsx` 进不了本仓库的单测（`check-test-pins.mjs` 硬规则第 1 条：e2e 跑的是 `.next`
  * 构建产物，撤 `src/app/**` 撤不出红）。**怎么画**留给组件，由最后一组按源码钉接线。
+ *
+ * issue #47 又给这道门加了一维输入：**审读**。某条判读被审读剔除之后详情页不再渲染它，
+ * 列表也就必须跟着不打标 —— 那条 4×2 的契约测试因此扩成 4×2×4（受众面 × 有没有判读 ×
+ * 审读结论）。这正是它存在的意义：每次门一改形状，它就会在"两边各说各话"之前先红。
  */
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
@@ -39,6 +44,26 @@ const IMPACT = {
 /** 只给 `noticeMarks` 真读的那三个键；其余键与判据无关。 */
 function summary(parts = {}) {
   return { impacts: [], changes: [], changeTable: null, ...parts };
+}
+
+/**
+ * 一条审读记录（issue #47）：走**写侧**造出来 —— 指纹的口径只有一处（生成侧的
+ * `quoteFingerprint`），测试里手抄一份就会在口径变动时静默过期。
+ */
+function reviewRecords(status) {
+  return impactReviewRecordsFrom({
+    impacts: [IMPACT],
+    verdicts: [
+      {
+        quote: IMPACT.quote,
+        text: IMPACT.text,
+        status,
+        revisedText: status === 'revised' ? '审读后：通行者的支出预期被改变。' : null,
+      },
+    ],
+    model: 'stub',
+    reviewedAt: '2026-10-04T12:00:00.000Z',
+  });
 }
 
 describe('issue #87：列表标记的判据（只说"有"，不说"无"）', () => {
@@ -100,20 +125,56 @@ describe('issue #87：列表标记的判据（只说"有"，不说"无"）', () 
 
   /**
    * 契约测试：把"同一道门"钉成**可执行**的东西，而不是注释里的一句话。
-   * 有效组合只有 4×2 种，穷举比举例子更难写错。
+   * 有效组合只有 4×2×4 种（受众面 × 有没有判读 × 审读结论），穷举比举例子更难写错。
+   *
+   * issue #47 把审读结论加进输入空间：审读**剔除**掉唯一一条之后，详情页不渲染那一段，
+   * 列表也就不许再打标 —— 这正是这条契约测试存在的意义（它每次都是靠"列表与详情页
+   * 逐格对齐"把上一刀的风险挡住的：库里存着判读，而门不放行）。
    */
-  it('契约：impacts 那一支的结论与 `shouldRenderImpacts` 逐格一致（同一道门）', () => {
+  it('契约：impacts 那一支的结论与 `impactsToRender` 逐格一致（同一道门）', () => {
+    const reviewCases = [
+      { label: '没有记录', reviews: [] },
+      { label: '通过', reviews: reviewRecords('passed') },
+      { label: '已改', reviews: reviewRecords('revised') },
+      { label: '剔除', reviews: reviewRecords('rejected') },
+    ];
     for (const audience of ['public', 'sector', 'unknown', null]) {
       for (const impacts of [[], [IMPACT]]) {
-        const viaMarks = noticeMarks({ audience, summary: summary({ impacts }) }).includes('impacts');
-        const viaGate = shouldRenderImpacts({ audience, impacts });
-        assert.equal(
-          viaMarks,
-          viaGate,
-          `audience=${audience} impacts=${impacts.length}：列表标记与详情页门控结论必须一致`,
-        );
+        for (const { label, reviews } of reviewCases) {
+          const viaMarks = noticeMarks({ audience, summary: summary({ impacts }), reviews }).includes(
+            'impacts',
+          );
+          const viaGate = impactsToRender({ audience, impacts, reviews }) !== null;
+          assert.equal(
+            viaMarks,
+            viaGate,
+            `audience=${audience} impacts=${impacts.length} 审读=${label}：列表标记与详情页门控结论必须一致`,
+          );
+        }
       }
     }
+  });
+
+  it('审读把唯一一条**剔除** ⇒ 不打标（列表不许承诺详情页不存在的东西）', () => {
+    assert.deepEqual(
+      noticeMarks({
+        audience: 'public',
+        summary: summary({ impacts: [IMPACT] }),
+        reviews: reviewRecords('rejected'),
+      }),
+      [],
+    );
+  });
+
+  it('审读**已改** ⇒ 照常打标（那一段还在，只是换了文本 —— 标记说的是"这里有判读"）', () => {
+    assert.deepEqual(
+      noticeMarks({
+        audience: 'public',
+        summary: summary({ impacts: [IMPACT] }),
+        reviews: reviewRecords('revised'),
+      }),
+      ['impacts'],
+    );
   });
 
   it('措辞不许被悄悄改软：impacts 的文案含「推断」与「非官方」', () => {
@@ -134,11 +195,11 @@ describe('issue #87：列表标记的判据（只说"有"，不说"无"）', () 
 describe('issue #87：接线（源码）', () => {
   const item = readRepoFile('src/app/_lib/notice-item.tsx');
 
-  it('组件真的用了 noticeMarks，并把解析后的摘要喂给它', () => {
+  it('组件真的用了 noticeMarks，并把解析后的摘要**与审读记录**一起喂给它', () => {
     assert.match(
       item,
-      /noticeMarks\(\{ audience: notice\.audience, summary: parseQuotedSummary\(notice\.aiSummary\) \}\)/,
-      '判据必须走 lib/notice-marks.ts，而不是在组件里另写一个 if',
+      /noticeMarks\(\{[\s\S]*?audience: notice\.audience,[\s\S]*?summary: parseQuotedSummary\(notice\.aiSummary\),[\s\S]*?reviews: notice\.impactReviews,[\s\S]*?\}\)/,
+      '判据必须走 lib/notice-marks.ts，而不是在组件里另写一个 if；审读记录也要喂进同一道门（否则列表会承诺详情页已剔除的判读）',
     );
   });
 
