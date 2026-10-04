@@ -117,6 +117,9 @@ const TARGETS = {
   // 这两处靶点分别钉"判据本身"与"脚本真的用了那份判据"。
   redraftCandidates: 'src/lib/redraft-candidates.ts',
   redraftScript: 'scripts/reset-summaries-for-redraft.mjs',
+  // issue #49：审读规则与提示词。六类判据是**文字**，而文字只有被案例钉住才拦得住改动 ——
+  // 错误案例库（`tests/unit/impact-review-rules.test.mjs`）就是那颗钉子。
+  impactReviewPrompt: 'src/lib/impact-review-prompt.ts',
   // issue #86 第 3 刀：喂入侧的档位与预算。这一处撤掉之后**一个字都不会报错** ——
   // 档位判错就是"还是老样子"（回到标准档，页面照常出摘要），喂少了只是模型看到的东西变少，
   // 而那正是这一刀要消灭的静默失败，所以它必须有"撤掉实现必须变红"的钉子。
@@ -1747,6 +1750,64 @@ const CASES = [
     to: "  ...{ candidate: row.status !== 'closed', reason: '撤掉实现：不用判据' },",
     pattern: '不带 --ids 时走池子',
     test: 'tests/e2e/redraft-ids.test.mjs',
+  },
+  // ── issue #49：审读规则（六类判据）与错误案例库 ──────────────────────────────
+  {
+    // A1 是真实语料里唯一有正例的一类（87 过目清单点名的两处卡点），所以它的实质要求
+    // 尤其不能被改软：撤掉"引用里没有写成本…就不许推出成本…"这句之后，那些案例全都不再被拦。
+    label: 'A1 的实质要求被改软（引用没写的成本 / 处罚 / 监管加强又被推出来）',
+    file: 'impactReviewPrompt',
+    from: "    + '引用里没有写成本、没有写处罚、没有写监管加强，就不许推出成本、处罚、监管加强。'",
+    to: "    + '引用要读得仔细一点。'",
+    pattern: 'A1',
+    test: 'tests/unit/impact-review-rules.test.mjs',
+  },
+  {
+    // 这一句是"不许因为它是推断就判负"的判据。撤掉它，审读模型会把**所有**判读都判负 ——
+    // 而 L3 的定义就是"结论是推断、但挂可核对的原文"，那等于把这一层整个关掉。
+    label: '提示词丢掉「多走一步不算错」（审读会把所有判读都判负）',
+    file: 'impactReviewPrompt',
+    from: '  \'判读是**推断**，"比原文多走一步"是它成立的方式，不算错。你要拦的是**多走了不该走的那一步**。\',',
+    to: "  '判读是推断。',",
+    pattern: '判正',
+    test: 'tests/unit/impact-review-rules.test.mjs',
+  },
+  {
+    // 只减不加的三句话（不换引用 / 不增删条目 / 逐字回显）是接受层能核对的前提。
+    label: '提示词不再交代「只减不加」（模型开始换引用、增删条目）',
+    file: 'impactReviewPrompt',
+    from: "  '只减不加：**不许换引用**，**不许新增或删除判读条目**。你只能给出三种结论之一：'",
+    to: "  '只减不加。',",
+    pattern: '系统提示词含六类判据',
+    test: 'tests/unit/impact-review-rules.test.mjs',
+  },
+  {
+    // 邻域长度是具名常量、只此一处：默认窗口回落到 0 之后，邻域只剩引用本身 ——
+    // 而 A1 会因此退化成循环判据（拿引用证明引用）。
+    label: '邻域的缺省窗口不再来自那个具名常量（A1 退化成拿引用证明引用）',
+    file: 'impactReviewPrompt',
+    from: '  chars: number = IMPACT_REVIEW_NEIGHBORHOOD_CHARS,',
+    to: '  chars: number = 0,',
+    pattern: '缺省窗口就是那个具名常量',
+    test: 'tests/unit/impact-review-rules.test.mjs',
+  },
+  {
+    // 归一化定位这一行：撤掉它，附件抽取出来的换行/全角空格/引号字形差异会让**真引用**定位不到，
+    // 邻域变成 null（三条判据都判不了），而这件事在页面上看不出来。
+    label: '邻域定位不再做归一化（真引用定位不到 ⇒ 邻域恒为 null）',
+    file: 'impactReviewPrompt',
+    from: '  const located = locateNormalized(sourceText, anchor);',
+    to: '  const located = null;',
+    pattern: '容忍附件抽取出来的换行',
+    test: 'tests/unit/impact-review-rules.test.mjs',
+  },
+  {
+    label: '提示词不再告诉模型邻域多长（依据范围又变成猜的）',
+    file: 'impactReviewPrompt',
+    from: '      `引用出处前后各 ${IMPACT_REVIEW_NEIGHBORHOOD_CHARS} 字的原文（邻域）：`,',
+    to: "      '引用出处的原文（邻域）：',",
+    pattern: '邻域长度只写在常量里',
+    test: 'tests/unit/impact-review-rules.test.mjs',
   },
   // 2026-09-30：引号字形归一（生产实测：附件原文是中文引号、模型某几遍吐 ASCII 直引号，
   // 词句逐字一致却整行被判"对不上" —— 那一遍 9 行全丢，页面上「改了哪几处」只剩事实行）。
