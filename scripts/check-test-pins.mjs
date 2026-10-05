@@ -127,6 +127,10 @@ const TARGETS = {
   // issue #51：只审读不重跑那条通道（存量里"摘要已经完整、不该重跑"的条目也要有审读记录，
   // 否则门翻转之后它们会集体不渲染 —— 公众广域那几条正在线上的判读就是这么走的）
   reviewImpactsNow: 'scripts/review-impacts-now.mjs',
+  // issue #51/#52 收尾：**线上量具**（`deploy/audit-l3-reach.sql`）。它在本机跑不了
+  // （没有 Postgres、没有 Docker），而它又是门翻转那件事唯一的线上证据 ——
+  // 于是"它有没有跟着代码一起漂"只能靠一个读它文本的单测，而那个单测自己要被撤一次看看红不红。
+  auditL3Reach: 'deploy/audit-l3-reach.sql',
   // issue #86 第 3 刀：喂入侧的档位与预算。这一处撤掉之后**一个字都不会报错** ——
   // 档位判错就是"还是老样子"（回到标准档，页面照常出摘要），喂少了只是模型看到的东西变少，
   // 而那正是这一刀要消灭的静默失败，所以它必须有"撤掉实现必须变红"的钉子。
@@ -1440,6 +1444,43 @@ const CASES = [
     to: '    if (record.quoteFingerprint === quote || record.textFingerprint === text) return record;',
     pattern: '指纹对不上',
     test: 'tests/unit/summary-impacts.test.mjs',
+  },
+  // ── 线上量具自己（issue #51/#52 收尾，2026-10-05）────────────────────────────
+  // 这一组撤的是 `deploy/audit-l3-reach.sql`（不是 .ts）。为什么它值得占四条：
+  // 门翻转那件事**没有本地可跑的端到端验证**（没有 Postgres），线上只见得到这个脚本的输出 ——
+  // 它一旦与代码漂开，表现是"数字看起来是对的"（第 6/12 节少报几条），而读的人会怀疑数据。
+  // 四条分别对着四种漂法：白名单放宽 / 尺子少一步 / 只比一个指纹 / 受众面偷偷回来。
+  {
+    label: '审计 SQL 的结论白名单放宽（被剔除的判读被算成"门放行"）',
+    file: 'auditL3Reach',
+    from: "in ('passed', 'revised')",
+    to: "in ('passed', 'revised', 'rejected')",
+    pattern: '结论白名单不是抄的',
+    test: 'tests/unit/audit-l3-reach-sql.test.mjs',
+  },
+  {
+    label: '审计 SQL 的指纹尺子少一步（引号字形不归一 ⇒ 量具说"没有记录"）',
+    file: 'auditL3Reach',
+    from: "'[“”＂〝〞「」『』]', '\"', 'g'),",
+    to: "'', '\"', 'g'),",
+    pattern: '逐例全等',
+    test: 'tests/unit/audit-l3-reach-sql.test.mjs',
+  },
+  {
+    label: '审计 SQL 只比一个指纹（生成侧重跑后旧结论在量具里照旧"放行"）',
+    file: 'auditL3Reach',
+    from: "and rec ->> 'textFingerprint' = pg_temp.zw_fingerprint(i ->> 'text')",
+    to: 'and (true)',
+    pattern: '两个指纹都要全等',
+    test: 'tests/unit/audit-l3-reach-sql.test.mjs',
+  },
+  {
+    label: '受众面回到审计 SQL 的"能不能渲染"里（量具与页面各说各话）',
+    file: 'auditL3Reach',
+    from: "in ('passed', 'revised')))",
+    to: "in ('passed', 'revised') and audience = 'public')))",
+    pattern: '受众面已退出判据',
+    test: 'tests/unit/audit-l3-reach-sql.test.mjs',
   },
   {
     // 硬约束 8（只减不加）的落地点：结论按**逐字回显的那一对 (quote, text)** 配对，

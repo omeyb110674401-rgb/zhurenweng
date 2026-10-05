@@ -312,9 +312,14 @@ describe('issue #86 / #52：详情页「可能的争议点」与渲染门（只�
    * 为什么要一起注入（#52）：门是 fail-closed 的 —— 只有"有有效审读记录"的判读才渲染。
    * 只注入摘要的话，这一组测的就变成"没有记录 ⇒ 什么都不渲染"，而不是页面上那几行字。
    * 反过来，`withRecords: false` 正是"没有记录"那一档的夹具。
+   *
+   * 三个选项对应门后面的三种投影（缺省 = 全部"通过"）：
+   * - `verdicts`：逐条给结论（「已改」要带 `revisedText`、「剔除」不带）；
+   * - `recordImpacts`：记录按**另一份判读**造出来 —— 那就是"生成侧重跑过、text 变了"的夹具，
+   *   用来钉"旧结论自动失效"这条时序语义（指纹对不上 ⇒ 不渲染）。
    */
   function injectImpacts(title, impacts, options = {}) {
-    const { withRecords = true } = options;
+    const { withRecords = true, verdicts, recordImpacts = impacts } = options;
     const db = new Database(dbFile);
     try {
       const original = db
@@ -327,12 +332,14 @@ describe('issue #86 / #52：详情页「可能的争议点」与渲染门（只�
       const records = withRecords
         ? serializeImpactReviews(
             impactReviewRecordsFrom({
-              impacts,
-              verdicts: impacts.map((impact) => ({
-                quote: impact.quote,
-                text: impact.text,
-                status: 'passed',
-              })),
+              impacts: recordImpacts,
+              verdicts:
+                verdicts ??
+                recordImpacts.map((impact) => ({
+                  quote: impact.quote,
+                  text: impact.text,
+                  status: 'passed',
+                })),
               model: 'e2e',
               reviewedAt: '2026-10-04T00:00:00.000Z',
             }),
@@ -441,6 +448,88 @@ describe('issue #86 / #52：详情页「可能的争议点」与渲染门（只�
     );
     assert.ok(!blocked.includes('可能的争议点'), '连标题都不出现');
     assert.ok(!blocked.includes('期限届满后若继续收费'), '推断的正文也不出现');
+  });
+
+  /**
+   * issue #47/#52 的**两种投影**在页面上是什么样：单测钉的是纯函数
+   * （`tests/unit/summary-impacts.test.mjs`），这里钉的是"它真的到了读者眼前"。
+   *
+   * 为什么这两条非有不可：「已改」是整条链路里唯一一处**文本被换掉**的地方，而它换错方向
+   * （退回原文）在页面上看起来完全正常 —— 那段话本来就存在过。只有把"原文一个字都不出现"
+   * 当成断言，才拦得住；「剔除」同理：整块消失与只去掉一条，读者看到的差别很大，
+   * 而两者在"某一条不在了"这一点上完全一样。
+   */
+  it('审读「已改」：页面上是审读后文本，生成时那句话一个字都不出现', async () => {
+    const REVISED = '审读后重写：期限届满后若继续收费，须重新履行听取意见程序。';
+    injectImpacts(AMENDMENT_TITLE, IMPACTS, {
+      verdicts: [
+        { quote: IMPACTS[0].quote, text: IMPACTS[0].text, status: 'revised', revisedText: REVISED },
+      ],
+    });
+    const html = await detailOf(AMENDMENT_TITLE);
+    assert.match(html, /data-testid="summary-impacts"/);
+    assert.ok(html.includes(REVISED), '「已改」渲染的是审读后文本');
+    assert.ok(
+      !html.includes('期限届满后若继续收费，通行费负担可能长期化。'),
+      '"原文不出现"是这一支的全部意义 —— 退回原文时页面看不出任何异常',
+    );
+    assert.ok(
+      html.includes('收费公路在收费偿债或者收费经营期间的管理养护费用'),
+      '逐字引用的原文照旧要在（它才是这段话的依据）',
+    );
+  });
+
+  it('审读「剔除」：只去掉那一条，同一段里其余判读照常（逐条剔除，不是整块消失）', async () => {
+    const KEPT = IMPACTS[0];
+    const DROPPED = {
+      quote: '网络服务提供者应当建立便捷的投诉、举报入口，及时受理并处理公众投诉、举报。',
+      who: '不愿实名发言的用户',
+      text: '实名要求可能压缩匿名表达的空间。',
+      kind: 'loophole',
+      source: '关于《中华人民共和国公路法（修正草案征求意见稿）》的起草说明.wps',
+      sourceUrl: 'https://attachments.test/explanation.wps',
+    };
+    injectImpacts(AMENDMENT_TITLE, [KEPT, DROPPED], {
+      verdicts: [
+        { quote: KEPT.quote, text: KEPT.text, status: 'passed' },
+        { quote: DROPPED.quote, text: DROPPED.text, status: 'rejected' },
+      ],
+    });
+    const html = await detailOf(AMENDMENT_TITLE);
+    assert.match(html, /data-testid="summary-impacts"/, '一条被判负不等于整段消失');
+    assert.ok(html.includes(KEPT.text), '被放行的那条照常渲染');
+    assert.ok(!html.includes(DROPPED.text), '被判负的那条不许推给读者');
+    assert.ok(
+      html.includes('共 1 处：'),
+      '概览的计数是**过门之后**的条数（它数的是读者真能看见的那几条）',
+    );
+  });
+
+  it('全部被剔除 ⇒ 整段不渲染（连标题都不出现）', async () => {
+    injectImpacts(AMENDMENT_TITLE, IMPACTS, {
+      verdicts: [{ quote: IMPACTS[0].quote, text: IMPACTS[0].text, status: 'rejected' }],
+    });
+    const html = await detailOf(AMENDMENT_TITLE);
+    assert.match(html, /data-testid="ai-summary"/, '排除"整页没渲染"这种假通过');
+    assert.ok(!html.includes('data-testid="summary-impacts"'));
+    assert.ok(!html.includes('可能的争议点'), '空壳比没有更坏 —— #85 的教训');
+  });
+
+  /**
+   * 时序语义（决定 19）在页面上的样子：指纹是**从判读现算**的，所以生成侧重跑改了 text 之后，
+   * 那份旧结论自动不再匹配 —— 不必谁去清理它，也不会出现"过期结论照旧生效"。
+   */
+  it('生成侧重跑改了 text：旧审读记录自动失效（指纹对不上就不渲染）', async () => {
+    injectImpacts(AMENDMENT_TITLE, [{ ...IMPACTS[0], text: '重跑之后换了一种说法。' }], {
+      recordImpacts: IMPACTS,
+    });
+    const html = await detailOf(AMENDMENT_TITLE);
+    assert.match(html, /data-testid="ai-summary"/, '排除"整页没渲染"这种假通过');
+    assert.ok(
+      !html.includes('data-testid="summary-impacts"'),
+      '指纹对不上 ⇒ 没有有效记录 ⇒ 不渲染（旧结论不许照旧生效）',
+    );
+    assert.ok(!html.includes('重跑之后换了一种说法。'), '重跑后的文本同样不渲染');
   });
 
   it('一条判读都没有时整块不渲染（连标题都不出现）', async () => {
