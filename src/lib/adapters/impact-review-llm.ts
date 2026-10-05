@@ -34,8 +34,44 @@ import { extraHeaders, stripJsonFence } from './openai-compatible-llm.ts';
  * "诊断里能区分'端口没跑'与'跑了但形状非法'"。
  */
 
-/** 缺省超时（毫秒）。审读是同步链路的一环，不能像摘要那样慢：给 60 秒。 */
-export const IMPACT_REVIEW_DEFAULT_TIMEOUT_MS = 60_000;
+/**
+ * 缺省超时（毫秒）。
+ *
+ * **2026-10-05 按真实金丝雀的读数从 60 秒调到 180 秒**：审读侧用的这一档是**推理模型**，
+ * 同一份 6 条判读的请求实测 `deepseek-v4-pro` 要 61 秒（给了输出上限）/ 144 秒（不给上限），
+ * `deepseek-flash` 要 21–28 秒。60 秒会**随机掐断**长响应，而掐断的表现不是超时错 ——
+ * 见下面响应处理那一段（会被读成"模型没吐正文"）。
+ *
+ * 为什么宁可等：审读不成 ⇒ 门 fail-closed ⇒ 这一条判读**不上页面**。等 3 分钟与丢一条
+ * 读者本来就该看到的推断，代价不在一个量级。
+ */
+export const IMPACT_REVIEW_DEFAULT_TIMEOUT_MS = 180_000;
+
+/**
+ * 审读请求的输出上限（token）。
+ *
+ * 为什么必须显式给一个：推理 token **计入同一个预算**。实测同一条请求
+ * `deepseek-v4-pro` 花掉 12,824 个推理 token（合计 13,380），`deepseek-flash` 花掉 4,185–5,523 个；
+ * 不给上限时（金丝雀第一跑）出现过"预算全被推理吃掉、`content` 是空串"的失败，
+ * 而它报出来只是一个形状错。给 8192 之后同一条请求 61 秒、`finish_reason=stop`、正文完整。
+ *
+ * 它同时是**成本与延迟的闸**：上限就是最坏情况下的开销（推理模型会一直想到预算用完）。
+ */
+/**
+ * 审读请求的**缺省**输出上限（token）。可经 `IMPACT_REVIEW_MAX_TOKENS` 覆盖。
+ *
+ * 为什么必须显式给一个：推理 token **与正文共用同一个预算**。2026-10-05 的真实金丝雀实测
+ * 同一条请求（6 条判读）：
+ *   · `deepseek-v4-pro` 12,824 个推理 token（合计 13,380）／`deepseek-flash` 3,387–5,523 个；
+ *   · 给 8192 ⇒ `finish_reason=length`、推理正文吃掉全部预算、**`content` 是空串**（一跑一败）；
+ *   · 给 16384 ⇒ 两次都 `stop`，正文完整（v4-pro 79 秒 / flash 17 秒）。
+ * 推理长度**一跑一变**（5.5k–12.8k 都见过），所以这个数不能贴着实测最小值给 —— 而按
+ * 缺省（不给上限）走时它会一路想到 13k+ token，又慢又贵。
+ *
+ * 它同时是**成本与延迟的闸**：上限就是最坏情况下的开销。撞上它的表现是自描述的
+ * （`finish_reason=length，推理正文 N 字`），看到就把这个值调大。
+ */
+export const IMPACT_REVIEW_DEFAULT_MAX_TOKENS = 16_384;
 
 /** 解析后的审读侧配置（构造端口与独立性核对共用一份口径）。 */
 export interface ResolvedImpactReviewConfig {
@@ -43,6 +79,7 @@ export interface ResolvedImpactReviewConfig {
   apiBase: string;
   model: string;
   timeoutMs: number;
+  maxTokens: number;
   headers: Record<string, string>;
   providerLabel: string;
 }
@@ -61,6 +98,20 @@ function timeoutOf(raw: string | undefined): number {
   const parsed = Number(value);
   if (!Number.isFinite(parsed) || parsed <= 0) {
     throw new ImpactReviewConfigError(`IMPACT_REVIEW_TIMEOUT_MS 不是正数毫秒值：「${value}」`);
+  }
+  return parsed;
+}
+
+/**
+ * 输出上限。可调的理由是实测出来的：推理长度一跑一变（5.5k–12.8k token），
+ * 贴着下限给会随机丢掉整条审读 —— 那意味着这一条判读**不上页面**（门是 fail-closed 的）。
+ */
+function maxTokensOf(raw: string | undefined): number {
+  const value = (raw ?? '').trim();
+  if (value === '') return IMPACT_REVIEW_DEFAULT_MAX_TOKENS;
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed) || parsed <= 0) {
+    throw new ImpactReviewConfigError(`IMPACT_REVIEW_MAX_TOKENS 不是正整数：「${value}」`);
   }
   return parsed;
 }
@@ -89,6 +140,7 @@ export function resolveImpactReviewConfig(
     apiBase: apiBase.replace(/\/+$/, ''),
     model: required(env.IMPACT_REVIEW_MODEL, 'IMPACT_REVIEW_MODEL', '审读模型名（如 glm-4.5）'),
     timeoutMs: timeoutOf(env.IMPACT_REVIEW_TIMEOUT_MS),
+    maxTokens: maxTokensOf(env.IMPACT_REVIEW_MAX_TOKENS),
     headers: extraHeaders(env.IMPACT_REVIEW_EXTRA_HEADERS),
     providerLabel: 'openai-compatible',
   };
@@ -152,6 +204,15 @@ export function parseImpactReviewVerdicts(content: string): ImpactReviewVerdict[
   return verdicts;
 }
 
+/** 兼容端点响应里我们用得上的那几格（其余一律不看）。 */
+interface ChatCompletionPayload {
+  choices?: Array<{
+    message?: { content?: unknown; reasoning_content?: unknown };
+    finish_reason?: unknown;
+  }>;
+  usage?: { completion_tokens?: unknown };
+}
+
 /** 真实审读端口（OpenAI 兼容端点）。 */
 export class OpenAiCompatibleImpactReview implements ImpactReviewPort {
   readonly provider: string;
@@ -160,6 +221,7 @@ export class OpenAiCompatibleImpactReview implements ImpactReviewPort {
   private readonly apiKey: string;
   private readonly apiBase: string;
   private readonly timeoutMs: number;
+  private readonly maxTokens: number;
   private readonly headers: Record<string, string>;
   private readonly fetchImpl: typeof fetch;
 
@@ -169,6 +231,7 @@ export class OpenAiCompatibleImpactReview implements ImpactReviewPort {
     this.apiKey = options.apiKey;
     this.apiBase = options.apiBase;
     this.timeoutMs = options.timeoutMs;
+    this.maxTokens = options.maxTokens;
     this.headers = options.headers;
     this.fetchImpl = options.fetchImpl ?? fetch;
   }
@@ -204,6 +267,8 @@ export class OpenAiCompatibleImpactReview implements ImpactReviewPort {
           ],
           // 审读要的是**稳定**：同一份判读两次判出不同结论，会让"重跑即失效"那条规矩失去意义
           temperature: 0,
+          // 推理模型（DeepSeek 这一档）的推理 token 与正文共用这一个预算：不给上限会被推理吃光
+          max_tokens: this.maxTokens,
         }),
         signal: AbortSignal.timeout(this.timeoutMs),
       });
@@ -227,14 +292,61 @@ export class OpenAiCompatibleImpactReview implements ImpactReviewPort {
       );
     }
 
-    const payload = (await response.json().catch(() => null)) as {
-      choices?: Array<{ message?: { content?: unknown } }>;
-    } | null;
-    const content = payload?.choices?.[0]?.message?.content;
-    if (typeof content !== 'string' || content.length === 0) {
+    /**
+     * 先取**文本**再自己解析，不用 `response.json().catch(() => null)`。
+     *
+     * 那个写法会把两种处置完全相反的故障混成同一句"形状非法"：
+     * ① 端点回了个非 JSON 的正文 ⇒ 提示词/端点的活；
+     * ② 正文**读到一半断了**（超时或断网）⇒ 重试 / 调超时的活。
+     *
+     * 2026-10-05 的真实金丝雀正是在这里被误诊的：60 秒的超时把 `deepseek-v4-pro` 的长响应掐断，
+     * `catch(() => null)` 把它吞成"缺少 choices[0].message.content"—— 看着像模型没吐东西，
+     * 其实是我们的超时太短（那两个修复方向差得很远）。
+     */
+    let bodyText: string;
+    try {
+      bodyText = await response.text();
+    } catch (error) {
+      const name = error instanceof Error ? error.name : '';
+      throw new ImpactReviewTransportError(
+        `审读响应读到一半就断了：${error instanceof Error ? error.message : String(error)}`,
+        name === 'TimeoutError' || name === 'AbortError' ? 'timeout' : 'network',
+        { elapsedMs },
+      );
+    }
+
+    let payload: ChatCompletionPayload | null = null;
+    try {
+      payload = JSON.parse(bodyText) as ChatCompletionPayload;
+    } catch {
       throw new ImpactReviewShapeError(
-        '审读响应缺少 choices[0].message.content 文本',
-        '',
+        '审读响应不是合法 JSON',
+        bodyText.slice(0, 500),
+        elapsedMs,
+      );
+    }
+
+    const choice = payload?.choices?.[0];
+    const content = choice?.message?.content;
+    if (typeof content !== 'string' || content.length === 0) {
+      // 空正文必须说清"为什么空"：`finish_reason=length` 要去调输出上限，
+      // 而"推理正文有、content 空"是推理模型的特征。只报一句"缺少文本"，
+      // 下一个人会去改提示词 —— 方向完全错。
+      const finishReason =
+        typeof choice?.finish_reason === 'string' ? choice.finish_reason : '未知';
+      const reasoningChars =
+        typeof choice?.message?.reasoning_content === 'string'
+          ? choice.message.reasoning_content.length
+          : 0;
+      const completionTokens =
+        typeof payload?.usage?.completion_tokens === 'number'
+          ? payload.usage.completion_tokens
+          : null;
+      throw new ImpactReviewShapeError(
+        `审读响应缺少 choices[0].message.content 文本（finish_reason=${finishReason}，` +
+          `推理正文 ${reasoningChars} 字` +
+          `${completionTokens === null ? '' : `，completion_tokens=${completionTokens}`}）`,
+        bodyText.slice(0, 500),
         elapsedMs,
       );
     }

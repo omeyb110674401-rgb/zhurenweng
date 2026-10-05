@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import http from 'node:http';
 import { after, before, describe, it } from 'node:test';
 import {
+  IMPACT_REVIEW_DEFAULT_MAX_TOKENS,
   IMPACT_REVIEW_DEFAULT_TIMEOUT_MS,
   OpenAiCompatibleImpactReview,
   parseImpactReviewVerdicts,
@@ -98,6 +99,7 @@ describe('issue #50：审读侧配置（独立的环境变量族）', () => {
     assert.equal(config.apiKey, 'secret');
     assert.equal(config.model, 'glm-4.5');
     assert.equal(config.timeoutMs, IMPACT_REVIEW_DEFAULT_TIMEOUT_MS);
+    assert.equal(config.maxTokens, IMPACT_REVIEW_DEFAULT_MAX_TOKENS, '输出上限有缺省值');
     assert.throws(
       () =>
         resolveImpactReviewConfig({
@@ -108,6 +110,34 @@ describe('issue #50：审读侧配置（独立的环境变量族）', () => {
         }),
       (error) => error instanceof ImpactReviewConfigError,
     );
+  });
+
+  /**
+   * 输出上限是**可调**的（2026-10-05 真实金丝雀）：推理长度一跑一变（实测 5.5k–12.8k token），
+   * 撞上上限的表现是 `finish_reason=length` + 空正文 ⇒ 这一条判读不上页面。所以运维要能
+   * **不改代码**把它调大 —— 但也不能接受一个非法值被当成"就用它"。
+   */
+  it('输出上限可经 IMPACT_REVIEW_MAX_TOKENS 覆盖；非正整数当场抛', () => {
+    const config = resolveImpactReviewConfig({
+      IMPACT_REVIEW_API_BASE: 'https://api.deepseek.com/v1',
+      IMPACT_REVIEW_API_KEY: 'k',
+      IMPACT_REVIEW_MODEL: 'deepseek-v4-pro',
+      IMPACT_REVIEW_MAX_TOKENS: '32768',
+    });
+    assert.equal(config.maxTokens, 32_768);
+    for (const bad of ['0', '-1', '8192.5', '很多']) {
+      assert.throws(
+        () =>
+          resolveImpactReviewConfig({
+            IMPACT_REVIEW_API_BASE: 'https://api.deepseek.com/v1',
+            IMPACT_REVIEW_API_KEY: 'k',
+            IMPACT_REVIEW_MODEL: 'm',
+            IMPACT_REVIEW_MAX_TOKENS: bad,
+          }),
+        (error) => error instanceof ImpactReviewConfigError && /不是正整数/.test(error.message),
+        `「${bad}」应当当场抛配置错`,
+      );
+    }
   });
 
   it('**不读生成侧的任何变量**：只给 LLM_* 时照样是"审读侧没配"', () => {
@@ -300,6 +330,7 @@ function adapterFor(base, extra = {}) {
     apiBase: base,
     model: 'glm-4.5',
     timeoutMs: extra.timeoutMs ?? 5_000,
+    maxTokens: extra.maxTokens ?? IMPACT_REVIEW_DEFAULT_MAX_TOKENS,
     headers: {},
     providerLabel: 'openai-compatible',
     ...(extra.fetchImpl ? { fetchImpl: extra.fetchImpl } : {}),
@@ -318,6 +349,32 @@ describe('issue #50：真发一次请求（打到本地假端点）', () => {
         return;
       }
       if (parsed.model === 'hang') return; // 不回话：测超时
+      /**
+       * 推理模型的真实形状（2026-10-05 金丝雀实测）：正文空、思考过程在 `reasoning_content`，
+       * `finish_reason=length` 说明预算被推理吃光了。
+       */
+      if (parsed.model === 'reasoning-empty') {
+        res.writeHead(200, { 'content-type': 'application/json' });
+        res.end(
+          JSON.stringify({
+            choices: [
+              {
+                message: { content: '', reasoning_content: '思考'.repeat(30) },
+                finish_reason: 'length',
+              },
+            ],
+            usage: { completion_tokens: 8192 },
+          }),
+        );
+        return;
+      }
+      if (parsed.model === 'cut') {
+        // 头先到、正文读一半断掉：这是**超时/断网**，不是"模型没吐东西"
+        res.writeHead(200, { 'content-type': 'application/json' });
+        res.write('{"choices":[{"message":{"content":"[');
+        res.socket.destroy();
+        return;
+      }
       const items = /逐字引用：([^\n]+)/g;
       const ids = [...parsed.messages[1].content.matchAll(items)].map((match) => match[1]);
       const verdicts = ids.map((quote, index) => ({
@@ -356,6 +413,12 @@ describe('issue #50：真发一次请求（打到本地假端点）', () => {
     assert.match(sent.body, /原文邻域|前后各 200 字/, '邻域必须真的送出去（没有它 A1/A2/A6 判不了）');
     assert.ok(sent.body.includes(QUOTE_A), '邻域里要带着引用本身');
     assert.match(sent.body, /"temperature":0/, '审读要稳定：温度固定 0');
+    // 2026-10-05 金丝雀：推理 token 与正文共用同一预算，不给上限会被推理吃光（正文空）
+    assert.match(
+      sent.body,
+      new RegExp(`"max_tokens":${IMPACT_REVIEW_DEFAULT_MAX_TOKENS}`),
+      '必须显式给输出上限（推理模型会把预算全花在思考上）',
+    );
   });
 
   it('HTTP 非 2xx ⇒ 传输错（kind=http），带上响应体供人定位', async () => {
@@ -391,6 +454,81 @@ describe('issue #50：真发一次请求（打到本地假端点）', () => {
       (error) =>
         error instanceof ImpactReviewTransportError &&
         error.kind === 'timeout' &&
+        reviewOutcomeOfError(error) === 'timeout',
+    );
+  });
+
+  /**
+   * 2026-10-05 的真实金丝雀（DeepSeek）在审读侧抓到两个故障，各钉一条 ——
+   * 它们的共同点是"报出来的错指向错误的修复方向"：只报"缺少正文"会让人去改提示词，
+   * 而真正要改的是输出上限与超时。
+   */
+  it('推理模型把预算花在思考上（正文空）⇒ 形状错里必须带着 finish_reason 与推理字数', async () => {
+    const reasoning = new OpenAiCompatibleImpactReview({
+      apiKey: 'k',
+      apiBase: server.base,
+      model: 'reasoning-empty',
+      timeoutMs: 5_000,
+      headers: {},
+      providerLabel: 'openai-compatible',
+    });
+    await assert.rejects(
+      () => reasoning.review({ noticeId: 'n6', title: 't', items: [ITEM_A] }),
+      (error) =>
+        error instanceof ImpactReviewShapeError &&
+        /finish_reason=length/.test(error.message) &&
+        /推理正文 60 字/.test(error.message) &&
+        /completion_tokens=8192/.test(error.message) &&
+        reviewOutcomeOfError(error) === 'invalid-shape',
+    );
+  });
+
+  it('正文读到一半断了 ⇒ **传输错**（超时/网络），不许被吞成"模型没吐正文"', async () => {
+    // 真把连接掐断（本地假端点在写了一半个 JSON 之后 destroy）
+    const cut = new OpenAiCompatibleImpactReview({
+      apiKey: 'k',
+      apiBase: server.base,
+      model: 'cut',
+      timeoutMs: 5_000,
+      headers: {},
+      providerLabel: 'openai-compatible',
+    });
+    await assert.rejects(
+      () => cut.review({ noticeId: 'n7', title: 't', items: [ITEM_A] }),
+      (error) =>
+        error instanceof ImpactReviewTransportError &&
+        (error.kind === 'timeout' || error.kind === 'network') &&
+        reviewOutcomeOfError(error) !== 'invalid-shape',
+    );
+
+    /**
+     * 再单钉一次"头到了、正文读到一半被超时打断"这条路：掐连接那条走的是 fetch 自己失败，
+     * 而这条路要的是**读取阶段**的分类 —— 旧写法 `json().catch(() => null)` 在这里会把它
+     * 吞成"缺少 choices[0].message.content"（处置方向从"调超时"偏成"改提示词"）。
+     */
+    const abort = new Error('The operation was aborted');
+    abort.name = 'TimeoutError';
+    const halfRead = new OpenAiCompatibleImpactReview({
+      apiKey: 'k',
+      apiBase: 'https://api.example.cn/v1',
+      model: 'm',
+      timeoutMs: 1_000,
+      headers: {},
+      providerLabel: 'openai-compatible',
+      fetchImpl: async () => ({
+        ok: true,
+        status: 200,
+        text: async () => {
+          throw abort;
+        },
+      }),
+    });
+    await assert.rejects(
+      () => halfRead.review({ noticeId: 'n8', title: 't', items: [ITEM_A] }),
+      (error) =>
+        error instanceof ImpactReviewTransportError &&
+        error.kind === 'timeout' &&
+        /读到一半就断了/.test(error.message) &&
         reviewOutcomeOfError(error) === 'timeout',
     );
   });
