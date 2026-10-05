@@ -1905,6 +1905,36 @@ const CASES = [
     pattern: '认不出的 status',
     test: 'tests/unit/impact-review-adapter.test.mjs',
   },
+  // ── 2026-10-05 真实模型金丝雀（DeepSeek）抓到的两处，各自也要被钉 ──────────────
+  {
+    // 输出上限必须**真的接上配置**：撤成"永远用缺省值"之后，运维把
+    // IMPACT_REVIEW_MAX_TOKENS 调大也没有用 —— 而撞上上限的表现是"正文空 ⇒ 审读失败
+    // ⇒ 这一条判读不上页面"，且推理长度一跑一变（实测 5.5k–12.8k token）。
+    label: '审读的输出上限不再接配置（运维调大也不生效，撞上限就是丢审读）',
+    file: 'impactReviewAdapter',
+    from: '    maxTokens: maxTokensOf(env.IMPACT_REVIEW_MAX_TOKENS),',
+    to: '    maxTokens: IMPACT_REVIEW_DEFAULT_MAX_TOKENS,',
+    pattern: '输出上限可经',
+    test: 'tests/unit/impact-review-adapter.test.mjs',
+  },
+  {
+    // 读正文失败被吞成"没吐正文"：处置方向从"放宽超时"偏成"改提示词"。
+    label: '审读读正文失败被吞掉（超时被误诊成模型没吐正文）',
+    file: 'impactReviewAdapter',
+    from: '      bodyText = await response.text();',
+    to: "      bodyText = await response.text().catch(() => '');",
+    pattern: '读到一半断了',
+    test: 'tests/unit/impact-review-adapter.test.mjs',
+  },
+  {
+    // 空正文必须说清"为什么空"：只说"缺少正文"，下一个人会去改提示词。
+    label: '空正文的形状错不带证据（finish_reason 与推理字数被丢掉）',
+    file: 'impactReviewAdapter',
+    from: "        typeof choice?.finish_reason === 'string' ? choice.finish_reason : '未知';",
+    to: "        '未知';",
+    pattern: '推理模型把预算花在思考上',
+    test: 'tests/unit/impact-review-adapter.test.mjs',
+  },
   {
     // worker 接线①：审读结果要进摘要诊断，否则"这条判读为什么没有记录"在库里读不出来。
     label: 'worker 不把审读结果写进诊断（六种失败在库里又变得分不开）',
@@ -2461,6 +2491,13 @@ const CASES = [
 
 let red = 0;
 const problems = [];
+/**
+ * 因**环境**而判不了的那些（套件被取消：构建产物不可用）。
+ *
+ * 与 `problems` 分开：`problems` 说的是"这条断言有问题，去改测试"，而这一栏说的是
+ * "**这一轮读数不算数**，先 npm run build 再跑"—— 两者的处置完全相反。
+ */
+const environmentBroken = [];
 
 /**
  * 正在被改写、尚未还原的文件。
@@ -2630,6 +2667,13 @@ for (const testCase of selected) {
     .filter((line) => /^\s*[✔✖]\s/.test(line))
     .filter((line) => !/^\s*[✔✖]\s+\S*\.mjs\s*\(/.test(line));
   const fileLevelFailure = /^\s*✖\s+\S*\.mjs\s*\(/m.test(out);
+  /**
+   * **整套用例被取消**（`ℹ cancelled N` 且 `ℹ fail 0`）—— 第三版错判据，2026-10-05 实测踩到：
+   * 两次失败的 `next build` 把 `.next` 弄坏之后，22 条走 e2e 的 pin 全部报成"撤掉实现后
+   * 测试仍然通过"，而真相是**那些用例一条都没跑**（`before()` 起不来服务 ⇒ 18 条 cancelled）。
+   * 那条读数会把人引到"这条断言是假的、删了吧"——方向完全错，所以它必须单独报出来。
+   */
+  const cancelled = Number(/\nℹ cancelled (\d+)/.exec(out)?.[1] ?? '0');
   if (fileLevelFailure) {
     problems.push(
       `${testCase.label} —— 撤掉实现后测试文件本身跑不起来（多半是撤出了语法错误），这条用例不成立`,
@@ -2638,6 +2682,8 @@ for (const testCase of selected) {
     problems.push(
       `${testCase.label} —— 名字模式没匹配到任何测试（只跑到了测试文件本身），这条用例本身是空的`,
     );
+  } else if (cancelled > 0 && !/\nℹ fail ([1-9]\d*)/.test(out)) {
+    environmentBroken.push(`${testCase.label}（cancelled ${cancelled}）`);
   } else if (/\nℹ fail ([1-9]\d*)/.test(out)) {
     red += 1;
     console.log(`红 ✓ ${testCase.label}`);
@@ -2651,6 +2697,14 @@ console.log(
     ? `\n撤掉实现后变红 ${red}/${CASES.length}`
     : `\n撤掉实现后变红 ${red}/${selected.length}（--only 子集，**不是**全套的 ${CASES.length} 条）`,
 );
+if (environmentBroken.length > 0) {
+  console.log(
+    `\n⚠️ 有 ${environmentBroken.length} 条因**环境**判不了（套件被取消：多半是构建产物不可用）：`,
+  );
+  for (const item of environmentBroken) console.log(`  · ${item}`);
+  console.log('   先 `npm run build` 让 .next 可用，再重跑本脚本 —— 上面那个 N 不是"没过"的条数。');
+  process.exitCode = 1;
+}
 if (problems.length > 0) {
   console.log(`有问题 ${problems.length} 条：`);
   for (const problem of problems) console.log(`  · ${problem}`);
