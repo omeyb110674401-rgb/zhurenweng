@@ -472,11 +472,11 @@ e2e **444/444 绿**。两组 e2e 夹具跟着改了语义：`notice-audience` �
    IMPACT_REVIEW_API_KEY=<DeepSeek 的 key>
    IMPACT_REVIEW_API_BASE=https://api.deepseek.com/v1
    IMPACT_REVIEW_MODEL=deepseek-v4-pro
-   IMPACT_REVIEW_TIMEOUT_MS=180000
+   IMPACT_REVIEW_TIMEOUT_MS=300000
    IMPACT_REVIEW_MAX_TOKENS=16384
    ```
    （模型名要按 key 实际开通的填 —— 2026-10-05 实测这把 key 上是 `deepseek-v4-pro` 与
-   `deepseek-flash`，**没有** `deepseek-chat`；后两行是 2026-10-05 金丝雀定的读数，见 §9.9。）
+   `deepseek-flash`，**没有** `deepseek-chat`；后两行是 2026-10-05 实测定的读数，见 §9.9 与 §9.10。）
 2. `bash deploy/set-env-keys.sh /tmp/impact-review.env`（脚本会先备份 `.env`、收紧 600，
    并跑 `docker compose config --quiet` 自检）。
 3. **金丝雀**（一条真条目）：`docker compose run --rm worker node scripts/review-impacts-now.mjs --ids <8 位前缀>`
