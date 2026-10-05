@@ -110,6 +110,11 @@ with base as (
          summary_status,
          s,
          d,
+         -- `r`（审读记录）必须**在这一层带下去**：第 12 节第二段要直接读它数"至少一条已改"。
+         -- 2026-10-05 生产实跑踩到过：base 里算了 `r` 而这里没带 ⇒ `l3` 没有这一列，
+         -- 那一段当场报 `column "r" does not exist`；而它**前面**的验收数全是绿的，
+         -- 只有最后那张"结论分布"表悄悄没了。判据落在 tests/unit/audit-l3-reach-sql.test.mjs。
+         r,
          -- 落库的判读条数（键缺席 / 空数组 / JSON null 一律 0）
          case when jsonb_typeof(s -> 'impacts') = 'array'
               then jsonb_array_length(s -> 'impacts') else 0 end                 as impacts,

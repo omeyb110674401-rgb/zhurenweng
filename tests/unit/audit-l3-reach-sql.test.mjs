@@ -301,4 +301,30 @@ describe('audit-l3-reach.sql：门放不放行与渲染门同一份判据', () =
     );
     assert.ok(sql.includes('差额(必须是0)'), '第 3 节要带一条"分档合计 = 总数"的自检');
   });
+
+  /**
+   * **视图要把它自己算出来的列带下去**。
+   *
+   * 2026-10-05 生产实跑踩到：`base` 里算了 `r`（审读记录），`shaped` 没带上 ⇒ `l3` 没有这一列，
+   * 第 12 节第二段当场报 `column "r" does not exist`。它很阴：那一段**前面**的验收数全是绿的
+   * （缺口 0 / 错挂 0 都对），只有最后那张"结论分布"表悄悄没了 —— 而本机没有 Postgres，
+   * 这类错在单测里只能靠"别名有没有被带下去"来钉。真库那一遍（§9.10）才是终审。
+   */
+  it('base 里算出来的列必须在 shaped 里暴露出来（否则真库报 column does not exist）', () => {
+    const base = /with base as \(([\s\S]*?)\), shaped as \(/.exec(sql);
+    assert.ok(base, 'SQL 里应有 base 子查询');
+    const aliases = [...base[1].matchAll(/\bas ([a-z])\b/g)].map((match) => match[1]);
+    assert.ok(aliases.includes('r'), '前提：base 里应算出审读记录那一列');
+
+    const shaped = /\), shaped as \(([\s\S]*?)\n\)\nselect \* from shaped;/.exec(sql);
+    assert.ok(shaped, 'SQL 里应有 shaped 子查询');
+    const afterShaped = sql.slice(sql.indexOf('select * from shaped;'));
+    for (const alias of aliases) {
+      if (!new RegExp(`\\b${alias}\\b`).test(afterShaped)) continue;
+      assert.ok(
+        new RegExp(`(^|\\s)${alias},`).test(shaped[1]),
+        `base 里的列 ${alias} 被后面的小节用到，shaped 必须把它带下去（否则真库报 ${alias} does not exist）`,
+      );
+    }
+  });
 });
