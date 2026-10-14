@@ -19,6 +19,11 @@ import type { QuotedStructuredSummary, SummaryQuotes } from '../../summary-conte
  * issue #4 扩展（向后兼容：不注入任何环境变量时行为与此前完全一致）：
  * - LLM_STUB_FAILURES=<n>：前 n 次调用抛错（验证重试）；LLM_STUB_FAILURES=always：
  *   每次调用都抛错（验证重试耗尽 → 待人工复核）；
+ * - LLM_STUB_FAILURE_MODE=supply（issue #84）：与 LLM_STUB_FAILURES 搭配使用，
+ *   把注入的失败换成**供给中断**的形状（HTTP 429 + GoUsageLimitError，逐字取自
+ *   2026-10-13 的生产日志），用来验熔断。缺省（不设）= 原来的内容族失败，
+ *   所以既有测试的行为一字不变 —— 这一点是刻意的：判据把两族分开正是 #84 的要害，
+ *   而"stub 的失败算哪一族"必须能被测试选中，否则熔断路径根本无法被 e2e 走到；
  * - LLM_STUB_CALLS_FILE=<path>：每次调用追加一行 JSON（JSONL，含全局序号），
  *   供跨进程（worker 子进程）断言真实调用次数。
  */
@@ -58,7 +63,24 @@ export interface StubLlmOptions {
   failures?: number | 'always';
   /** 每次调用追加一行 JSON 的文件路径；缺省仅记录在内存。 */
   callsFile?: string;
+  /**
+   * 注入失败的**族**（issue #84）：'supply' = 抛供给中断形状（429 额度打满），
+   * 缺省 'content' = 原来的那句话（内容族）。见模块头注释。
+   */
+  failureMode?: 'content' | 'supply';
 }
+
+/**
+ * 供给中断的注入样本（issue #84）：**逐字**取自 2026-10-13 的生产日志
+ * （中转站月度额度打满那一条），不是编造的近似句。
+ *
+ * 为什么要逐字：熔断判据是按真实措辞写的关键词匹配，而"测试里能熔断、生产里不熔断"
+ * 恰恰是这类判据最典型的失效方式 —— 用真实样本能把这个风险降到最低
+ * （`GoUsageLimitError` 与 `limitName: monthly` 都在里面，判据的每一条都够得着）。
+ */
+const SUPPLY_BROKEN_MESSAGE =
+  'openai API HTTP 429：{"type":"error","error":{"type":"GoUsageLimitError",' +
+  '"message":"Go usage limit exceeded"},"metadata":{"limitName":"monthly"}}';
 
 function failuresFromEnv(raw: string | undefined): number | 'always' {  if (raw === undefined || raw === '') return 0;
   if (raw === 'always') return 'always';
@@ -84,11 +106,17 @@ export class StubLlm implements LlmPort {
   private readonly calls: LlmSummarizeInput[] = [];
   private readonly failures: number | 'always';
   private readonly callsFile?: string;
+  private readonly failureMode: 'content' | 'supply';
   private callSeq = 0;
 
   constructor(options: StubLlmOptions = {}) {
     this.failures = options.failures ?? failuresFromEnv(process.env.LLM_STUB_FAILURES);
     this.callsFile = options.callsFile ?? (process.env.LLM_STUB_CALLS_FILE || undefined);
+    // 只认 'supply' 这一个值：写错（比如 'Supply'）时退回内容族而不是抛错 ——
+    // stub 环境变量写错的表现应该是"测试没熔断"（一眼看得见），不是"整个 worker 起不来"。
+    this.failureMode =
+      options.failureMode ??
+      (process.env.LLM_STUB_FAILURE_MODE === 'supply' ? 'supply' : 'content');
   }
 
   get callCount(): number {
@@ -106,6 +134,9 @@ export class StubLlm implements LlmPort {
     this.appendCallLog(input);
 
     if (this.failures === 'always' || this.callSeq <= this.failures) {
+      if (this.failureMode === 'supply') {
+        throw new Error(SUPPLY_BROKEN_MESSAGE);
+      }
       throw new Error(`【stub】注入的 LLM 调用失败（第 ${this.callSeq} 次，LLM_STUB_FAILURES=${this.failures}）`);
     }
 

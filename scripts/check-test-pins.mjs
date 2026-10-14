@@ -506,6 +506,28 @@ const CASES = [
     test: 'tests/e2e/summary-draft-input.test.mjs',
   },
   {
+    label: '供给中断也照旧跑满重试（额度打满时每条白花 4 次出境调用）',
+    file: 'summarize',
+    // issue #84：这一行是"额度打满就不重试"的唯一开关。撤掉它 ⇒ 429 会走满
+    // MAX_RETRIES 次退避重试，第四轮那条"共 1 次调用"的断言当场变红。
+    // 靶点选在 `summarizeWithRetry` 里（第 322 行），不是编排层那个阈值判断 ——
+    // 前者管"这一条要不要重试"，后者管"本轮要不要停"，两件事分别有 pin 钉。
+    from: '      if (isLlmSupplyBroken(error)) {',
+    to: '      if (false) {',
+    pattern: 'LLM 供给中断的熔断',
+    test: 'tests/e2e/summary-supply-breaker.test.mjs',
+  },
+  {
+    label: '供给中断不熔断本轮（队列里剩下的条目继续逐条撞墙）',
+    file: 'summarize',
+    // issue #84 的另一半：撤掉阈值判断 ⇒ 不会提前停手，第二条照样被调用，
+    // 第四轮"共 1 次调用"与"剩余 1 条不再调用"两条断言一起变红。
+    from: '      if (supplyBrokenStreak >= SUPPLY_BREAKER_THRESHOLD) {',
+    to: '      if (false) {',
+    pattern: 'LLM 供给中断的熔断',
+    test: 'tests/e2e/summary-supply-breaker.test.mjs',
+  },
+  {
     label: '把「没探测过附件」说成「没有随文附件」',
     file: 'summaryDisplay',
     from: "  if (report === null) return { kind: 'not-probed' };",

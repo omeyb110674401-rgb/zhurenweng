@@ -278,6 +278,8 @@ const model = llmModelName(llm);
 
 let succeeded = 0;
 let failedReview = 0;
+/** 其中有多少条是「供给中断」而非「内容不行」（issue #84）：收尾用它给一句可行动的提示。 */
+let supplyBroken = 0;
 const broken = [];
 for (const entry of entries) {
   const { record, raw, target } = entry;
@@ -305,7 +307,11 @@ for (const entry of entries) {
       console.log(`✔ ${record.id} 已落库（${record.title.slice(0, 30)}）`);
     } else {
       failedReview += 1;
-      console.log(`✖ ${record.id} 重试耗尽，已转人工复核：${result.error}`);
+      // 供给中断的那条只试过 1 次（issue #84）：工具是给人点名用的，说"重试耗尽"
+      // 会让人以为重试过了、通道是好的，而真实情况是"根本没重试、通道还坏着"。
+      const why = result.supplyBroken ? 'LLM 供给中断（未重试）' : '重试耗尽';
+      console.log(`✖ ${record.id} ${why}，已转人工复核：${result.error}`);
+      if (result.supplyBroken) supplyBroken += 1;
     }
   } catch (error) {
     // 共用实现抛出的那类错误（取条文失败、写失败态本身失败、索引之外的意外）：按条记下、
@@ -326,5 +332,13 @@ if (succeeded > 0) {
 }
 if (failedReview > 0 || broken.length > 0) {
   console.log('有没成的：上面逐条有原因；转人工复核的条目在后台复核队列里（判据 summary_status）。');
+  if (supplyBroken > 0) {
+    // 供给中断与"这条内容跑了但没过"的处置**完全不同**：前者等通道恢复就行，
+    // 重跑一遍输入一个字没变的条目只会再拿一个 429。这句是给下一次点名的建议。
+    console.log(
+      `⚠ 其中 ${supplyBroken} 条是 LLM 供给中断（额度/限流/认证），与内容无关：` +
+        '修好通道后原样重跑即可，不必改输入。',
+    );
+  }
   process.exit(1);
 }

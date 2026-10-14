@@ -91,6 +91,49 @@ export const MAX_RETRIES = envInt('SUMMARY_MAX_RETRIES', 3, { min: 0, max: 10 })
 const RETRY_BASE_DELAY_MS = envInt('SUMMARY_RETRY_DELAY_MS', 500, { min: 0 });
 
 /**
+ * 连续多少条撞上「供给中断」就熔断本轮（issue #84）。
+ *
+ * 取 **2** 而不是 1：单条撞 429 可能只是偶发限流（换下一条就过了），连续两条同因才足以
+ * 判定"通道整体不可用"。2026-10-13 生产的形状正是后者 —— 中转站月度额度打满
+ * （HTTP 429 `GoUsageLimitError` / `limitName: monthly`），3 条待摘要全部走满 4 次尝试，
+ * 白打 12 次出境调用、留 12 行失败日志。若那天待摘要是 50 条，就是 200 次。
+ *
+ * 这条阈值**只管编排层**（job 的循环）；单条内"撞上供给中断就不再退避重试"是无条件的，
+ * 因为它对任何调用方都没有意义 —— 重试一个"额度已满"只会得到同一个 429。
+ */
+export const SUPPLY_BREAKER_THRESHOLD = envInt('SUMMARY_SUPPLY_BREAKER_THRESHOLD', 2, {
+  min: 1,
+  max: 20,
+});
+
+/**
+ * 「供给中断」：**通道坏了**，不是**这条内容不行**。
+ *
+ * 这个区分是熔断的全部要害。失败的成因有两族：
+ * - 内容族（模型输出不是合法 JSON、必填段不合格、引用找不到）—— 换一条多半就好了，
+ *   既不该放弃本条的重试，更不该熔断整轮；
+ * - 供给族（额度打满 / 限流 / 认证失效 / 欠费）—— 重试同一条与重试下一条得到的
+ *   是**同一个** 429，重试次数只决定你白花多少分钟。
+ *
+ * 判据优先看 HTTP 状态码（`LlmResponseError` 的消息形如
+ * `openai API HTTP 429：{...}`，状态码是最可靠的信号），再用关键词兜住不同服务商的
+ * 措辞差异（`GoUsageLimitError`、`insufficient_quota`、`rate limit` 等）。
+ * 401/403 一并算供给中断：密钥失效同样是"重试不会好转"，且它长得就像内容错误
+ * （都带响应体、都能解析出诊断），不显式认出来就会被当成内容失败逐条跑满。
+ *
+ * 导出是为了让测试直接钉住判据本身，而不是在测试里复刻一份正则 ——
+ * 复刻出来的那份与这份漂移时，测试会继续绿，而生产已经不再熔断。
+ */
+export function isLlmSupplyBroken(error: unknown): boolean {
+  const message = errorMessage(error);
+  // 状态码：429 限流/额度，401/403 认证与授权，402 欠费（部分网关用）
+  if (/\bHTTP\s+(429|401|402|403)\b/i.test(message)) return true;
+  return /usage\s*limit|usage_limit|insufficient[_ ]quota|exceeded your current quota|rate[_ ]?limit|quota exceeded|额度|限流|余额不足|欠费|账号已欠费/i.test(
+    message,
+  );
+}
+
+/**
  * 本条目可以喂给摘要的附件条文（issue #57 第 5 步）。
  *
  * 预算从 `src/lib/attachment-feed.ts` 来（issue #86 第 3 刀起**按受众面分档**），
@@ -236,6 +279,11 @@ function sleep(ms: number): Promise<void> {
  * 带重试的 LLM 调用：全部尝试耗尽仍失败时抛出最后一次错误。
  * 首调 + SUMMARY_MAX_RETRIES 次重试（如 3 → 共 4 次尝试）。
  *
+ * **供给中断不重试**（issue #84）：撞上 `isLlmSupplyBroken` 的错误时立刻抛出。
+ * 退避重试在这里没有任何可能的好结局 —— 额度打满、密钥失效、账号欠费都不会因为
+ * 等了 500ms / 1s / 2s 而好转，只会把一次失败放大成 4 次（生产实测：3 条待摘要
+ * 打出 12 次出境调用、12 行失败日志）。抛出时把原因带上，供编排层决定是否熔断本轮。
+ *
  * 返回 `attempts`（第几次调用成功，1 基）：它此前只出现在 stdout 的日志行里，
  * 事后查不到 —— 而"这条试了 4 次才成功"与"一次就成"在诊断上不是同一件事
  * （前者说明通道不稳，重跑策略要另算）。
@@ -271,9 +319,35 @@ async function summarizeWithRetry(
       logger(
         `条目 ${target.id} LLM 调用失败（第 ${attempt + 1}/${MAX_RETRIES + 1} 次尝试）：${errorMessage(error)}`,
       );
+      if (isLlmSupplyBroken(error)) {
+        // 这一条不重试了。编造"已重试 N 次"会把 1 次调用说成 4 次，所以这里把话说准。
+        logger(
+          `条目 ${target.id} 判定为 LLM 供给中断（额度/限流/认证），本条不再重试：${errorMessage(error)}`,
+        );
+        throw new LlmSupplyBrokenError(errorMessage(error), error);
+      }
     }
   }
   throw lastError;
+}
+
+/**
+ * 「供给中断」在抛出物上的标记（issue #84）：让编排层不必靠**再匹配一次字符串**
+ * 来判断"这条是不是因为通道坏了才失败的"。
+ *
+ * 不复用字符串判据的理由与 `diagnosticsOfError` 认形状的理由相同：熔断决策若依赖
+ * "日志文本里有没有 429"，那么任何一次日志措辞调整（比如错误被包装一层前缀）都会
+ * 静默让熔断失效，而失效的表现是"看起来一切正常，只是又白跑了 200 次"。
+ * 这里保留 `cause` 供诊断用。
+ */
+export class LlmSupplyBrokenError extends Error {
+  readonly cause: unknown;
+
+  constructor(message: string, cause: unknown) {
+    super(message);
+    this.name = 'LlmSupplyBrokenError';
+    this.cause = cause;
+  }
 }
 
 /**
@@ -468,6 +542,14 @@ export interface SummarizeOneNoticeResult {
   fedCjk: number;
   /** 失败时的可读错误；成功时 null */
   error: string | null;
+  /**
+   * 失败是否属于「供给中断」（issue #84）：编排层据此决定要不要熔断本轮。
+   *
+   * 由单条层显式交出，而不是让编排层再匹配一次错误文本 —— 理由见
+   * `LlmSupplyBrokenError` 的注释（文本匹配会在某次措辞调整后静默失效）。
+   * 成功时恒为 false。
+   */
+  supplyBroken: boolean;
 }
 
 export async function summarizeOneNotice(
@@ -593,7 +675,7 @@ export async function summarizeOneNotice(
         `条目 ${target.id} 检索索引同步失败（由重建任务兜底）：${errorMessage(error)}`,
       );
     }
-    return { outcome: 'done', tier, fedCjk: draftChars, error: null };
+    return { outcome: 'done', tier, fedCjk: draftChars, error: null, supplyBroken: false };
   } catch (error) {
     const message = errorMessage(error);
     // 拿到响应之后才失败的调用，错误上带着诊断（issue #86）：那正是最需要原始输出的
@@ -610,10 +692,21 @@ export async function summarizeOneNotice(
     );
     // 摘要失败告警（issue #12）：先把"转人工复核"落库，再交给调用方决定要不要发信
     await deps.onRetriesExhausted?.({ target, error: message });
+    // 供给中断只尝试过 1 次（issue #84）：把它写成"已重试 3 次仍失败"就是把自己的
+    // 编排说成另一个样子 —— 看日志的人会去查"为什么重试没好"，而真实答案是"没重试"。
     logger(
-      `条目 ${target.id} 摘要失败：已重试 ${MAX_RETRIES} 次仍失败，转人工复核（最后错误：${message}）`,
+      error instanceof LlmSupplyBrokenError
+        ? `条目 ${target.id} 摘要失败：LLM 供给中断，未重试，转人工复核（原因：${message}）`
+        : `条目 ${target.id} 摘要失败：已重试 ${MAX_RETRIES} 次仍失败，转人工复核（最后错误：${message}）`,
     );
-    return { outcome: 'failed_review', tier, fedCjk: draftChars, error: message };
+    return {
+      outcome: 'failed_review',
+      tier,
+      fedCjk: draftChars,
+      error: message,
+      // 单条层已经把非供给类的失败按"重试耗尽"处理完了；这里只回答"是不是通道坏了"。
+      supplyBroken: error instanceof LlmSupplyBrokenError,
+    };
   }
 }
 
@@ -647,7 +740,15 @@ export const summarizeNoticesJob: Job = {
     let fedCount = 0;
     // 重档（公众广域）跑了几条：用户拍板的"分级投入"到底分了多少，这一行是它的量具
     let deepCount = 0;
-    for (const target of targets) {
+    /**
+     * 连续撞上「供给中断」的条数（issue #84）。任何一条正常结束（成功、或内容族失败）
+     * 都把它清零 —— 熔断判的是"**连续**几条同因"，不是"本轮累计几条"：
+     * 额度恢复后第 3 条跑成了，说明通道回来了，此时还按累计数熔断就是误伤。
+     */
+    let supplyBrokenStreak = 0;
+    /** 熔断跳过的条数（未调 LLM、已置失败态）；>0 时收尾多打一行说清。 */
+    let breakerSkipped = 0;
+    for (const [index, target] of targets.entries()) {
       /**
        * 单条的完整链路（取条文 → 重试调用 → 归一化 → 造改动表 → 落库 → 标附件 → 刷索引）
        * 全在 `summarizeOneNotice` 里，与 `scripts/summarize-now.mjs` 是**同一份实现**。
@@ -678,9 +779,78 @@ export const summarizeNoticesJob: Job = {
       if (result.tier === 'deep') deepCount += 1;
       if (result.outcome === 'done') succeeded += 1;
       else sentToReview += 1;
+
+      // 判定这条是不是"因为通道坏了"才失败的：只有单条层显式抛出的标记算数，
+      // 不在这里重新匹配一次错误文本（理由见 `LlmSupplyBrokenError` 的注释）。
+      if (result.supplyBroken) {
+        supplyBrokenStreak += 1;
+      } else {
+        supplyBrokenStreak = 0;
+      }
+
+      if (supplyBrokenStreak >= SUPPLY_BREAKER_THRESHOLD) {
+        const remaining = targets.slice(index + 1);
+        breakerSkipped = remaining.length;
+        /**
+         * 最后一条中招时 `remaining` 是空的 —— 此时**不能**打"剩余 0 条转人工复核"，
+         * 那是在宣布一件没发生的事（没有条目被跳过，本轮本来就是最后一条）。
+         * 这个项目对"说得比事实多"有过明确教训（见 `markAttachmentsFedToSummary` 那处
+         * 注释），所以这里按有无剩余分两句说。
+         */
+        if (remaining.length > 0) {
+          ctx.logger(
+            `⚠ 连续 ${supplyBrokenStreak} 条 LLM 供给中断（额度/限流/认证），熔断本轮：` +
+              `剩余 ${remaining.length} 条不再调用，转人工复核（原因：${result.error ?? '未知'}）`,
+          );
+        } else {
+          ctx.logger(
+            `⚠ 连续 ${supplyBrokenStreak} 条 LLM 供给中断（额度/限流/认证）：` +
+              `本轮恰好跑完，无剩余条目可跳（原因：${result.error ?? '未知'}）`,
+          );
+        }
+        /**
+         * 剩余条目**逐条置失败态**，与"重试耗尽"落在同一列上（用户拍板的语义：
+         * 熔断跳过 = 同等终态）。为什么不在循环外批量写：`markNoticeSummaryForReview`
+         * 是既有的单条接口，批量版本要新开一条 SQL 路径，而这条路径没有别处会走它 ——
+         * 复制一份写库逻辑的风险大于省下的几次 UPDATE。剩余的 N 通常是个位数。
+         *
+         * 这里**不发告警**：它们是"被牵连"的，不是各自撞了墙；真正的故障信号是上面那条
+         * `⚠` 行与循环里前两条各自那份告警，逐条再发就是同一件事说 N 遍。
+         */
+        for (const pending of remaining) {
+          try {
+            await markNoticeSummaryForReview(pending.id);
+            ctx.logger(`条目 ${pending.id} 因熔断跳过，转人工复核`);
+          } catch (error) {
+            // 写失败不能把已经完成的那部分战果抹掉（摘要已成功的那几条是真的成了），
+            // 记一笔说清是哪条没落上，交给下一轮 / 人工处理。
+            ctx.logger(
+              `条目 ${pending.id} 熔断置失败态写入失败（下一轮会再次进入队列）：${errorMessage(error)}`,
+            );
+          }
+        }
+        break;
+      }
     }
+    /**
+     * 熔断跳过的条目也要计入「转人工复核」（issue #84）。
+     *
+     * 它们没走循环里那次 `sentToReview += 1`（那行在 `break` 之前就跳过了），但它们的
+     * `summary_status` 确实被置成了 `failed_review` —— 不补这一笔，汇总行就会报少，
+     * 而"转人工复核 1 条"底下躺着 2 条待复核，正是这行日志最不该出的错。
+     * 这里补的是**本轮真实产生的**失败态条数，与页面/复核队列读到的数字同源。
+     */
+    sentToReview += breakerSkipped;
     ctx.logger(
       `摘要任务完成：成功 ${succeeded} 条，转人工复核 ${sentToReview} 条（本轮用到附件条文输入的条目 ${fedCount} 条，其中重档 ${deepCount} 条；附件输入档位 ${attachmentMode()}）`,
     );
+    // 熔断信息走**额外一行**而不是并进上面那句：那行汇总的形状被 tests/e2e 里多处
+    // `assert.match` 钉着（成功/转复核/条文/重档/档位五个数），改它等于改一份契约。
+    if (breakerSkipped > 0) {
+      ctx.logger(
+        `本轮因熔断提前结束：未调用 LLM 的条目 ${breakerSkipped} 条已转人工复核，` +
+          `额度恢复后可重跑（scripts/summarize-now.mjs 支持点名补摘要）`,
+      );
+    }
   },
 };
