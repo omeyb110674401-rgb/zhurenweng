@@ -386,7 +386,7 @@ describe('issue #47：「可能的争议点」渲染门（选择器）', () => {
   it('审读只动 text：who / point / kind / quote / 出处原样带出去', () => {
     const rendered = impactsToRender({ impacts: [IMPACT], reviews: recordsFor('revised') });
     const { text, ...rest } = rendered[0];
-    const { text: originalText, ...expected } = IMPACT;
+    const { text: _originalText, ...expected } = IMPACT;
     assert.deepEqual(rest, expected);
     assert.equal(text, REVISED_TEXT);
   });

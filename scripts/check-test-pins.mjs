@@ -2509,6 +2509,69 @@ const CASES = [
     pattern: '组件真的用了 noticeMarks',
     test: 'tests/unit/notice-marks.test.mjs',
   },
+  // ── 2026-10-05：内容区块各自成容器（每个区块一条边界，不再共用）───────────────
+  // 这一刀的靶子全在 `.tsx` 的类名与 `globals.css` 的规则里 —— 两者都进不了"渲染层断言"
+  // （e2e 跑的是 `.next` 构建产物，撤源码不重建、页面照旧），所以由
+  // `tests/unit/content-blocks.test.mjs` 按**源码**钉（与 who-display / feed-intake-note
+  // 那两组同一手法）。下面三条撤的都是"最容易被顺手改回去"的地方。
+  {
+    label: '摘要九段又共用一条边界（"这一段到哪儿为止"重新变得要猜）',
+    file: 'summaryView',
+    from: '    <div className="summary-section content-block" data-testid={testId}>',
+    to: '    <div className="summary-section" data-testid={testId}>',
+    pattern: '九段全都挂着 content-block',
+    test: 'tests/unit/content-blocks.test.mjs',
+  },
+  {
+    // 下面两条钉的是**为保住行宽读数而刻意写下的内边距**，不是观感偏好：
+    // 外卡给 16px 时窄屏（375px）实测 `.summary-section-text` 从 19 掉到 17 字/行，
+    // 正文块给 16px 时 `.body-text` 从 22 掉到 19 —— 而"行宽读数不变"是这一刀点名的验收项。
+    label: '摘要外卡的内边距又写回 16px（两级内边距叠起来，行宽读数掉）',
+    file: 'pageCss',
+    from: '  padding: 14px 4px;',
+    to: '  padding: 14px 16px;',
+    pattern: '两级内边距不许叠',
+    test: 'tests/unit/content-blocks.test.mjs',
+  },
+  {
+    label: '正文块又给自己加水平内边距（正文行宽读数掉）',
+    file: 'pageCss',
+    from: '  padding: 14px 0;',
+    to: '  padding: 14px 16px;',
+    pattern: '两级内边距不许叠',
+    test: 'tests/unit/content-blocks.test.mjs',
+  },
+  // ── 2026-10-05 第二组：块**内部**的层级 ─────────────────────────────────────
+  // 加完容器边界之后从截图里量出来的：`.summary-section-note`（块级免责声明 + 两处覆盖度）
+  // 与 `.impact-kind`（每条判读的类型标签）在样式表里**一条规则都没有**，退回浏览器默认段落
+  // ——16px 正文黑，比它们标注/修饰的推断正文（14px）还大，整块里最大的字成了免责声明。
+  // 这两条撤的是"补上的规则本身"（把选择器改个名 = 类名又变回没有规则）。
+  {
+    label: '块级免责声明又变回没有规则（元信息压过推断正文）',
+    file: 'pageCss',
+    from: '.summary-section-note {',
+    to: '.summary-section-note-legacy {',
+    pattern: '必须有自己的规则',
+    test: 'tests/unit/content-blocks.test.mjs',
+  },
+  {
+    label: '类型标签又变回没有规则（标签比它下面的推断还大）',
+    file: 'pageCss',
+    from: '.impact-kind {',
+    to: '.impact-kind-legacy {',
+    pattern: '字号阶梯',
+    test: 'tests/unit/content-blocks.test.mjs',
+  },
+  {
+    // 类名审计那一条挡的是**整类**缺陷：任何"写了 className 却没有规则"的类名都会红。
+    // 这里拿 `.impact-who` 当靶子 —— 它不在"有意无样式"清单里，规则一改名就该被审计抓到。
+    label: '又出现"写了类名却没有规则"的地方（视觉落回浏览器默认值）',
+    file: 'pageCss',
+    from: '.impact-who {',
+    to: '.impact-who-legacy {',
+    pattern: '其它类名都必须有规则',
+    test: 'tests/unit/content-blocks.test.mjs',
+  },
 ];
 
 let red = 0;

@@ -99,8 +99,10 @@ export default async function NoticeDiffPage({ params }: NoticeDiffPageProps) {
           <p className="diff-banner" data-testid="diff-version-banner">
             这是第 {versionSeq} 轮征求意见稿，与上一轮（{formatDate(previous.publishedAt)}）对比
           </p>
+          {/* 两版各是一个独立容器（2026-10-05）：改动前「上一轮」与「本轮」两个
+              flex 行只靠 10px 间距分开，而它们各自是"一份文件的身份信息"。 */}
           <div className="diff-versions">
-            <div className="diff-version diff-version-old">
+            <div className="diff-version diff-version-old content-block">
               <span className="diff-version-label">上一轮</span>
               <Link
                 href={`/notices/${previous.id}`}
@@ -111,7 +113,7 @@ export default async function NoticeDiffPage({ params }: NoticeDiffPageProps) {
               </Link>
               <span className="diff-version-date">发布：{formatDate(previous.publishedAt)}</span>
             </div>
-            <div className="diff-version diff-version-new">
+            <div className="diff-version diff-version-new content-block">
               <span className="diff-version-label">本轮</span>
               <span className="diff-version-title">{notice.title}</span>
               <span className="diff-version-date">发布：{formatDate(notice.publishedAt)}</span>

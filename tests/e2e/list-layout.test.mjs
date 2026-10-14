@@ -39,14 +39,15 @@ function ruleBody(css, selector) {
 }
 
 /**
- * 取**含某个标记**的那个 `@media (min-width: 1000px)` 整块。
+ * 取**含某个标记**的那个 `@media (min-width: 1240px)` 整块。
  *
- * 为什么不能像 `detail-layout.test.mjs` 那样直接取第一个：本文件现在有**两个**同断点的
- * 媒体查询（详情页一个、列表页一个，刻意分开 —— 改一个不会顺手碰另一个）。
- * 按标记挑，将来再加第三个也不会选错。
+ * 断点 2026-10-07 从 1000px 抬到 1240px（推导见 globals.css 列表页那一节：1000px 时
+ * 列表列只有 568px，比窄屏单栏在 768px 视口下的 713px 还窄）。文件里现在有三个宽屏
+ * 断点（详情页的内边距档 1200 / 详情页的列档 1200 / 本页 1240），所以只能按标记挑 ——
+ * 按"第一个"挑会选到详情页那一块，"看着还在守、其实守的是别人"。
  */
 function wideBlockContaining(css, marker) {
-  const needle = '@media (min-width: 1000px)';
+  const needle = '@media (min-width: 1240px)';
   let from = 0;
   for (;;) {
     const at = css.indexOf(needle, from);

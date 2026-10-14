@@ -289,8 +289,12 @@ export default async function NoticeDetailPage({ params }: NoticeDetailPageProps
             {/* 「分步提意指引」从行动栏搬进主栏（放在摘要卡之后）：它是**怎么提**的
                 阅读内容，不是行动按钮本身 —— 挤在 320px 的窄栏里会折成十几行，而右栏
                 只留 CTA / 提交方式 / 订阅提醒 / 出站点击小字（见下方 .detail-rail）。
-                搬过来之后这一段的 DOM 位置在窄屏与宽屏上都一致，不做两套阅读顺序。 */}
-            <div className="how-to" data-testid="how-to-comment">
+                搬过来之后这一段的 DOM 位置在窄屏与宽屏上都一致，不做两套阅读顺序。
+
+                `content-block`（2026-10-05）：它与摘要卡、附件、正文各自是一个独立容器。
+                此前靠一条 `.detail-main > .how-to { border-top }` 与摘要卡分开 ——
+                那条补丁规则本身就是"两块共用一个容器"的证据，边界各自成立后已删。 */}
+            <div className="how-to content-block" data-testid="how-to-comment">
               <p className="how-to-title">分步提意指引</p>
               <ol>
                 <li>
@@ -341,7 +345,11 @@ export default async function NoticeDetailPage({ params }: NoticeDetailPageProps
           ) : null}
 
           {notice.bodyText ? (
-            <section className="notice-body">
+            // `content-block`（2026-10-05）：正文也是一个独立容器。盒子从 `.body-text`
+            // 挪到了这一层 —— 此前标题与「官方原文：」那行在框外、正文在框里，
+            // 同一段内容被切成两个视觉层次。水平内边距留在 `.body-text`（见 globals.css），
+            // 缩进与行宽读数因此一个字不变。
+            <section className="notice-body content-block">
               <h2>正文（纯文本，摘自官方页面）</h2>
               <div className="body-text" data-testid="notice-body">
                 {notice.bodyText}
@@ -371,7 +379,14 @@ export default async function NoticeDetailPage({ params }: NoticeDetailPageProps
               2026-10-02 的第一版把它写在了 `.detail-main` 里面 —— 后果是栅格只剩一个
               子项、右栏退化成主栏里的一段（窄栏挤在正文中间），而当时的结构断言只查
               "节点存在"，是渲染出来的**祖先链**把它抓出来的。改完请照 DOM 祖先链验，
-              别只验"有没有这个节点"。 */}
+              别只验"有没有这个节点"。
+
+              **栏内四件各自是独立容器**（2026-10-05）：改动前它们全挤在这一个白卡里，
+              块与块之间只靠 margin 分开。现在 `.action-slot` 退回纯摆放（只给竖排与间距），
+              四件各带自己的边界 —— 提交方式有自己的绿框，其余三件挂 `.content-block`。
+              **类名一个字不许动**：`class="action-slot detail-rail"` 被
+              `tests/e2e/detail-layout.test.mjs` 精确断言（右栏就是行动栏本身），
+              在这儿加第三个类会让那条守卫变红。 */}
           <aside className="action-slot detail-rail">
             <a
               className="go-button"
@@ -384,13 +399,16 @@ export default async function NoticeDetailPage({ params }: NoticeDetailPageProps
                 按钮要跳走，此处先给「跳过去之后往哪儿提」。取不到时不再留白，
                 而是说明为什么取不到（issue #64），仍然不编一条凑数。 */}
             <SubmissionChannels channels={submissionChannels} guidance={channelAdvice} url={notice.url} />
-            <p className="click-stats" data-testid="outbound-clicks">
+            {/* `content-block`（2026-10-05）：这一行此前与按钮、渠道、订阅提醒共处
+                一个白卡、自身没有任何边界，读起来像渠道块下面的一句注解。 */}
+            <p className="click-stats content-block" data-testid="outbound-clicks">
               出站提意点击：{notice.outboundClicks} 次
             </p>
             {/* 订阅提醒入口（issue #17）：详情页是「想参与」意向最强的时刻；
-                邮件端口未配置时不渲染（不挂必然失败的死流程） */}
+                邮件端口未配置时不渲染（不挂必然失败的死流程）。
+                `content-block`（2026-10-05）：与上面三件一样各成一块。 */}
             {mailerReady() ? (
-              <p className="subscribe-hint">
+              <p className="subscribe-hint content-block">
                 不想错过同类公示？
                 <Link href="/subscribe" data-testid="subscribe-detail-link">
                   订阅公示提醒

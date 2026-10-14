@@ -65,10 +65,21 @@ function readSource(relativePath) {
   return fs.readFileSync(path.join(repoRoot, relativePath), 'utf8');
 }
 
-/** 取 `@media (min-width: 1000px) { … }` 整块（按大括号配对收，不受块内嵌套影响）。 */
-function wideMediaBlock(css) {
-  const at = css.indexOf('@media (min-width: 1000px)');
-  assert.ok(at >= 0, 'globals.css 应有 ≥1000px 的宽屏断点（详情页两栏的开关）');
+/**
+ * 取**含某个标记**的那个 `@media (min-width: Npx)` 整块（按大括号配对收，不受块内嵌套影响）。
+ *
+ * 为什么带 `minWidth` 参数而不是像第一版那样取"第一个 ≥1000px 的块"：2026-10-07 那一刀
+ * 把详情页的开关从 1000px 抬到了 **1200px**（推导见 globals.css 详情页那节：1000px 时
+ * 主栏只有 508px，比窄屏单栏还窄），而列表页的同族开关也在文件里 —— 按"第一个"取会在
+ * 两处断点不同值之后选到一个**与本文件无关的**块，断言于是"看着还在守、其实守的是别人"。
+ * 本页所有的宽屏断言都取 `DETAIL_WIDE_MIN_WIDTH` 那一块。
+ */
+const DETAIL_WIDE_MIN_WIDTH = 1200;
+
+function wideMediaBlock(css, minWidth) {
+  const needle = `@media (min-width: ${minWidth}px)`;
+  const at = css.indexOf(needle);
+  assert.ok(at >= 0, `globals.css 应有 ${needle} 的宽屏断点（详情页两栏的开关）`);
   const open = css.indexOf('{', at);
   let depth = 0;
   for (let i = open; i < css.length; i += 1) {
@@ -303,13 +314,13 @@ describe('详情页两栏：DOM 结构（谁在谁里面）', () => {
 });
 
 describe('详情页两栏：断点与栅格（源码文本，没有浏览器时的唯一办法）', () => {
-  it('CSS 里写了 1000px 断点，窄屏基础规则是单列', () => {
+  it('CSS 里写了详情页断点，窄屏基础规则是单列', () => {
     const css = readSource('src/app/globals.css');
     const base = ruleBody(css, '.detail-grid {');
     assert.match(base, /grid-template-columns: minmax\(0, 1fr\);/, '基础（窄屏）栅格应是单列');
     assert.match(base, /display:\s*grid/, '栅格布局写在基础规则里（宽屏只是换列数，不是从无到有）');
     assert.match(
-      wideMediaBlock(css),
+      wideMediaBlock(css, DETAIL_WIDE_MIN_WIDTH),
       /grid-template-columns:\s*minmax\(0, 1fr\) 320px/,
       '宽屏应是主栏 + 320px 右栏',
     );
@@ -323,8 +334,8 @@ describe('详情页两栏：断点与栅格（源码文本，没有浏览器时�
     assert.doesNotMatch(base, /position:\s*(sticky|fixed|absolute)/, '窄屏右栏不能是 sticky');
   });
 
-  it('sticky 只在 ≥1000px 生效，吸顶 16px 且不拉伸', () => {
-    const wide = wideMediaBlock(readSource('src/app/globals.css'));
+  it('sticky 只在宽屏档生效，吸顶 16px 且不拉伸', () => {
+    const wide = wideMediaBlock(readSource('src/app/globals.css'), DETAIL_WIDE_MIN_WIDTH);
     const rail = ruleBody(wide, '.detail-rail {');
     assert.match(rail, /grid-column:\s*2/, '宽屏右栏应在第二列');
     assert.match(rail, /grid-row:\s*1/, '宽屏右栏应与主栏同一行（否则会被顶到主栏下面）');
@@ -338,7 +349,7 @@ describe('详情页两栏：断点与栅格（源码文本，没有浏览器时�
     // 基础 `.page` 没动：窄屏仍是 760px 居中（详情页只是多挂一个 detail-page 类）
     const page = ruleBody(css, '.page {');
     assert.match(page, /max-width:\s*760px/, '窄屏仍是 760px 居中');
-    const wide = wideMediaBlock(css);
+    const wide = wideMediaBlock(css, DETAIL_WIDE_MIN_WIDTH);
     /*
      * 加宽必须作用在**外层** `.page` 上：根布局把每一页都包在 `<div class="page">` 里
      * （layout.tsx），详情页的 `<main class="page detail-page">` 只是它的**子元素** ——
@@ -348,10 +359,10 @@ describe('详情页两栏：断点与栅格（源码文本，没有浏览器时�
      */
     /*
      * 2026-10-02 收尾：宽度从**断点里**搬到了**基础规则**上，而且写成连续式
-     * `min(1120px, max(760px, 100% - 48px))`。原来它写死在断点里，视口跨过 1000px 时
+     * `min(1120px, max(760px, 100vw - 48px))`。原来它写死在断点里，视口跨过断点时
      * 宽度从 760 一步跳到 952（拖窗口时看得见）。所以这里断言两件事：
      * ① 上限作用在**外层** `.page:has(.detail-grid)` 上（不是详情页自己的 `<main>`）；
-     * ② 它是**连续式**（含 `min` 与百分比）—— 写死一个 px 就又会跳一次。
+     * ② 它是**连续式**（含 min 与视口单位）—— 写死一个 px 就又会跳一次。
      */
     const widened = ruleBody(css, '.page:has(.detail-grid) {');
     assert.match(widened, /max-width:\s*min\(\s*1120px/, '上限放到 1120px，且作用在外层 .page 上');

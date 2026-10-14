@@ -236,7 +236,7 @@ describe('audit-l3-reach.sql：量具的尺子与 JS 侧同一把', () => {
   });
 
   it('空白那一步按脚本头注声明的口径（ASCII 空白 + 全角空格）', () => {
-    assert.match(CHAIN[2].pattern, /\[\\t\\n\\v\\f\\r 　\]\+/, '空白步：ASCII 空白 + 全角空格（U+3000）');
+    assert.match(CHAIN[2].pattern, /\[\\t\\n\\v\\f\\r \u3000\]\+/, '空白步：ASCII 空白 + 全角空格（U+3000）');
     assert.ok(/\[\\s\\u3000\]\+/.test(summaryContent), 'JS 侧是 \\s + \\u3000');
   });
 

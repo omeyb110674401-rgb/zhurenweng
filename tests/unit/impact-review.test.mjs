@@ -190,7 +190,7 @@ describe('issue #47：审读记录只接受"逐字回显同一对 (quote, text)"
   });
 
   it('回显只差换行 / 全角空格 / 引号字形 ⇒ 照样配对（附着在原文上的空白不是内容）', () => {
-    const spaced = { ...IMPACT, quote: `收费公路在收费偿债期间的\n　管理养护费用，在车辆通行费中列支。` };
+    const spaced = { ...IMPACT, quote: `收费公路在收费偿债期间的\n\u3000管理养护费用，在车辆通行费中列支。` };
     const records = recordsFor([{ ...spaced, status: 'passed' }]);
     assert.equal(records.length, 1);
     assert.equal(records[0].quoteFingerprint, quoteFingerprint(IMPACT.quote));

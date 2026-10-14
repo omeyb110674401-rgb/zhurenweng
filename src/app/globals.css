@@ -1,19 +1,101 @@
 :root {
   color-scheme: light;
-  --ink: #1f2937;
-  --ink-soft: #4b5563;
-  --accent: #b45309;
+
+  /* ===== 色板（primitive 层）=====
+     原始色值**只在这里出现一次**。命名 =「色板名-档位」，档位取自 Tailwind 的原始色板
+     （本项目的色值全部来自它，没有自造色相）；`--c-gray-control` 与 `--c-warm-50` 是
+     两个例外，各自在下面写明了来历。
+
+     **一个 token 对一个值，刻意不做任何合并。** 下面这几组看着"差不多"，但合并即改变
+     渲染结果 —— 它们是设计决策，不是工程债：
+       · #991b1b / #b91c1c / #7f1d1d  —— 红三档（已截止 / 今天截止 / 更强的红）
+       · #f0fdf4 / #ecfdf5            —— green-50 与 emerald-50（渠道块底 / 判读底）
+       · #bbf7d0 / #a7f3d0            —— green-200 与 emerald-200（同上，描边那一档）
+       · #fef2f2 / #fee2e2            —— red-50 与 red-100
+       · #dbeafe / #eff6ff            —— blue-100 与 blue-50
+       · #fffbeb / #fffdf5            —— amber-50 与暖白（引用块的底）
+       · #e2e8f0 / #f3f4f6            —— slate-200 与 gray-100（同值域、不同档）
+
+     下面 semantic 层（--ink / --ink-soft / --accent / --line / --line-control /
+     --paper）的名字**全部保留**，只把取值改成指向这里 —— 于是所有调用点一个字都不用改，
+     而"改一次色板、全站跟着走"这件事第一次成为可能。 */
+  --c-white: #fff;
+  --c-slate-50: #f8fafc;
+  --c-gray-100: #f3f4f6;
+  --c-gray-200: #e5e7eb;
+  --c-slate-200: #e2e8f0;
+  --c-slate-300: #cbd5e1;
+  --c-gray-400: #9ca3af;
+  --c-slate-400: #94a3b8;
+  /* 非 Tailwind 档位：表单控件边框专用的中性灰，由 WCAG 1.4.11 的 3:1 反推出的最浅值
+     （对 #fff 3.15:1 / 对 --paper 3.01:1），再浅一档的 #929292 只有 2.97 —— 那是硬边界。 */
+  --c-gray-control: #919191;
+  --c-slate-500: #64748b;
+  --c-gray-600: #4b5563;
+  --c-slate-600: #475569;
+  --c-stone-600: #57534e;
+  --c-slate-700: #334155;
+  --c-gray-800: #1f2937;
+  --c-red-50: #fef2f2;
+  --c-red-100: #fee2e2;
+  --c-red-200: #fecaca;
+  --c-red-700: #b91c1c;
+  --c-red-800: #991b1b;
+  --c-red-900: #7f1d1d;
+  --c-amber-50: #fffbeb;
+  --c-amber-100: #fef3c7;
+  --c-amber-200: #fde68a;
+  --c-amber-300: #fcd34d;
+  --c-amber-700: #b45309;
+  --c-amber-800: #92400e;
+  --c-orange-50: #fff7ed;
+  --c-orange-100: #ffedd5;
+  --c-orange-200: #fed7aa;
+  --c-orange-300: #fdba74;
+  --c-orange-700: #c2410c;
+  --c-orange-800: #9a3412;
+  --c-green-50: #f0fdf4;
+  --c-green-100: #dcfce7;
+  --c-green-200: #bbf7d0;
+  --c-green-800: #166534;
+  --c-emerald-50: #ecfdf5;
+  --c-emerald-200: #a7f3d0;
+  --c-emerald-800: #065f46;
+  --c-blue-50: #eff6ff;
+  --c-blue-100: #dbeafe;
+  --c-blue-200: #bfdbfe;
+  --c-blue-900: #1e3a8a;
+  /* 非 Tailwind 档位：引用块的暖白底（比 amber-50 更中性的一档）。 */
+  --c-warm-50: #fffdf5;
+
+  --ink: var(--c-gray-800);
+  --ink-soft: var(--c-gray-600);
+  /* 次要文字的第四处引用点（issue #76/#83，2026-10-07 补齐定义）。
+     此前有 4 处写着 `color: var(--muted)` 而**全仓没有定义**（.genre-badge 268 /
+     .notice-mark 330 / .audience-badge 1353 / .filter-group-label 1383）—— 未定义的
+     自定义属性在计算值阶段失效、颜色退回继承值（那几处的父元素是 --ink 深灰），
+     于是本该比标签淡一档的角标与组标签，实际比它们标注的正文还重。
+     取 --ink-soft 而不是新色值：它已经是全站「低于正文、高于装饰」的次级灰
+     （.section-hint 179 / .notice-meta 242 / .category-chip 1430 /
+     .view-controls-group 1462 都是它），而上面 4 处里有 3 处与这些元素**同行或同组**
+     —— 组标签 .filter-group-label 在视觉上就该与 .view-controls-group 同色。 */
+  --muted: var(--ink-soft);
+  --accent: var(--c-amber-700);
   /* 装饰性边框与分隔线：卡片、表格线、页眉页脚分隔、领域 chip、进度条。
      WCAG 1.4.11 的 3:1 只约束「识别控件所必需的边界」，这些都不在其列 —— 它们靠
      圆角、留白与相邻文字即可被识别，加深只会让整站每个表面都描一圈中灰。 */
-  --line: #e5e7eb;
+  --line: var(--c-gray-200);
   /* 表单控件的边框（issue #54）：输入框的可识别性**只**靠这条边框（无底色差、
      无前置图标），因此必须满足 1.4.11 的 3:1。取「两种底色上都过 3:1 的最浅中性灰」：
      #919191 = 3.15:1（对 #fff）/ 3.01:1（对 --paper），再浅一档 #929292 只有 2.97。
      直觉上的 gray-300 #d1d5db 实测仅 1.41:1，不够。
      刻意与 --line 拆成两个 token：合并成一个会把 19 处装饰性边框一起拖深。 */
-  --line-control: #919191;
-  --paper: #f8fafc;
+  --line-control: var(--c-gray-control);
+  --paper: var(--c-slate-50);
+  /* 宽屏内边距（20px → 24px）：详情页（≥1200px）与列表页（≥1240px）两栏档共用的那一个值。
+     抽成变量只为让"两栏开关"与"内边距档"的断点必须同值这件事在**一处**可读 —— 两处各写
+     一个 24px 时，下一个人改一处就会得到"加了宽却没分栏"的中间态（白吃 24px 内容宽度）。 */
+  --page-gutter-wide: 24px;
 }
 
 * {
@@ -88,8 +170,8 @@ body {
   z-index: 100;
   padding: 8px 14px;
   background: var(--accent);
-  color: #fff;
-  font-size: 14px;
+  color: var(--c-white);
+  font-size: 0.875rem;
   text-decoration: none;
   border-radius: 0 0 8px 0;
 }
@@ -113,6 +195,50 @@ body {
   border: 0;
 }
 
+/* ===== 内容区块：彼此独立的容器（2026-10-05 用户拍板）=====
+   页面上并列的每一段内容**自带一条边界**（白底 + 1px 描边 + 8px 圆角 + 内边距），
+   块与块之间由边界分开，而不是靠"猜哪里是下一段"。
+
+   为什么要有这一节（读数说得很直白，`scripts/measure-rendered-geometry.mjs` 之外
+   另有一只逐区块量具量过）：改动前摘要卡里的九段（这是什么 / 影响谁 / 可能的争议点 /
+   逾期会怎样 / 条文要点 / 改了哪几处 / 编制说明要点 / 截止日期 / 如何提意见）
+   **九段全是 `border 0 / radius 0 / padding 0 / 背景透明`** —— 它们同处
+   `.summary-sections` 一个容器里，唯一的分界是 12px 的空隙；「分步提意指引」与
+   摘要卡之间也只有一条 `.detail-main > .how-to` 的 `border-top` 打补丁；右栏那四件
+   （CTA / 提交方式 / 出站点击 / 订阅提醒）全挤在 `.action-slot` **同一个**白卡里；
+   正文与附件两段则完全裸着。于是"这一段到哪儿为止"要靠读者自己找。
+
+   `.content-block` 是这条边界的**唯一定义处**（新加区块请直接挂这个类）。
+   下面那些**类名**是页面上并列的内容段 —— 它们此前没有边界，本轮共用同一条。
+
+   已有自己那套边界的块**不在这里**（它们本来就是独立容器，再套一层只会变成双框）：
+   `.notice-item`、`.filter-bar`、`.empty-state`、`.brief-card`、`.summary-card`、
+   `.summary-slot`、`.result-card`、`.diff-row`、`.diff-empty`、`.channels`、`.diff-banner`。
+   它们的取值与本条**大体是同一套边界语言**（8px 圆角是全体同值；描边都是 1px，实线与
+   虚线按语义分；白底是多数），但**内边距与配色各自按块调整**，并不是逐字同值 —— 实测：
+   内边距 `.notice-item` / `.brief-card` / `.summary-slot` 14px 16px、
+   `.filter-bar` / `.diff-row` / `.channels` / `.diff-banner` 12px 14px、
+   `.result-card` / `.diff-empty` 20px、`.summary-card` 14px 4px（水平刻意留窄，缩进交给
+   子块）、`.empty-state` 36px 24px；底色另有琥珀（`.summary-card` / `.summary-slot` /
+   `.diff-banner`）、绿（`.channels`）、灰（`.brief-card`）几种，描边随之换色。
+   （上一版这里写"逐字同值（白底 / 1px var(--line) / 8px 圆角 / 14px 16px 内边距）"，
+   四项里只有圆角对全体成立 —— 留着会让人以为改内边距是"破坏统一"，其实各块本来就不同。）
+   所以全站读完仍是同一套边界语言 —— 本轮**一个字都不动**，读数因此也不变。
+
+   放在文件**靠前**是故意的：某一处想改自己那块的内边距，写在自己的规则里即可
+   （特异性相同、后写者胜），不必回来跟这一条较劲。 */
+.content-block,
+.attachments {
+  background: var(--c-white);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 14px 16px;
+}
+/* `.attachments` 为什么用**自己的类名**列在这里而不是在 `.tsx` 里挂 `.content-block`：
+   `tests/e2e/detail-layout.test.mjs` 用 `class="attachments"` 精确断言（引号是断言的一部分），
+   加一个类名会让那条用例变红 —— 而它是"附件清单在主栏内"的守卫，不该为了这一刀改。
+   本轮的口径是"不动既有验证"，所以这一处由 CSS 这边认领。 */
+
 .site-header {
   border-bottom: 1px solid var(--line);
   padding-bottom: 16px;
@@ -120,7 +246,7 @@ body {
 }
 
 .brand {
-  font-size: 32px;
+  font-size: 2rem;
   letter-spacing: 0.08em;
   margin: 0 0 4px;
 }
@@ -132,18 +258,18 @@ body {
 .tagline {
   margin: 0;
   color: var(--ink-soft);
-  font-size: 15px;
+  font-size: 0.9375rem;
 }
 
 .notice-section h2 {
-  font-size: 20px;
+  font-size: 1.25rem;
   margin: 0 0 4px;
 }
 
 .section-hint {
   margin: 0 0 12px;
   color: var(--ink-soft);
-  font-size: 13px;
+  font-size: 0.8125rem;
 }
 
 /* ===== RSS feed（issue #6）===== */
@@ -160,20 +286,20 @@ body {
 .empty-state {
   border: 1px dashed var(--line);
   border-radius: 8px;
-  background: #fff;
+  background: var(--c-white);
   padding: 36px 24px;
   text-align: center;
 }
 
 .empty-state .empty-title {
-  font-size: 17px;
+  font-size: 1.0625rem;
   font-weight: 600;
   margin: 0 0 8px;
 }
 
 .empty-state .empty-hint {
   color: var(--ink-soft);
-  font-size: 14px;
+  font-size: 0.875rem;
   margin: 0;
 }
 
@@ -187,7 +313,7 @@ body {
 }
 
 .notice-item {
-  background: #fff;
+  background: var(--c-white);
   border: 1px solid var(--line);
   border-radius: 8px;
   padding: 14px 16px;
@@ -206,7 +332,7 @@ body {
 .notice-item .notice-meta {
   margin-top: 4px;
   color: var(--ink-soft);
-  font-size: 13px;
+  font-size: 0.8125rem;
 }
 
 .notice-item-head {
@@ -221,7 +347,7 @@ body {
 
 .status-badge {
   display: inline-block;
-  font-size: 12px;
+  font-size: 0.75rem;
   line-height: 1;
   padding: 4px 8px;
   border-radius: 999px;
@@ -233,7 +359,7 @@ body {
   padding: 2px 8px;
   border: 1px solid var(--line);
   border-radius: 999px;
-  font-size: 12px;
+  font-size: 0.75rem;
   color: var(--muted);
 }
 
@@ -245,28 +371,28 @@ body {
 }
 
 .status-open {
-  color: #166534;
-  background: #dcfce7;
-  border-color: #bbf7d0;
+  color: var(--c-green-800);
+  background: var(--c-green-100);
+  border-color: var(--c-green-200);
 }
 
 .status-closed {
-  color: #7f1d1d;
-  background: #fee2e2;
-  border-color: #fecaca;
+  color: var(--c-red-900);
+  background: var(--c-red-100);
+  border-color: var(--c-red-200);
 }
 
 .status-resulted {
-  color: #1e3a8a;
-  background: #dbeafe;
-  border-color: #bfdbfe;
+  color: var(--c-blue-900);
+  background: var(--c-blue-100);
+  border-color: var(--c-blue-200);
 }
 
 .countdown {
-  font-size: 12px;
-  color: #9a3412;
-  background: #ffedd5;
-  border: 1px solid #fed7aa;
+  font-size: 0.75rem;
+  color: var(--c-orange-800);
+  background: var(--c-orange-100);
+  border: 1px solid var(--c-orange-200);
   border-radius: 999px;
   padding: 4px 8px;
   line-height: 1;
@@ -275,12 +401,12 @@ body {
 /* 「新」角标（issue #62）：刻意比状态徽标弱一档（描边而非填色）——
    它只是「最近才收录」的提示，不该和「征求意见中 / 已截止」抢注意力。 */
 .notice-new-badge {
-  font-size: 12px;
+  font-size: 0.75rem;
   line-height: 1;
   padding: 4px 8px;
   border-radius: 999px;
   color: var(--accent);
-  background: #fff;
+  background: var(--c-white);
   border: 1px dashed var(--accent);
 }
 
@@ -295,20 +421,35 @@ body {
   padding: 2px 8px;
   border: 1px solid var(--line);
   border-radius: 999px;
-  font-size: 12px;
+  font-size: 0.75rem;
   color: var(--muted);
 }
 
 .countdown-urgent {
-  color: #b91c1c;
-  background: #fee2e2;
-  border-color: #fecaca;
+  color: var(--c-red-700);
+  background: var(--c-red-100);
+  border-color: var(--c-red-200);
   font-weight: 600;
+}
+
+/* 倒计时的中间档（2026-10-07）：剩 2–3 天。
+   此前只有"今天/明天截止"才醒目，于是「剩 2 天」「剩 3 天」与「剩 30 天」长得一模一样
+   —— 最该催人的那一档反而不醒目（判据与分档写在 `notice-display.tsx` 的 urgencyOf）。
+   强度刻意落在基础档（.countdown：#9a3412 / #ffedd5 / 琥珀描边）与最强档
+   （.countdown-urgent：红底 + 600 字重）**之间**：描边由琥珀转橙、底色由琥珀褪成中性、
+   文字走同一条橙色的深一档，不加粗 —— 明显但不刺眼，不跟"今天截止"抢。
+   色值全在本文件已有的橙色家族里（基础档 #9a3412/#ffedd5/#fed7aa 与强调色
+   #b45309/#92400e 之间的 #c2410c / #fff7ed / #fdba74），没有引入新的色相：
+   #c2410c 对 #fff7ed 实测 5.8:1，与基础档 #9a3412 对 #ffedd5 的 5.5:1 同档。 */
+.countdown-soon {
+  color: var(--c-orange-700);
+  background: var(--c-orange-50);
+  border-color: var(--c-orange-300);
 }
 
 .breadcrumb {
   margin-bottom: 16px;
-  font-size: 14px;
+  font-size: 0.875rem;
 }
 
 .breadcrumb a {
@@ -334,7 +475,7 @@ body {
 }
 
 .detail-title {
-  font-size: 24px;
+  font-size: 1.5rem;
   line-height: 1.4;
   margin: 0 0 14px;
 }
@@ -347,20 +488,20 @@ body {
 }
 
 .detail-fields .field dt {
-  font-size: 12px;
+  font-size: 0.75rem;
   color: var(--ink-soft);
   margin: 0 0 2px;
 }
 
 .detail-fields .field dd {
   margin: 0;
-  font-size: 14px;
+  font-size: 1rem;
   font-weight: 500;
 }
 
 .summary-slot {
-  background: #fffbeb;
-  border: 1px dashed #fcd34d;
+  background: var(--c-amber-50);
+  border: 1px dashed var(--c-amber-300);
   border-radius: 8px;
   padding: 14px 16px;
   margin-bottom: 20px;
@@ -372,46 +513,69 @@ body {
   flex-wrap: wrap;
   gap: 8px;
   margin-bottom: 6px;
+  /* 外卡的水平内边距缩到 4px（见 `.summary-card`），这里补回 12px，合计 16px */
+  padding: 0 12px;
 }
 
 .summary-tag {
-  font-size: 12px;
+  font-size: 0.75rem;
   font-weight: 600;
-  color: #92400e;
-  background: #fef3c7;
-  border: 1px solid #fde68a;
+  color: var(--c-amber-800);
+  background: var(--c-amber-100);
+  border: 1px solid var(--c-amber-200);
   border-radius: 4px;
   padding: 2px 6px;
 }
 
 .summary-pending {
-  font-size: 14px;
+  font-size: 0.875rem;
   font-weight: 600;
-  color: #92400e;
+  color: var(--c-amber-800);
 }
 
 .summary-note {
   margin: 0;
-  font-size: 13px;
+  font-size: 0.8125rem;
   color: var(--ink-soft);
 }
 
+/* 右栏（详情页行动栏）：**不再是"一个卡片装四件"**（2026-10-05 用户拍板）。
+   改动前 CTA / 意见提交方式 / 出站提意点击 / 订阅提醒全挤在这一个白卡里，块与块之间
+   只靠 margin 分开，读者分不清"哪几件是一件事"。现在四件各自是独立容器 ——
+   提交方式本来就有自己的绿框（`.channels`），CTA 是按钮，另两件挂 `.content-block` ——
+   这一层退回**纯摆放**：只管竖排与间距，自己不给任何边界，否则就成了"四张小卡
+   套在一张大卡里"。
+
+   这个类名有外部契约：`tests/e2e/detail-layout.test.mjs` 按
+   `class="action-slot detail-rail"` 精确断言"右栏就是行动栏本身、不是另做的一份 DOM"，
+   所以**两个类名都不许动、也不许在这里加第三个类**。 */
 .action-slot {
-  background: #fff;
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
   margin-bottom: 20px;
 }
 
+/* 栏内那几件的上/下外边距抹平在**本文件后面**（`.channels` 规则之后那一条）。
+   为什么不在这一节写：那条抹平靠"后写者胜"生效，而它的特异性与栏内三件自己的规则
+   同为 (0,1,0) —— 写在这里会被后写的 `.click-stats`(14px) / `.subscribe-hint`(10px) /
+   `.channels`(12px) **静默覆盖**，右栏间距于是变回 gap + 14/10/12px（2026-10-07 实测
+   26/22/24px）。当时 `tests/unit/content-blocks.test.mjs` 只查"规则存在"（assert.match），
+   所以门是绿的 —— 一条"看着在守、其实守不住"的断言。现已改成按**源顺序**钉。 */
+
 /* 主行动按钮。同一个类同时用在 <a>（详情页「去官方渠道提意见」）与 <button>
    （订阅页「提交订阅」）上 —— 此前只写了链接需要的那几条，于是订阅页的按钮
-   带着 UA 默认边框、光标是箭头、字体是按钮默认字体（issue #53）。 */
+   带着 UA 默认边框、光标是箭头、字体是按钮默认字体（issue #53）。
+
+   `align-self` 是右栏改成 flex 竖排之后补的（2026-10-05）：flex 子项默认 stretch，
+   按钮会被拉成整栏宽、与改动前的 176px 不一样。它在订阅页那个 `<form>` 里是空操作
+   （不是 flex 容器），所以那处逐字不变。 */
 .go-button {
   display: inline-block;
+  align-self: flex-start;
   background: var(--accent);
-  color: #fff;
-  font-size: 16px;
+  color: var(--c-white);
+  font-size: 1rem;
   font-weight: 600;
   text-decoration: none;
   padding: 12px 24px;
@@ -423,24 +587,19 @@ body {
 }
 
 .go-button:hover {
-  background: #92400e;
+  background: var(--c-amber-800);
 }
 
+/* 「分步提意指引」：它现在是 `.content-block` 那一套独立边界（类挂在 page.tsx）。
+   改动前这里有一条 `.detail-main > .how-to { border-top }` 的打补丁规则 —— 那条规则
+   本身就是"两块共用一个容器、只好画一条线"的证据；边界各自成立之后它已无必要（删）。
+   下外边距与摘要卡 / 附件 / 正文同值（20px），块间距不靠外边距折叠碰运气。 */
 .how-to {
-  margin-top: 14px;
-}
-
-/* 「分步提意指引」搬进主栏之后（2026-10-02 详情页两栏）：它原来是行动栏里的最后
-   一段，靠 `.action-slot` 的上内边距与卡片底色跟按钮分开；到了主栏里，上一条是
-   摘要卡，两者都是白底/浅底块，只靠间距分不开 —— 补一条分隔线。窄屏下这个选择器
-   不命中（.detail-main 只在详情页存在），列表页等其它页面不受影响。 */
-.detail-main > .how-to {
-  border-top: 1px solid var(--line);
-  padding-top: 14px;
+  margin: 0 0 20px;
 }
 
 .how-to .how-to-title {
-  font-size: 14px;
+  font-size: 0.875rem;
   font-weight: 600;
   margin: 0 0 6px;
 }
@@ -449,7 +608,7 @@ body {
   margin: 0;
   padding-left: 20px;
   color: var(--ink-soft);
-  font-size: 13px;
+  font-size: 0.8125rem;
   display: flex;
   flex-direction: column;
   gap: 4px;
@@ -461,14 +620,14 @@ body {
 
 .click-stats {
   margin: 14px 0 0;
-  font-size: 12px;
+  font-size: 0.75rem;
   color: var(--ink-soft);
 }
 
 /* 详情页订阅提醒入口（issue #17）：紧跟在出站点击统计之后，弱化但不隐形 */
 .subscribe-hint {
   margin: 10px 0 0;
-  font-size: 13px;
+  font-size: 0.8125rem;
   color: var(--ink-soft);
 }
 
@@ -479,7 +638,7 @@ body {
 
 .attachments h2,
 .notice-body h2 {
-  font-size: 16px;
+  font-size: 1rem;
   margin: 0 0 8px;
 }
 
@@ -490,7 +649,7 @@ body {
 .attachments ul {
   margin: 0;
   padding-left: 20px;
-  font-size: 14px;
+  font-size: 0.875rem;
   display: flex;
   flex-direction: column;
   gap: 4px;
@@ -504,20 +663,32 @@ body {
 /* 附件打不开时的出路提示（issue #35）：与正文来源行同一套低对比排版 */
 .attachment-hint {
   margin: 8px 0 0;
-  font-size: 12px;
-  color: #64748b;
+  font-size: 0.75rem;
+  color: var(--c-slate-500);
 }
 
+/* 正文块：边界来自 `.content-block`，但**水平内边距刻意留 0** —— 原文那一段自己带
+   16px 缩进（`.body-text`），两级叠起来会把行宽读数吃掉（2026-10-05 那一刀实测：这里
+   再给 16px 时，375px 视口下的 `.body-text` 从 22 掉到 19 字/行，而行宽读数是那一刀
+   点名要保的验收项）。
+   读数注：2026-10-07 正文档由 14px 升到 16px 之后，同一个 375px 视口下是 **19 字/行**。
+   数字变了但**理由一个字没变** —— 两级内边距叠起来照样会吃掉行宽。
+   垂直内边距照给，块的上下气口不受影响。 */
 .notice-body {
+  padding: 14px 0;
   margin-bottom: 20px;
 }
 
+/* 原文正文：**盒子交给它所在的那个区块**（`.notice-body` 挂 `.content-block`），
+   这一层只留排版。改动前它是一个自带白底与描边的框，而框外的「正文（纯文本…）」
+   标题与「官方原文：」那行裸在外面 —— 同一段内容被切成"框里"与"框外"两半，
+   读者看到的是两个视觉层次，其实是一件事。
+   水平内边距**留在这一层**（`.notice-body` 的水平内边距是 0），所以缩进与改动前
+   一模一样；行宽读数在 2026-10-07 正文档升到 16px 后是 **19 字/行**（375px 视口，
+   升级前 22）。 */
 .body-text {
-  background: #fff;
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  padding: 16px;
-  font-size: 14px;
+  padding: 0 16px;
+  font-size: 1rem;
   white-space: pre-wrap;
   /* 行宽上限（2026-10-02 详情页两栏）：与 `.summary-section-text` 同一条理由 ——
      官方原文是最该慢慢读的一段，宽屏上通栏排到 50+ 汉字/行只会让人串行。
@@ -527,7 +698,7 @@ body {
 
 .body-source {
   margin-top: 8px;
-  font-size: 12px;
+  font-size: 0.75rem;
   color: var(--ink-soft);
   word-break: break-all;
 }
@@ -541,7 +712,7 @@ body {
   border-top: 1px solid var(--line);
   padding-top: 16px;
   color: var(--ink-soft);
-  font-size: 12px;
+  font-size: 0.75rem;
 }
 
 .site-footer p {
@@ -554,7 +725,7 @@ body {
   flex-wrap: wrap;
   gap: 4px 14px;
   margin: 10px 0 6px;
-  font-size: 13px;
+  font-size: 0.8125rem;
 }
 
 .footer-nav a {
@@ -571,25 +742,33 @@ body {
 .list-actions {
   margin: 0 0 12px;
   color: var(--ink-soft);
-  font-size: 13px;
+  font-size: 0.8125rem;
 }
 
 /* ===== AI 摘要（issue #4） ===== */
 
 .summary-card {
-  background: #fffbeb;
-  border: 1px solid #fcd34d;
+  background: var(--c-amber-50);
+  border: 1px solid var(--c-amber-300);
   border-radius: 8px;
-  padding: 14px 16px;
+  /* 水平内边距**故意只留 4px**（一道琥珀色气口），真正的缩进交给里面每一块自己。
+     两级内边距叠起来会把正文行宽吃掉两遍：这里写 16px 时，窄屏（375px）实测
+     `.summary-section-text` 掉两档（2026-10-05 那一刀的口径：19 → 17 字/行）——
+     而"行宽读数不变"是那一刀点名要保的。
+     读数注：2026-10-07 正文档由 14px 升到 16px 之后，同一个 375px 视口下是 **16 字/行**、
+     1440px 视口下是 **40 字/行**；理由与上面那条一样，一个字没变。
+     卡自己的头尾（`.summary-head` / `.summary-sources` / `.summary-model`）各补 12px，
+     合计仍是 16px，与改动前逐字一致。 */
+  padding: 14px 4px;
   margin-bottom: 20px;
 }
 
 .ai-disclaimer {
-  font-size: 13px;
+  font-size: 0.8125rem;
   font-weight: 700;
-  color: #92400e;
-  background: #fef3c7;
-  border: 1px solid #fde68a;
+  color: var(--c-amber-800);
+  background: var(--c-amber-100);
+  border: 1px solid var(--c-amber-200);
   border-radius: 4px;
   padding: 2px 8px;
 }
@@ -602,15 +781,15 @@ body {
 }
 
 .summary-section-title {
-  font-size: 13px;
+  font-size: 0.8125rem;
   font-weight: 600;
-  color: #92400e;
+  color: var(--c-amber-800);
   margin: 0 0 2px;
 }
 
 .summary-section-text {
   margin: 0;
-  font-size: 14px;
+  font-size: 1rem;
   color: var(--ink);
   /* 行宽上限（2026-10-02 详情页两栏）：宽屏下主栏有 700px 以上，中文一行能排到
      50 字以上 —— 加宽版式**不许**把正文行一起拉长（正文 65–75ch 是上限，"大屏上
@@ -618,18 +797,49 @@ body {
   max-inline-size: 44em;
 }
 
+/* 块级免责声明与两处覆盖度说明（`.summary-section-note`，3 处共用：判读那段免责声明 /
+   「改了哪几处」的覆盖度 / 「编制说明要点」的覆盖度）。
+   **2026-10-05 补的规则**：此前这个类名在样式表里**一条规则都没有**（全仓只有 .tsx 在用它），
+   于是它退回**浏览器默认段落** —— 16px、正文黑（--ink）、默认 16px 上下外边距。
+   后果在截图上一眼可见：整块里最大的那行字是「以下是本站 AI …的推断」（375 下 5 行、
+   102px 高），比它要标注的那条推断（`.summary-section-text` 14px）还大 —— 元信息压过了
+   内容，读者第一眼读到的是免责声明，而不是判读本身。
+   现在它是 13px / --ink-soft，与概览那两行同档：**内容用正文黑且最大，元信息一律灰一档**。
+   免责声明该说的话一个字没少（里面那个 `<b>推断</b>` 仍是粗体），只是不再抢正文的位置。 */
+.summary-section-note {
+  margin: 6px 0 10px;
+  font-size: 0.8125rem;
+  color: var(--ink-soft);
+}
+
 /* 「影响点」概览（2026-10-02 第二刀，规格 7.5）：块首两行**程序聚合**的摘要 ——
    一行计数（共 6 处：2 处… · 2 处…）、一行主体（影响：甲、乙 等 2 类）。
-   视觉权重**刻意低于上面那段免责声明**：它是一行索引，不是结论。免责声明是默认字号
-   （16px）+ 正文黑（--ink），这里降一档字号、换 --ink-soft，且**不加底色块** ——
-   加底色就等于在免责声明上面立了一张"结论卡"，读者会先看它、跳过声明。
+   视觉权重**刻意低于它下面那条判读正文**（14px / --ink）：它是一行索引，不是结论 ——
+   且**不加底色块**，加底色就等于在免责声明上面立了一张"结论卡"，读者会先看它、跳过声明。
+   （它与上面那段免责声明**同档**：都是 13px / --ink-soft。改动前免责声明是浏览器默认的
+   16px 黑，两者不同档这件事本身是"类名没有规则"的副作用，不是决定 —— 见上面那条。）
    下边距 8px 是给后面的判读列表留气口：`.summary-points` 自己的 margin 是 0，
    这两行若不留，列表会直接贴上来（相邻块级元素的上下边距会合并，取大的那个）。 */
 .impact-overview,
 .impact-overview-who {
   margin: 2px 0 8px;
-  font-size: 13px;
+  font-size: 0.8125rem;
   color: var(--ink-soft);
+}
+
+/* 每条判读的类型标签（「可能的不利后果」/「可能被规避或滥用」）。
+   **2026-10-05 补的规则**：与 `.summary-section-note` 同一个病 —— 类名在样式表里没有规则，
+   退回默认段落（16px、正文黑、默认 16px 上下外边距）。两个后果：
+   ① 标签比它下面那行推断（14px）还大，读者看到的是"标题 + 小字"，而实际是
+      "这条属于哪一类 + 推断是什么"；
+   ② 那对 16px 的默认外边距在**兼任每条判读之间的气口**（`.summary-points li` 的 margin 是 0、
+      `ul` 的 gap 只有 8px），等于每条凭空多出 32px 空白（375px 视口实测）。
+   现在它是一个 12px 的琥珀色标签，气口改由下面 `.summary-points li + li` 的分隔线给。 */
+.impact-kind {
+  margin: 0 0 2px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--c-amber-800);
 }
 
 /* 每条判读那一行「影响：主体 · 方面」：从「可能受影响：<长串>」改成短标签行之后，
@@ -638,7 +848,7 @@ body {
    会糊成一片，而这一行是用户点名要看的那一行。 */
 .impact-who {
   margin: 2px 0 0;
-  font-size: 13px;
+  font-size: 0.8125rem;
   color: var(--ink-soft);
 }
 
@@ -661,15 +871,26 @@ body {
   position: absolute;
   left: 2px;
   font-weight: 700;
-  color: #92400e;
+  color: var(--c-amber-800);
+}
+
+/* 判读 / 草案条文要点 / 编制说明要点三处共用这份清单：**条目之间给一条分隔线**。
+   为什么现在才需要：`.impact-kind` 那对浏览器默认的 16px 上下外边距此前在**兼任**分隔
+   （见上面那条规则），把它收掉之后只剩 `ul` 的 8px gap —— 而一条判读有五行，
+   8px 分不开两条。用分隔线而不是单纯加大 gap：这三处列表的每一项都是
+   "一个可独立核对的小单元"，线让"这条到哪儿为止"看得见 ——
+   与这一刀在区块层做的是同一件事，只是下沉一层。 */
+.summary-points li + li {
+  border-top: 1px solid var(--line);
+  padding-top: 10px;
 }
 
 /* 条文要点的出处标注（issue #57）：字号比正文小一档、颜色更淡，
    但**不能淡到读不见** —— 它是「这句话凭什么」的唯一交代，属于内容不属于装饰。 */
 .draft-point-source {
   margin: 2px 0 0;
-  font-size: 12px;
-  color: #57534e;
+  font-size: 0.75rem;
+  color: var(--c-stone-600);
 }
 
 /* 订阅范围（issue #60）：两个选项竖排，让「选全部时下面不再生效」这句话读得到 */
@@ -683,16 +904,17 @@ body {
   display: flex;
   align-items: center;
   gap: 6px;
-  font-size: 14px;
+  font-size: 0.875rem;
 }
 
 /* 「具体条文在附件里」的明示：与其让摘要装作总结了条文，
    不如把读者准确地送到条文所在 */
 .summary-sources {
   margin: 12px 0 0;
-  padding-top: 10px;
+  /* 上边框是"卡内正文 / 卡尾标注"的分界，左右 12px 与 `.summary-head` 同一条（外卡只给 4px） */
+  padding: 10px 12px 0;
   border-top: 1px solid var(--line);
-  font-size: 13px;
+  font-size: 0.8125rem;
   color: var(--ink-soft);
 }
 
@@ -702,10 +924,10 @@ body {
   align-items: baseline;
   gap: 6px;
   margin-top: 4px;
-  font-size: 12px;
+  font-size: 0.75rem;
   color: var(--ink-soft);
-  background: #fffdf5;
-  border-left: 3px solid #fcd34d;
+  background: var(--c-warm-50);
+  border-left: 3px solid var(--c-amber-300);
   border-radius: 0 4px 4px 0;
   padding: 3px 8px;
   text-decoration: none;
@@ -720,19 +942,20 @@ body {
 .summary-quote-jump {
   color: var(--accent);
   white-space: nowrap;
-  font-size: 11px;
+  font-size: 0.6875rem;
 }
 
 .summary-model {
   margin: 12px 0 0;
-  font-size: 12px;
+  padding: 0 12px;
+  font-size: 0.75rem;
   color: var(--ink-soft);
 }
 
 .summary-review-note {
   margin: 6px 0 0;
-  font-size: 13px;
-  color: #9a3412;
+  font-size: 0.8125rem;
+  color: var(--c-orange-800);
 }
 
 /* ===== 订阅与退订（issue #7）===== */
@@ -740,32 +963,31 @@ body {
 .form-banner {
   border-radius: 8px;
   padding: 12px 16px;
-  font-size: 14px;
+  font-size: 0.875rem;
   margin: 0 0 16px;
 }
 
 .form-banner-ok {
-  background: #ecfdf5;
-  border: 1px solid #a7f3d0;
-  color: #065f46;
+  background: var(--c-emerald-50);
+  border: 1px solid var(--c-emerald-200);
+  color: var(--c-emerald-800);
 }
 
 .form-banner-error {
-  background: #fef2f2;
-  border: 1px solid #fecaca;
-  color: #991b1b;
+  background: var(--c-red-50);
+  border: 1px solid var(--c-red-200);
+  color: var(--c-red-800);
 }
 
 .subscribe-section h2 {
-  font-size: 20px;
+  font-size: 1.25rem;
   margin: 0 0 4px;
 }
 
+/* 表单不再自己做一张卡：订阅页那个区块（`.subscribe-section` 挂 `.content-block`）本身
+   已经是独立容器，里面再套一张白卡就是"卡里套卡" —— 与右栏那一刀同一个毛病。
+   内边距交给区块，这一层只留"与上面那句说明之间的间距"。 */
 .subscribe-form {
-  background: #fff;
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  padding: 20px;
   margin-top: 12px;
 }
 
@@ -781,7 +1003,7 @@ body {
 .form-field > label,
 .form-field legend {
   display: block;
-  font-size: 13px;
+  font-size: 0.8125rem;
   font-weight: 600;
   margin-bottom: 6px;
 }
@@ -792,7 +1014,7 @@ body {
   border: 1px solid var(--line-control);
   border-radius: 6px;
   padding: 8px 10px;
-  font-size: 14px;
+  font-size: 0.875rem;
   font-family: inherit;
 }
 
@@ -806,11 +1028,11 @@ body {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  font-size: 13px;
+  font-size: 0.8125rem;
 }
 
 .result-card {
-  background: #fff;
+  background: var(--c-white);
   border: 1px solid var(--line);
   border-radius: 8px;
   padding: 20px;
@@ -832,10 +1054,10 @@ body {
   flex: 1;
   min-width: 0;
   padding: 10px 14px;
-  font-size: 15px;
+  font-size: 0.9375rem;
   font-family: inherit;
   color: var(--ink);
-  background: #fff;
+  background: var(--c-white);
   border: 1px solid var(--line-control);
   border-radius: 8px;
 }
@@ -848,9 +1070,9 @@ body {
 
 .search-button {
   padding: 10px 20px;
-  font-size: 15px;
+  font-size: 0.9375rem;
   font-weight: 600;
-  color: #fff;
+  color: var(--c-white);
   background: var(--accent);
   border: none;
   border-radius: 8px;
@@ -858,7 +1080,7 @@ body {
 }
 
 .search-button:hover {
-  background: #92400e;
+  background: var(--c-amber-800);
 }
 
 .search-back-link {
@@ -874,10 +1096,10 @@ body {
 .version-line {
   margin: 0 0 16px;
   padding: 10px 14px;
-  font-size: 14px;
+  font-size: 0.875rem;
   color: var(--ink);
-  background: #fffbeb;
-  border: 1px solid #fde68a;
+  background: var(--c-amber-50);
+  border: 1px solid var(--c-amber-200);
   border-radius: 8px;
 }
 
@@ -894,11 +1116,11 @@ body {
 .diff-banner {
   margin: 0 0 16px;
   padding: 12px 14px;
-  font-size: 15px;
+  font-size: 0.9375rem;
   font-weight: 600;
-  color: #92400e;
-  background: #fffbeb;
-  border: 1px solid #fde68a;
+  color: var(--c-amber-800);
+  background: var(--c-amber-50);
+  border: 1px solid var(--c-amber-200);
   border-left: 4px solid var(--accent);
   border-radius: 8px;
 }
@@ -919,7 +1141,7 @@ body {
 
 .site-nav {
   margin-top: 10px;
-  font-size: 14px;
+  font-size: 0.875rem;
 }
 
 .site-nav a {
@@ -938,13 +1160,13 @@ body {
 
 .stats-overview {
   margin: 10px 0 0;
-  font-size: 14px;
+  font-size: 0.875rem;
   color: var(--ink-soft);
 }
 
 .stats-overview strong {
   color: var(--ink);
-  font-size: 16px;
+  font-size: 1rem;
 }
 
 .stats-section {
@@ -952,12 +1174,12 @@ body {
 }
 
 .stats-section h2 {
-  font-size: 20px;
+  font-size: 1.25rem;
   margin: 0 0 4px;
 }
 
 .stats-section h3 {
-  font-size: 15px;
+  font-size: 0.9375rem;
   margin: 16px 0 8px;
 }
 
@@ -986,9 +1208,9 @@ body {
 .stat-table {
   width: 100%;
   border-collapse: collapse;
-  background: #fff;
+  background: var(--c-white);
   border: 1px solid var(--line);
-  font-size: 14px;
+  font-size: 0.875rem;
 }
 
 .stat-table th,
@@ -1000,7 +1222,7 @@ body {
 }
 
 .stat-table thead th {
-  font-size: 12px;
+  font-size: 0.75rem;
   color: var(--ink-soft);
   background: var(--paper);
 }
@@ -1037,17 +1259,17 @@ body {
   display: flex;
   align-items: center;
   gap: 10px;
-  background: #fff;
+  background: var(--c-white);
   border: 1px solid var(--line);
   border-radius: 8px;
   padding: 8px 12px;
-  font-size: 14px;
+  font-size: 0.875rem;
 }
 
 .period-buckets .period-label {
   flex: 0 0 150px;
   color: var(--ink-soft);
-  font-size: 13px;
+  font-size: 0.8125rem;
 }
 
 .period-buckets .period-bar {
@@ -1078,13 +1300,13 @@ body {
   display: flex;
   flex-direction: column;
   gap: 8px;
-  font-size: 14px;
+  font-size: 0.875rem;
 }
 
 .diff-version-label {
   flex-shrink: 0;
   padding: 2px 8px;
-  font-size: 12px;
+  font-size: 0.75rem;
   color: var(--ink-soft);
   background: var(--paper);
   border: 1px solid var(--line);
@@ -1102,7 +1324,7 @@ body {
 
 .diff-legend {
   margin: 0 0 16px;
-  font-size: 13px;
+  font-size: 0.8125rem;
   color: var(--ink-soft);
 }
 
@@ -1116,52 +1338,52 @@ body {
   gap: 10px;
   align-items: flex-start;
   padding: 12px 14px;
-  background: #fff;
+  background: var(--c-white);
   border: 1px solid var(--line);
   border-radius: 8px;
 }
 
 .diff-row-added {
-  background: #f0fdf4;
-  border-color: #bbf7d0;
+  background: var(--c-green-50);
+  border-color: var(--c-green-200);
 }
 
 .diff-row-removed {
-  background: #fef2f2;
-  border-color: #fecaca;
+  background: var(--c-red-50);
+  border-color: var(--c-red-200);
 }
 
 .diff-row-modified {
-  background: #fffbeb;
-  border-color: #fde68a;
+  background: var(--c-amber-50);
+  border-color: var(--c-amber-200);
 }
 
 .diff-row-same {
   color: var(--ink-soft);
-  font-size: 14px;
+  font-size: 0.875rem;
 }
 
 .diff-badge {
   flex-shrink: 0;
   padding: 2px 8px;
-  font-size: 12px;
+  font-size: 0.75rem;
   font-weight: 600;
   border-radius: 999px;
 }
 
 .diff-badge-added {
-  color: #166534;
-  background: #dcfce7;
+  color: var(--c-green-800);
+  background: var(--c-green-100);
 }
 
 .diff-badge-removed {
-  color: #991b1b;
-  background: #fee2e2;
+  color: var(--c-red-800);
+  background: var(--c-red-100);
 }
 
 .diff-badge-modified {
-  color: #92400e;
-  background: #fef3c7;
+  color: var(--c-amber-800);
+  background: var(--c-amber-100);
 }
 
 .diff-badge-same {
@@ -1187,22 +1409,22 @@ body {
 }
 
 .diff-del {
-  color: #991b1b;
-  background: #fecaca;
+  color: var(--c-red-800);
+  background: var(--c-red-200);
   text-decoration: line-through;
 }
 
 .diff-ins {
-  color: #166534;
-  background: #bbf7d0;
+  color: var(--c-green-800);
+  background: var(--c-green-200);
   text-decoration: none;
 }
 
 .diff-empty {
   padding: 20px;
-  font-size: 14px;
+  font-size: 0.875rem;
   color: var(--ink-soft);
-  background: #fff;
+  background: var(--c-white);
   border: 1px dashed var(--line);
   border-radius: 8px;
 }
@@ -1219,7 +1441,7 @@ body {
 
 .top-clicks .top-click-meta {
   color: var(--ink-soft);
-  font-size: 13px;
+  font-size: 0.8125rem;
   margin-left: 8px;
 }
 
@@ -1230,7 +1452,7 @@ body {
   display: flex;
   flex-direction: column;
   gap: 6px;
-  font-size: 14px;
+  font-size: 0.875rem;
 }
 
 .clicks-by-date strong {
@@ -1244,20 +1466,20 @@ body {
   padding: 2px 8px;
   border: 1px solid var(--line);
   border-radius: 999px;
-  font-size: 12px;
+  font-size: 0.75rem;
   color: var(--muted);
 }
 
 .audience-public {
-  color: #92400e;
-  background: #fffbeb;
-  border-color: #fcd34d;
+  color: var(--c-amber-800);
+  background: var(--c-amber-50);
+  border-color: var(--c-amber-300);
 }
 
 .audience-sector {
-  color: #1e3a8a;
-  background: #eff6ff;
-  border-color: #bfdbfe;
+  color: var(--c-blue-900);
+  background: var(--c-blue-50);
+  border-color: var(--c-blue-200);
 }
 
 /* 受众面筛选条（issue #83）：与领域标签云同住筛选条，但**先出现** ——
@@ -1271,7 +1493,7 @@ body {
 }
 
 .filter-group-label {
-  font-size: 12px;
+  font-size: 0.75rem;
   color: var(--muted);
 }
 
@@ -1287,19 +1509,19 @@ body {
   border: 1px solid var(--line);
   background: var(--paper);
   color: var(--ink-soft);
-  font-size: 12px;
+  font-size: 0.75rem;
 }
 
 .summary-basis-attachment-points {
-  color: #166534;
-  background: #f0fdf4;
-  border-color: #bbf7d0;
+  color: var(--c-green-800);
+  background: var(--c-green-50);
+  border-color: var(--c-green-200);
 }
 
 /* ===== 领域分类浏览与筛选（issue #9）===== */
 
 .filter-bar {
-  background: #fff;
+  background: var(--c-white);
   border: 1px solid var(--line);
   border-radius: 8px;
   padding: 12px 14px;
@@ -1316,7 +1538,7 @@ body {
 }
 
 .category-chip {
-  font-size: 13px;
+  font-size: 0.8125rem;
   color: var(--ink-soft);
   background: var(--paper);
   border: 1px solid var(--line);
@@ -1331,10 +1553,10 @@ body {
 }
 
 .category-chip-active {
-  color: #92400e;
+  color: var(--c-amber-800);
   font-weight: 600;
-  background: #fffbeb;
-  border-color: #fcd34d;
+  background: var(--c-amber-50);
+  border-color: var(--c-amber-300);
 }
 
 /* ===== 排序与收录范围入口（issue #62）=====
@@ -1350,15 +1572,15 @@ body {
 }
 
 .view-controls-group {
-  font-size: 12px;
+  font-size: 0.75rem;
   color: var(--ink-soft);
   letter-spacing: 0.04em;
 }
 
 .view-chip {
-  font-size: 13px;
+  font-size: 0.8125rem;
   color: var(--ink-soft);
-  background: #fff;
+  background: var(--c-white);
   border: 1px solid var(--line);
   border-radius: 999px;
   padding: 4px 12px;
@@ -1371,10 +1593,10 @@ body {
 }
 
 .view-chip-active {
-  color: #92400e;
+  color: var(--c-amber-800);
   font-weight: 600;
-  background: #fffbeb;
-  border-color: #fcd34d;
+  background: var(--c-amber-50);
+  border-color: var(--c-amber-300);
 }
 
 .filter-form {
@@ -1388,7 +1610,7 @@ body {
   flex: 1;
   min-width: 160px;
   padding: 8px 12px;
-  font-size: 14px;
+  font-size: 0.875rem;
   font-family: inherit;
   color: var(--ink);
   background: var(--paper);
@@ -1401,7 +1623,7 @@ body {
 .filter-source {
   max-width: 280px;
   padding: 8px 10px;
-  font-size: 14px;
+  font-size: 0.875rem;
   font-family: inherit;
   color: var(--ink);
   background: var(--paper);
@@ -1411,9 +1633,9 @@ body {
 
 .filter-button {
   padding: 8px 18px;
-  font-size: 14px;
+  font-size: 0.875rem;
   font-weight: 600;
-  color: #fff;
+  color: var(--c-white);
   background: var(--accent);
   border: none;
   border-radius: 6px;
@@ -1421,11 +1643,11 @@ body {
 }
 
 .filter-button:hover {
-  background: #92400e;
+  background: var(--c-amber-800);
 }
 
 .filter-clear {
-  font-size: 13px;
+  font-size: 0.8125rem;
   color: var(--accent);
 }
 
@@ -1441,10 +1663,10 @@ body {
 }
 
 .notice-tag {
-  font-size: 12px;
-  color: #1e3a8a;
-  background: #dbeafe;
-  border: 1px solid #bfdbfe;
+  font-size: 0.75rem;
+  color: var(--c-blue-900);
+  background: var(--c-blue-100);
+  border: 1px solid var(--c-blue-200);
   border-radius: 999px;
   padding: 2px 8px;
   line-height: 1.4;
@@ -1455,30 +1677,30 @@ body {
   align-items: center;
   gap: 14px;
   margin-top: 18px;
-  font-size: 14px;
+  font-size: 0.875rem;
 }
 
 .pagination-link {
   color: var(--accent);
-  border: 1px solid #e5e7eb;
+  border: 1px solid var(--c-gray-200);
   border-radius: 6px;
   padding: 4px 12px;
 }
 
 .pagination-link:hover {
-  background: #fef3c7;
+  background: var(--c-amber-100);
   text-decoration: none;
 }
 
 .pagination-disabled {
-  color: #9ca3af;
-  border: 1px solid #f3f4f6;
+  color: var(--c-gray-400);
+  border: 1px solid var(--c-gray-100);
   border-radius: 6px;
   padding: 4px 12px;
 }
 
 .pagination-status {
-  color: #4b5563;
+  color: var(--c-gray-600);
 }
 
 /* ===== 结构化速读与提交方式（issue #26/#27） =====
@@ -1486,9 +1708,9 @@ body {
    标签 + 「非 AI 生成」说明。读者要能一眼看出这段话是人写的规则摘的、还是模型生成的。 */
 
 .brief-card {
-  background: #f8fafc;
+  background: var(--c-slate-50);
   border: 1px solid var(--line);
-  border-left: 4px solid #64748b;
+  border-left: 4px solid var(--c-slate-500);
   border-radius: 8px;
   padding: 14px 16px;
   margin-bottom: 20px;
@@ -1503,18 +1725,18 @@ body {
 }
 
 .brief-tag {
-  font-size: 13px;
+  font-size: 0.8125rem;
   font-weight: 700;
-  color: #334155;
-  background: #e2e8f0;
+  color: var(--c-slate-700);
+  background: var(--c-slate-200);
   border-radius: 4px;
   padding: 2px 8px;
 }
 
 .brief-origin {
-  font-size: 12px;
-  color: #475569;
-  border: 1px solid #cbd5e1;
+  font-size: 0.75rem;
+  color: var(--c-slate-600);
+  border: 1px solid var(--c-slate-300);
   border-radius: 4px;
   padding: 1px 7px;
 }
@@ -1522,20 +1744,20 @@ body {
 .brief-lead {
   margin: 0 0 12px;
   padding: 8px 12px;
-  background: #fff;
-  border-left: 3px solid #94a3b8;
+  background: var(--c-white);
+  border-left: 3px solid var(--c-slate-400);
   border-radius: 0 4px 4px 0;
 }
 
 .brief-lead p {
   margin: 0;
-  font-size: 14px;
+  font-size: 1rem;
 }
 
 .brief-lead-jump {
   display: inline-block;
   margin-top: 4px;
-  font-size: 12px;
+  font-size: 0.75rem;
   color: var(--ink-soft);
 }
 
@@ -1545,22 +1767,22 @@ body {
 
 .brief-field-label {
   display: block;
-  font-size: 13px;
+  font-size: 0.8125rem;
   font-weight: 600;
-  color: #334155;
+  color: var(--c-slate-700);
   margin-bottom: 2px;
 }
 
 .brief-field-value {
-  font-size: 14px;
+  font-size: 1rem;
 }
 
 .brief-kind {
   display: inline-block;
   margin-left: 6px;
-  font-size: 12px;
-  color: #334155;
-  background: #e2e8f0;
+  font-size: 0.75rem;
+  color: var(--c-slate-700);
+  background: var(--c-slate-200);
   border-radius: 3px;
   padding: 1px 6px;
 }
@@ -1568,7 +1790,7 @@ body {
 .brief-items {
   margin: 0;
   padding-left: 20px;
-  font-size: 14px;
+  font-size: 1rem;
 }
 
 .brief-items li {
@@ -1577,23 +1799,41 @@ body {
 
 .brief-note {
   margin: 8px 0 0;
-  font-size: 12px;
+  font-size: 0.75rem;
   color: var(--ink-soft);
 }
 
 .channels {
   margin: 12px 0;
   padding: 12px 14px;
-  background: #f0fdf4;
-  border: 1px solid #bbf7d0;
+  background: var(--c-green-50);
+  border: 1px solid var(--c-green-200);
   border-radius: 8px;
+}
+
+/* 右栏间距**只由 `.action-slot` 那条 `gap: 12px` 给** —— 把栏内每一件的上/下外边距抹平。
+
+   **这一条必须留在这里（栏内所有可能带 margin 的规则之后）**，不能挪回 `.action-slot`
+   定义旁边：它的特异性 (0,1,0) 与 `.click-stats`(14px 0 0) / `.subscribe-hint`(10px 0 0) /
+   `.channels`(12px 0) **同值**，靠"后写者胜"生效。写回前面 = 被三者静默覆盖，右栏实际
+   间距变成 gap 12px **加上** 14/10/12px —— 2026-10-07 逐元素读计算样式实测是 **26/22/24px**，
+   而当时那条断言只查"规则存在"，照样全绿。现在 `tests/unit/content-blocks.test.mjs`
+   按**源顺序**钉它（抹平的位置必须大于三者的位置），撤掉顺序即红。
+
+   为什么不用"逐条删掉那三个 margin"这个更直觉的改法：`.channels` 在**结构化速读区**
+   （`notice-brief-view.tsx` 的 `.brief-card` 里）是另一处独立用法，那个 `margin: 12px 0`
+   负责它与相邻块的间距 —— 删掉会顺手改掉速读区的版式。这里的抹平作用域限定在
+   `.action-slot` 的**直接子元素**上，两个上下文互不干扰。 */
+.action-slot > * {
+  margin-top: 0;
+  margin-bottom: 0;
 }
 
 .channels-title {
   margin: 0 0 8px;
-  font-size: 13px;
+  font-size: 0.8125rem;
   font-weight: 700;
-  color: #166534;
+  color: var(--c-green-800);
 }
 
 /* 取不到渠道时的说明块（issue #64）：外观刻意与"抽到了"的那块分开 ——
@@ -1626,39 +1866,39 @@ body {
 
 .channel-kind {
   flex: 0 0 auto;
-  font-size: 12px;
+  font-size: 0.75rem;
   font-weight: 600;
-  color: #166534;
-  background: #dcfce7;
+  color: var(--c-green-800);
+  background: var(--c-green-100);
   border-radius: 3px;
   padding: 1px 6px;
 }
 
 .channel-source {
   flex: 0 0 auto;
-  font-size: 11px;
+  font-size: 0.6875rem;
   font-weight: 600;
-  color: #92400e;
-  background: #fef3c7;
+  color: var(--c-amber-800);
+  background: var(--c-amber-100);
   border-radius: 3px;
   padding: 1px 5px;
 }
 
 .channel-value {
-  font-size: 14px;
+  font-size: 0.875rem;
   word-break: break-all;
 }
 
 .channel-context {
   flex: 1 1 100%;
   margin: 0;
-  font-size: 12px;
+  font-size: 0.75rem;
   color: var(--ink-soft);
 }
 
 .channels-note {
   margin: 8px 0 0;
-  font-size: 12px;
+  font-size: 0.75rem;
   color: var(--ink-soft);
 }
 
@@ -1683,13 +1923,20 @@ body {
    不改桌面视觉。 */
 
 /* 触控目标：只在指针粗糙（手指）的设备生效，鼠标环境保持原有紧凑外观。
-   WCAG 2.5.8 的最低目标是 24px，iOS HIG 建议 44px —— 折中取 40px。 */
+   WCAG 2.5.8 的最低目标是 24px，iOS HIG 建议 44px —— 折中取 40px。
+
+   `.filter-clear`（「清除筛选」，2026-10-07 补进这一批）：它与 `.filter-button` 同处
+   筛选条那一行，此前却不在这个清单里 —— 13px × 1.6 行高 = **20.8px**，够不着 2.5.8
+   的 24px 底线，而同一行右侧的提交按钮已经是 40px（同一件事的两个控件，一个大一个小，
+   手指点小的那个全靠猜）。它渲染出来是 `<a>`，所以与上面那批走同一条
+   inline-flex + min-height，不需要下面那种 padding 摊法。 */
 @media (pointer: coarse) {
   .category-chip,
   .view-chip,
   .pagination-link,
   .pagination-disabled,
   .filter-button,
+  .filter-clear,
   .category-option {
     display: inline-flex;
     align-items: center;
@@ -1723,7 +1970,7 @@ body {
   }
 
   .brand {
-    font-size: 26px;
+    font-size: 1.625rem;
   }
 
   /* 详情字段：两列在窄屏下每列只剩 110px 左右，「全国人大常委会法制工作委员会」
@@ -1732,6 +1979,7 @@ body {
     grid-template-columns: 1fr;
   }
 }
+
 
 @media (max-width: 420px) {
   /* 公示期长度分布：标签 150px + 计数 56px 是固定基，加两处间距后整行 ≈236px，
@@ -1755,10 +2003,36 @@ body {
 }
 
 /* ===== 详情页宽屏两栏（2026-10-02 用户拍板）=====
-   断点 1000px（用户拍板，不是算出来的）：1440×900 这类常见桌面视口下主栏约 770px
-   （1120 − 320 右栏 − 28 间距 − 左右内边距），正文靠 44em 上限收到约 44 汉字/行；
-   视口刚好 1000px 时主栏只剩约 610px，仍排得下 —— 再窄就落回单栏，而不是把正文
-   挤成窄条。
+   **断点 1200px：由「主栏够宽才分栏」推出来的**（2026-10-07 实测改正）。
+   原来写 1000px，而理由里那两个数字都是错的 —— 实测（scripts/measure-rendered-geometry.mjs，
+   修复前）：1440 ⇒ 主栏 **676**（不是注释写的 770）、1000 ⇒ 主栏 **508**（不是 610）。
+   508 比窄屏单栏在 768px 视口下的 673 还窄 165px —— 也就是"两栏一启用，正文反而变窄了"。
+   错在哪：容器宽是连续式 `min(1120px, max(760px, 100vw − 48px))`，而**宽屏档的内边距
+   被算了两遍**（外层 .page 24px + 内层详情页那个 .page 的 24px），再减 320 右栏与 28 间距，
+   得到的就是 W − 444：1440 ⇒ 676 ✓、1000 ⇒ 508 ✓、375 ⇒ 304 ✓ —— 三档与实测逐项吻合。
+   推导：容器**内容盒** = min(1024px, 100vw − 96px)，主栏 = 它 − 320 − 28 = min(676px,
+   100vw − 444px)。两栏主栏要**不窄于 760px 单栏**（内容盒 720px；768px 视口下实测 673），
+   需要 100vw ≥ 1200px。于是把开关抬到 1200px，而不是继续在 1000px 硬塞两列：
+   1199px 及以下一律单栏，1000–1199px 这一段与修复前**逐字一致**（容器公式与内边距
+   20px 都没动，只是不再分栏）。1200px 起主栏追平并稳定在 676px：内容盒 1024px
+   （= min(1120, 1200−48) − 内边距 48）− 320 − 28 = 676 ✓，与 1440px 那一档**同值**
+   （视口 ≥1168px 时容器恒定 1120px），正文行宽因此与 1440px 那一档**同值**。
+    读数注：2026-10-02 那一刀验收的是 44 字/行；2026-10-07 正文档由 14px 升到 16px 之后
+    是 **40 字/行**（量具的 `bodyLineChars` 读数 42，它量的是含内边距的盒子宽）——
+    `44em` 的上限在更大的字号下不再咬合，行宽改为由主栏宽度决定。
+   注：只改条件、**不动"两遍内边距"本身** —— 把它清零会让 1440px 下的主栏从 676 涨到 724，
+   破坏那条已验收的读数。
+
+   **这一档的代价（写在这里，别让下一个人以为断点本来就该是 1200）**：1000–1199px 这一段
+   视口现在回到**单栏**，也就是这一段宽度的用户失去了 2026-10-02 那一刀的两栏收益
+   （右栏 CTA 不再与正文并排，要滚到正文之后）。取舍的方向是明确的：那一段的两栏主栏
+   只有 508–604px（比手机单栏还窄），"并排"在那里买到的是更窄的正文 —— 读者丢掉的是
+   可读性，而右栏只是从"并排"变成"顺排"，位置与顺序都没变（DOM 顺序本来就把行动栏放在
+   摘要卡之后）。**列表页的同族开关另取 1240px**（推导见本文件列表页那一节：它要减掉
+   320px 右栏与**它自己的 16px gap** —— 28px 是详情页 `.detail-grid` 的值，两页别混用；
+   按实测的单栏基线 713px 算，两栏主栏 736px 是**达标**的），所以 1000–1239px 会出现
+   "详情页单栏、首页可能已两栏"——从详情回到首页，版式会有一次跳变，这是两个开关
+   各自独立（本文件下面那节写明的决定）的已知副作用。
 
    **宽度必须写在根布局那层 `.page` 上，不能写在详情页自己的 `<main>` 上。**
    第一版写成 `main.page.detail-page { max-width: 1120px }`，看着特异性更高、其实
@@ -1806,13 +2080,16 @@ body {
   max-width: min(1120px, max(760px, 100vw - 48px));
 }
 
-@media (min-width: 1000px) {
+@media (min-width: 1200px) {
   .page:has(.detail-grid) {
     /* 宽度不在这里给 —— 它已经是连续的那一条（见上），再写一次就又跳回去了 */
-    padding-left: 24px;
-    padding-right: 24px;
+    padding-left: var(--page-gutter-wide);
+    padding-right: var(--page-gutter-wide);
   }
 
+  /* 两栏开关：1200px（**不是 1000px**），推导见本节开头 —— 判据是"主栏不窄于 760px
+     单栏"，而不是"视口够 1000px 就分"。内边距那一档与它同断点、同在这一个媒体查询里：
+     分开写会在 1000–1199px 造出"加了宽却没分栏"的中间态（白吃 48px 内容宽度）。 */
   .page:has(.detail-grid) .detail-grid {
     grid-template-columns: minmax(0, 1fr) 320px;
   }
@@ -1898,14 +2175,37 @@ body {
    **这一条也刻意写成一行**：理由与下面两条列位规则一样（CRLF 文件里多行片段钉不住）。 */
 .page:has(.list-page) { max-width: min(1120px, max(760px, 100vw - 48px)); }
 
-/* 宽屏那一档单独成块，**不并进上面详情页那个 `@media (min-width: 1000px)`**：
-   两个版式的开关各自独立，将来改一个不会顺手碰到另一个（详情页那档刚验收过）。 */
-@media (min-width: 1000px) {
-  /* 内边距 20px → 24px，与详情页宽屏那一档同值：宽屏下正文离屏幕边缘太近会显得
-     整页没边距。它**只影响内边距**，容器宽度仍是上面那条连续式。 */
+/* 宽屏那一档单独成块，**不并进详情页那个 `@media (min-width: 1200px)`**：
+   两个版式的开关各自独立，将来改一个不会顺手碰到另一个。
+
+   断点 1240px —— 与详情页的 1200px **不同值**，因为这里的"两栏"要另外减掉 320px 右栏
+   与**本页自己的 16px gap**（`.list-layout` 的 gap；28px 是详情页 `.detail-grid` 的值，
+   两页别混用）。本页推导（2026-10-07 实测改正）：
+     · 两栏主栏 = 内容盒 − 320 − 16 = 内容盒 − 336；
+     · 窄屏单栏基线：760px 单栏的落点，768px 视口下实测 **713px**（量具 noticeList.w）；
+     · 要两栏主栏**不窄于**它，需要内容盒 ≥ 713 + 336 = 1049px；
+     · 容器在 ≥1168px 时恒定 1120px，而列表页只有**外层一个** `.page` 命中宽屏内边距
+       （`.list-layout` 自己不带内边距）⇒ 内容盒 = 1120 − 48 = **1072px** ≥ 1049 ✓
+       ⇒ 两栏主栏 **736px**，也就是**已经达标**。
+   （2026-10-07 之前这里写 1000px，实测主栏只有 568px；那次改动**不动内容与布局**，
+   只把开关移到足够宽的视口上，1000–1239px 因此逐字回到单栏的读数。）
+
+   **勘误 —— 上一版这段里的两个数字都是错的**：上一版说"宽屏内边距是**两层**，咬合后
+   内容盒 = 1024px，本页**恒达不到** 713px；1240px 起两栏主栏 676px 仍比 713px 窄 37px，
+   要再抬到 1470px 才达标，是否值得是产品决定"。那是把**详情页**的口径借了过来：
+   676 = 1024 − 320 − **28**，其中 1024 是"1120 减两层 24px 内边距"、28 是详情页的 gap，
+   而列表页只有**一层**内边距、gap 是 **16px**。
+   实测（scripts/measure-rendered-geometry.mjs，1440×900）：noticeList.w = **736**、
+   filterBar.w = 320、两者之间的 gap = **16**、容器 1120、左内边距 **24**（单层）。
+   736 > 713 ⇒ 这个区间**本来就达标**，不存在"仍有余量不足"，也就没有什么 1470px
+   需要产品拍板。
+
+   内边距 20px → 24px 与详情页同值（都走 --page-gutter-wide）：宽屏下正文离屏幕边缘
+   太近会显得整页没边距。它**只影响内边距**，容器宽度仍是上面那条连续式。 */
+@media (min-width: 1240px) {
   .page:has(.list-page) {
-    padding-left: 24px;
-    padding-right: 24px;
+    padding-left: var(--page-gutter-wide);
+    padding-right: var(--page-gutter-wide);
   }
 
   /* 两栏：主栏 + 320px 右栏（与详情页右栏同宽，两个版式的栏宽不会一页一个样）。
@@ -1933,7 +2233,73 @@ body {
   .page:has(.list-page) .list-main { grid-column: 1; grid-row: 1; }
   .page:has(.list-page) .list-layout > .filter-bar { grid-column: 2; grid-row: 1; }
 
-  /* 结果区在主栏里最宽约 772px（1120 − 320 右栏 − 28 间距），与改动前的 760px
-     几乎同宽 —— 条目卡的行宽因此不需要另设上限（多了反而是个会在别处失效的常数）。
+  /* 结果区在主栏里恒为 **736px**：1120 容器 − 一层 24px 内边距 = 1072 内容盒，
+     再减 320 右栏与 **16px** gap（`.list-layout` 的 gap；28px 是详情页的值）。
+     2026-10-07 实测确认（scripts/measure-rendered-geometry.mjs，1440×900）：
+     noticeList.w = 736、filterBar.w = 320、gap = 16、容器 1120、左内边距 24。
+
+     这段注释的两个历史数字都错在同一个地方 —— 把**详情页**的口径搬到了列表页：
+       · 最早的 772px：连内边距都没减；改成 676px 时又减了**两层** 24px（1024 而非 1072）
+         并借用了详情页的 28px gap（→ 1024 − 320 − 28 = 676）。
+       · 列表页只有**外层一个** `.page` 命中内边距，`.list-layout` 自己不带内边距。
+     条目卡的行宽因此不需要另设上限（多了反而是个会在别处失效的常数）。
      结果页（/search）没有右栏、主栏独占整行的情形由基础规则里的 `.list-main-solo` 管。 */
+}
+
+/* ===== 窄屏（<1000px）：筛选条的三组 chip 折成**单行横滚条**（2026-10-07）=====
+   起因是实测：375×800 下首屏**一条公示都读不到** —— 首条从 y=936 才开始（视口只有 800），
+   压在它上面的是页头 198px + 汇总与排序说明 151px + **筛选控件 435px**
+   （scripts/measure-rendered-geometry.mjs 的 `listItemsInFirstScreen` = 0）。
+   435px 里最大的一块就是 chip 换行：领域 14 个 chip 占 4 行（147px）、受众面 2 行（70px）、
+   排序与范围 3 行（108px）—— **光 chip 就约 325px**。
+
+   做法：只把这三组 chip 所在的**行容器**改成 nowrap + 容器内横滚（`overflow-x: auto`）。
+   为什么不折叠进 <details>：`open` 是服务端渲染时写死的 HTML 属性，而**"窄屏收起、
+   宽屏展开"在零 JS 下做不到** —— 未加 `open` 时 <details> 内容的隐藏是浏览器内部实现
+   （`display: none` 或 `content-visibility: hidden`），作者 CSS 不能可靠地反向强制展开，
+   写这类规则会做出"宽屏下筛选整体消失"的页面（比现状更坏）。横滚没有这个问题：
+   **DOM 一个字节没动、控件一个没少、焦点顺序没变**（Tab 到视口外的 chip 时浏览器会自动
+   把它滚进视野，原生行为），也不与 page.tsx 里"不许用 order 让视觉顺序与焦点顺序分家"
+   那条既有决定冲突。
+
+   `overflow-x` 只加在**行容器**上（.view-controls / .audience-cloud / .category-cloud），
+   **不加在 .filter-bar 或 .filter-form 上**：那两处装着关键词框、两个下拉与提交按钮，
+   把它们也横滚等于**把提交按钮推到视口外**（无 JS 下筛选就真的没法用了）。
+   chip 横滚不影响那几个控件所在行的位置。
+
+   读数（同一件量具）：375×800 首屏读完 0 → 1、首条 top 936 → 见报告；1440×900 不动。
+
+   **两条必须一起写的附带声明**（第一版漏了它们，实测反而把首条从 936 推到 982 —— 比不改
+   还坏，所以留在这里当反面记录）：
+   1. `white-space: nowrap` 挂**容器**上，是这一节真正的机关。`flex-wrap: nowrap` 只管
+      "要不要换行"，**不管行内文字要不要折行** —— 少了这一条，每个 chip 会缩到
+      **min-content**（对中文就是一个字宽，实测 37px），文字逐字竖排，整行反而涨到 150px。
+      挂容器就够：`white-space` 是继承属性，chip 自己没写 `white-space`。
+   2. 排序 / 范围那两个**组标签**（`.view-controls-group`）平时靠容器换行才拿到整行宽度，
+      `nowrap` 之后成了最窄的 flex 子项：实测被压到 25px ⇒ "排序"两个汉字折成两行。
+      给它们 `flex: none`（不参与伸缩）+ `white-space: nowrap` 两条一起，才不再被压窄。
+   另注：`overflow-x: auto` 会让 `overflow-y` 的计算值也变成 `auto`（CSS 溢出规范），
+   所以这两条声明必须与"文字不折行"一起出现 —— 否则 chip 被撑高后会被这个滚动容器裁掉。 */
+@media (max-width: 999px) {
+  .view-controls,
+  .audience-cloud,
+  .category-cloud {
+    flex-wrap: nowrap;
+    /* 见上：真正阻止 chip 缩到 min-content 的是这一条（会继承给 chip） */
+    white-space: nowrap;
+    overflow-x: auto;
+    /* 滚动必须被限制在容器内部：不给整页造出横向滚动条（量具的 horizontalOverflow 必须为 false） */
+    overscroll-behavior-x: contain;
+    -webkit-overflow-scrolling: touch;
+    align-items: center;
+  }
+
+  /* 组标签：不参与伸缩、且**绝不允许折行**。
+     平时（容器可换行）它们靠"撑满一整行"拿到宽度；`nowrap` 之后成了最窄的 flex 子项，
+     宽度掉到 min-content（两个汉字 = 32px 左右），于是被折成 3 行 —— 整行跟着涨到 150px
+     （实测，比不改还坏）。`flex: none` + `white-space: nowrap` 两条缺一不可。 */
+  .view-controls-group {
+    flex: none;
+    white-space: nowrap;
+  }
 }

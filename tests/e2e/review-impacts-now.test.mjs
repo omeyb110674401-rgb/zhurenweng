@@ -199,8 +199,8 @@ describe('issue #51：只审读不重跑（review-impacts-now）', () => {
     const { code, output } = await runScript([]);
     assert.equal(code, 0, output);
     assert.match(output, /有判读的条目 2 条 \/ 判读 4 条：覆盖 2 条，\*\*缺口 2 条\*\*/);
-    assert.match(output, /✔ c2c2c2c2  覆盖 2\/2/);
-    assert.match(output, /缺口 a1a1a1a1  覆盖 0\/2/);
+    assert.match(output, /✔ c2c2c2c2 {2}覆盖 2\/2/);
+    assert.match(output, /缺口 a1a1a1a1 {2}覆盖 0\/2/);
     assert.match(output, /缺口逐条/, '缺口的条目与引用要逐条列出来（回填要点名跑这些）');
     assert.match(output, /只读模式（未加 --apply）/);
     assert.equal(JSON.stringify(rowOf(GAP)), before, '只读模式一个字节都不许动');
@@ -237,7 +237,7 @@ describe('issue #51：只审读不重跑（review-impacts-now）', () => {
     const coveredBefore = rowOf(COVERED).reviews;
     const { code, output } = await runScript(['--apply', '--all']);
     assert.equal(code, 0, output);
-    assert.match(output, /✔ c2c2c2c2  覆盖 2\/2/, '只读那一段就说清了它不缺');
+    assert.match(output, /✔ c2c2c2c2 {2}覆盖 2\/2/, '只读那一段就说清了它不缺');
     assert.equal(rowOf(COVERED).reviews, coveredBefore, '已有记录不许被覆盖（幂等）');
     // 没有判读的条目根本不该出现在清单里
     assert.doesNotMatch(output, /d3d3d3d3/);

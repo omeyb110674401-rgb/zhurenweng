@@ -1,12 +1,15 @@
 import type { ReactNode } from 'react';
 import type { NoticeRecord, NoticeStatus } from '@/db/types';
-import { daysUntil } from '@/lib/dates';
+import { countdownView } from '@/lib/notice-countdown';
 import { noticeStatusLabel } from '@/lib/notice-status';
 
 /**
  * 公示条目的展示组件（列表页与详情页共用）。
- * 状态徽标取自库中 status 字段（抓取时按截止日期推导）；倒计时按本地日历日
- * 计算，仅在「征求意见中」时展示。
+ *
+ * 状态徽标取自**展示用有效状态**（issue #43 的 `effectiveStatus`：库内 status 是抓取时
+ * 推导的，刚过截止的条目在下一轮抓取前仍是 open）；倒计时按站点日历日（东八区）计算，
+ * 只在同一条判据说「这条还在征求意见」时展示 —— 那个判据与它的紧迫度分档都在
+ * `lib/notice-countdown.ts`（2026-10-07 抽出），这里只做摆放。
  *
  * 文案表在 lib/notice-status.ts（issue #51 起与结构化数据共用一份），未知取值
  * 原样显示 —— 不渲染 undefined。
@@ -20,23 +23,20 @@ export function StatusBadge({ status }: { status: NoticeStatus }) {
   );
 }
 
-/** 截止倒计时文案；非征求意见中或不带截止日期时返回 null（不展示）。 */
-export function countdownText(notice: NoticeRecord, now: Date): string | null {
-  if (notice.status !== 'open') return null;
-  const days = daysUntil(notice.deadlineAt, now);
-  if (days === null) return null;
-  if (days < 0) return null;
-  if (days === 0) return '今天截止';
-  if (days === 1) return '明天截止';
-  return `剩 ${days} 天`;
-}
-
+/**
+ * 截止倒计时。
+ *
+ * 判据与分档全在 `lib/notice-countdown.ts`（`countdownDays` / `countdownText` /
+ * `countdownView`）—— 为什么抽出去：分档边界是有产品含义的阈值，而 `.tsx` 里的分支
+ * 进不了单测（Node 的类型剥离不吃 `.tsx`），只能靠源码文本断言，钉不住真值表。
+ * 这里因此退化成纯模板：类名与文案都由判据给。
+ */
 export function Countdown({ notice, now }: { notice: NoticeRecord; now: Date }): ReactNode {
-  const text = countdownText(notice, now);
-  if (text === null) return null;
+  const view = countdownView(notice, now);
+  if (view === null) return null;
   return (
-    <span className={`countdown${text === '今天截止' || text === '明天截止' ? ' countdown-urgent' : ''}`} data-testid="notice-countdown">
-      {text}
+    <span className={view.className} data-testid="notice-countdown">
+      {view.text}
     </span>
   );
 }
@@ -45,3 +45,7 @@ export function Countdown({ notice, now }: { notice: NoticeRecord; now: Date }):
 export function formatDate(iso: string | null): string {
   return iso ?? '未标注';
 }
+
+// 判据住在 lib/notice-countdown.ts，这里原样转发 —— 既有调用点（页面 / 测试）的
+// import 路径不必跟着搬家，两处口径不会分叉。
+export { countdownDays, countdownText } from '@/lib/notice-countdown';

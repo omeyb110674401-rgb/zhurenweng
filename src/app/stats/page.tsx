@@ -135,7 +135,11 @@ export default async function StatsPage() {
         </p>
       </header>
 
-      <section className="stats-section" aria-labelledby="stats-agency-title">
+      {/* 五节各自是一个独立容器（2026-10-05）：改动前 `.stats-section` 只有
+          `margin-bottom: 28px`，五张表 / 三张表 / 趋势 / 分布 / 点击榜全靠空隙排开，
+          滚到中段就分不清哪几行属于哪一节。边界由 `.content-block` 给（globals.css 开头）。
+          只加类名，节内的表格、文案、钻取链接一个字没动。 */}
+      <section className="stats-section content-block" aria-labelledby="stats-agency-title">
         <h2 id="stats-agency-title">各部门公示量</h2>
         <p className="section-hint">
           按<strong>牵头机关</strong>聚合的公示条目数（全部收录历史）；联合发文只记在牵头机关名下，
@@ -203,7 +207,7 @@ export default async function StatsPage() {
         )}
       </section>
 
-      <section className="stats-section" aria-labelledby="stats-source-title">
+      <section className="stats-section content-block" aria-labelledby="stats-source-title">
         <h2 id="stats-source-title">各来源收录量</h2>
         <p className="section-hint">
           按抓取来源（各部委 / 机构的公开栏目）聚合。「最近新收录」取的是该源最新一条
@@ -289,7 +293,7 @@ export default async function StatsPage() {
         ) : null}
       </section>
 
-      <section className="stats-section" aria-labelledby="stats-trend-title">
+      <section className="stats-section content-block" aria-labelledby="stats-trend-title">
         <h2 id="stats-trend-title">公示量月度趋势（最近 {TREND_MONTHS} 个月）</h2>
         <p className="section-hint">
           按发布日期所在月份统计（{months[0]} 至 {months[months.length - 1]}）。
@@ -390,7 +394,7 @@ export default async function StatsPage() {
         )}
       </section>
 
-      <section className="stats-section" aria-labelledby="stats-period-title">
+      <section className="stats-section content-block" aria-labelledby="stats-period-title">
         <h2 id="stats-period-title">公示期长度分布</h2>
         <p className="section-hint">
           公示期长度 = 截止日期 - 发布日期（按日历日）；分桶为 7 天以内 / 8-15 天 / 16-30 天 /
@@ -431,7 +435,7 @@ export default async function StatsPage() {
         )}
       </section>
 
-      <section className="stats-section" aria-labelledby="stats-clicks-title">
+      <section className="stats-section content-block" aria-labelledby="stats-clicks-title">
         <h2 id="stats-clicks-title">出站提意点击（北极星指标）</h2>
         <p className="section-hint">
           「去官方渠道提意见」按钮的跳转点击聚合，纯计数统计，不记录任何个人身份

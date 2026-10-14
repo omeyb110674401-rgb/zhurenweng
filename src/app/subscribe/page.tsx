@@ -153,7 +153,9 @@ function SubscribeFormSection({
   agencyOptions: string[];
 }) {
   return (
-    <section className="subscribe-section" aria-labelledby="subscribe-form-title">
+    // `content-block`（2026-10-05）：整个区块自带边界，里面的表单不再自己做一张卡
+    // （`.subscribe-form` 的白底描边已删，见 globals.css）—— 否则就是"卡里套卡"。
+    <section className="subscribe-section content-block" aria-labelledby="subscribe-form-title">
       <h2 id="subscribe-form-title">填写订阅规则</h2>
       <p className="section-hint">
         订阅后会收到两类邮件：本站有新公示收录时的一封汇总，以及截止前 7 天、3 天的提醒
@@ -304,7 +306,7 @@ function SubscribeFormSection({
  */
 function SubscribeUnavailableSection() {
   return (
-    <section className="subscribe-section" data-testid="subscribe-unavailable">
+    <section className="subscribe-section content-block" data-testid="subscribe-unavailable">
       <h2>邮件订阅暂未开放</h2>
       <p className="form-banner form-banner-error" data-testid="subscribe-unavailable-banner">
         邮件订阅暂未开放：本站的邮件发送通道正在配置中，现在提交订阅无法收到确认邮件，

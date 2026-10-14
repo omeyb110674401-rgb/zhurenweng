@@ -38,7 +38,7 @@
  * 恢复：`#BACKUP {"id":…,"previousImpactReviewJson":…}` 每行一条，按 id 写回
  * `notices.impact_review_json` 即可（那之前的值通常是 NULL = 没有审读记录）。
  */
-import { inArray, isNotNull } from 'drizzle-orm';
+import { isNotNull } from 'drizzle-orm';
 import { getDb } from '../src/db/client.ts';
 import { notices } from '../src/db/schema/sqlite.ts';
 import { safeParseJson } from '../src/db/types.ts';

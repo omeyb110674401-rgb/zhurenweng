@@ -53,7 +53,7 @@ function runWorkerOnce() {
   });
 }
 
-/** 列表页 → 条目数组（标题 / 详情链接 / 徽标 / 倒计时文案）。 */
+/** 列表页 → 条目数组（标题 / 详情链接 / 徽标 / 倒计时文案 / 倒计时的类名）。 */
 function listItems(html) {
   return noticeItems(html)
     .map((block) => block.slice(0, block.indexOf('</li>')))
@@ -62,6 +62,7 @@ function listItems(html) {
       title: /data-testid="notice-title-link"[^>]*>([^<]*)</.exec(chunk)?.[1] ?? '',
       badge: /data-testid="notice-status-badge"[^>]*>([^<]*)</.exec(chunk)?.[1] ?? null,
       countdown: /data-testid="notice-countdown"[^>]*>([^<]*)</.exec(chunk)?.[1] ?? null,
+      countdownClass: /<span class="(countdown[^"]*)" data-testid="notice-countdown"/.exec(chunk)?.[1] ?? null,
     }));
 }
 
@@ -110,6 +111,48 @@ describe('issue #43：过期条目的状态必须当场改口', () => {
     assert.ok(soon.length >= 2, `列表应有带倒计时的条目，实际 ${soon.length}`);
     for (const item of soon) {
       assert.equal(item.badge, '征求意见中', `「${item.title}」抓取后应是进行中`);
+    }
+  });
+
+  /**
+   * 倒计时的紧迫度分档（2026-10-07）：**渲染层**的证据。
+   *
+   * 判据与分档住在 `src/lib/notice-countdown.ts`，它的两层边界由
+   * `tests/unit/countdown-urgency.test.mjs` 的真值表钉住。这里只证一件事：
+   * 那个判据**真的到了页面上** —— 每条倒计时的类名与它自己那句文案的天数同档。
+   *
+   * 为什么必须从**渲染出来的天数**反推期望档位、而不是写死某一档：fixture 的截止日期
+   * 是相对"抓取那一刻"生成的，写死档位会在某些日子假红。所以这里把页面上的文案翻译回
+   * 天数，再按与判据相同的分档规则算期望类名 —— 测的是"文案与类名一致"这件事实。
+   */
+  it('倒计时的类名与它自己的天数同档（0–1 最强 / 2–3 中间 / ≥4 不醒目）', async () => {
+    const items = listItems(await fetchHome());
+    const withCountdown = items.filter((item) => item.countdown !== null);
+    assert.ok(withCountdown.length >= 2, `列表应有带倒计时的条目，实际 ${withCountdown.length}`);
+
+    for (const item of withCountdown) {
+      const days = remainingDays(item);
+      assert.ok(days !== null, `倒计时文案应是「今天截止 / 明天截止 / 剩 N 天」，实际 ${item.countdown}`);
+      const expected = days <= 1 ? 'countdown countdown-urgent' : days <= 3 ? 'countdown countdown-soon' : 'countdown';
+      assert.equal(
+        item.countdownClass,
+        expected,
+        `「${item.title}」${item.countdown} 应挂 ${expected}，实际 ${item.countdownClass}`,
+      );
+    }
+
+    // 反向：不展示倒计时的条目不许留下类名（组件返回 null，不是空 span）
+    for (const item of items.filter((entry) => entry.countdown === null)) {
+      assert.equal(item.countdownClass, null, `「${item.title}」没有倒计时就不该有那个 span`);
+    }
+  });
+
+  it('同一张卡片上两个口径不分家：有倒计时的条目徽标必是「征求意见中」', async () => {
+    // 判据同源（effectiveStatus）之后，这一条在两个口径分家时会立刻红 ——
+    // 而分家的表现是"徽标已截止、倒计时还在"（每天 00:00 到下一轮抓取之间约 14 小时）。
+    for (const item of listItems(await fetchHome())) {
+      if (item.countdown === null) continue;
+      assert.equal(item.badge, '征求意见中', `「${item.title}」有倒计时却不是进行中 —— 两个口径分家了`);
     }
   });
 

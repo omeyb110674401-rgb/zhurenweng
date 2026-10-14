@@ -46,6 +46,16 @@ import { summaryProvenance, summaryTemplateOf } from '@/lib/summary-basis';
  *   随后字段本身也一并删除（提示词 / 形状解析 / 落库 / 检索 / 后台表单，2026-10-02）——
  *   所以本组件里已经没有任何地方读它；旧行里多出来的那个键由 `parseQuotedSummary` 丢弃。
  *
+ * **每个段落各是一个独立容器**（2026-10-05 用户拍板）：九段此前同处 `.summary-sections`
+ * 一个容器里，全靠 12px 空隙分界 —— 逐区块量出来的读数是九段全都
+ * "边框 0 / 圆角 0 / 内边距 0 / 背景透明"，读者没法一眼看出"这一段到哪儿为止"，
+ * 新加的判读那一段更是与前后长成一个样子。现在每段挂 `.content-block`（边界定义在
+ * globals.css 开头那一节），块由**边界**分开而不是靠空隙。
+ * 只加类名：数据来源、渲染条件（含判读那道门）、文案一个字没动。
+ * 外卡 `.summary-card` 的水平内边距同时缩到 4px、头尾两处各补 12px —— 两级内边距
+ * 叠起来会把正文行宽吃掉两遍（窄屏实测 19 → 17 字/行），而"行宽读数不变"是本轮
+ * 点名要保的东西。
+ *
  * 「条文要点」与其余各段不同：它的依据不是公告壳，而是本站从附件里抽出的正文，
  * 因此每条都带**出处**（哪个附件），且出处是程序按引用反查出来的（`buildQuotedSummary`）——
  * 反查不到的要点根本不会落库，所以这里不需要防御"模型编了条文"。
@@ -117,7 +127,7 @@ function SectionBlock({
 }) {
   if (section.text.trim() === '') return null;
   return (
-    <div className="summary-section" data-testid={testId}>
+    <div className="summary-section content-block" data-testid={testId}>
       <h2 className="summary-section-title">{label}</h2>
       <p className="summary-section-text">{children ?? section.text}</p>
       {section.quote ? <SectionQuote notice={notice} quote={section.quote} /> : null}
@@ -294,7 +304,7 @@ export function SummaryView({
            */
           const overview = impactOverview(impacts);
           return (
-            <div className="summary-section" data-testid="summary-impacts">
+            <div className="summary-section content-block" data-testid="summary-impacts">
               <h2 className="summary-section-title">可能的争议点</h2>
               <p className="summary-section-note" data-testid="summary-impacts-note">
                 以下是本站 AI 依据公开原文作出的<b>推断</b>，不是官方表述，也不构成法律意见；
@@ -361,7 +371,7 @@ export function SummaryView({
         />
         {/* 条文要点（issue #57 第 6 步）：依据是附件正文，不是公告壳，所以每条都带出处 */}
         {summary.keyPoints.length > 0 ? (
-          <div className="summary-section" data-testid="summary-key-points">
+          <div className="summary-section content-block" data-testid="summary-key-points">
             <h2 className="summary-section-title">草案条文要点</h2>
             <ul className="summary-points">
               {summary.keyPoints.map((point, index) => (
@@ -436,7 +446,7 @@ export function SummaryView({
                 ? changeCoverageVerdict(changes.length, summary.changeMarkers, feedReport).detail
                 : null;
           return (
-            <div className="summary-section" data-testid="summary-changes">
+            <div className="summary-section content-block" data-testid="summary-changes">
               <h2 className="summary-section-title">改了哪几处</h2>
               {note ? (
                 <p className="summary-section-note" data-testid="summary-change-coverage">
@@ -527,7 +537,7 @@ export function SummaryView({
           const points = summary.explanationPoints;
           if (points.length === 0) return null;
           return (
-            <div className="summary-section" data-testid="summary-explanations">
+            <div className="summary-section content-block" data-testid="summary-explanations">
               <h2 className="summary-section-title">编制说明要点</h2>
               {summary.explanationSections !== null ? (
                 <p className="summary-section-note" data-testid="summary-explanation-coverage">
